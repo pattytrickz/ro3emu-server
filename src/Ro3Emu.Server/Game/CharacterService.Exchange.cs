@@ -422,7 +422,11 @@ public sealed partial class CharacterService
                     AddVirtualReward(floatReward, JobExpItem, jobExp);
                     await session.SendGameAsync(GetRewardNotify, floatReward);
                 }
-                if (p.Level != originalProgress.Level || p.JobLevel != originalProgress.JobLevel) await AfterLevelChangeAsync(session, persist: false);
+                if (p.Level != originalProgress.Level || p.JobLevel != originalProgress.JobLevel)
+                {
+                    await AfterLevelChangeAsync(session, persist: false);
+                    await RefillOnLevelUpAsync(session, originalProgress.Level, p.Level);
+                }
                 else await SyncAsync(session, RoleBaseInfoSync, BuildBaseInfo(session));
                 AddVirtualReward(reward, BaseExpItem, baseExp);
                 AddVirtualReward(reward, JobExpItem, jobExp);

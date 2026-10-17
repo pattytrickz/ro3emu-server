@@ -333,6 +333,7 @@ public sealed partial class CharacterService
             {
                 await SendStatPlanAsync(session);
                 await SendStatsAsync(session);
+                await RefillOnLevelUpAsync(session, oldLevel, staged.Level);
                 foreach (var handler in ProgressHandlers) await handler(session);
             }
         }

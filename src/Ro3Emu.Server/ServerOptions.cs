@@ -59,6 +59,12 @@ public sealed class ServerOptions
     public int StallNameMaxLength { get; set; } = 24;
 
     /// <summary>
+    /// House rule: a base level-up refills HP and SP, as in Ragnarok Online 1. Off by default: nothing in the RO3
+    /// client (config, Lua, texts) says the original server did it, and its level-up only raises the maxima.
+    /// </summary>
+    public bool LevelUpRefill { get; set; }
+
+    /// <summary>
     /// The live season playbook (SeasonService). 101 is the only one this client has season content for; a value
     /// set in game with "!season" overrides it.
     /// </summary>

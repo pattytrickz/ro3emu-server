@@ -99,6 +99,8 @@ public sealed partial class CharacterService
         if (p.Level != oldLevel || p.JobLevel != oldJob)
         {
             await AfterLevelChangeAsync(session, stillOwner, persist: false);
+            if (stillOwner?.Invoke() == false) return string.Empty;
+            await RefillOnLevelUpAsync(session, oldLevel, p.Level);
         }
         else
         {
@@ -117,6 +119,14 @@ public sealed partial class CharacterService
     {
         int maxJob = MaxJobLevel(p.Career);
         while (p.JobLevel < maxJob && JobLvRow(p.Career, p.JobLevel) is { } row && GameData.Int(row, "_iJobeExp") == 0) p.JobLevel++;
+    }
+
+    /// <summary><see cref="ServerOptions.LevelUpRefill"/>: a base level-up of a living player refills HP and SP.</summary>
+    private async Task RefillOnLevelUpAsync(GameSession session, int oldLevel, int newLevel)
+    {
+        if (newLevel <= oldLevel || !options.Value.LevelUpRefill || session.Dead) return;
+        var max = Stats(session);
+        await SetHpSpAsync(session, max[MaxHp], max[MaxSp]);
     }
 
     private async Task AfterLevelChangeAsync(GameSession session, Func<bool>? stillOwner = null, bool persist = true)
