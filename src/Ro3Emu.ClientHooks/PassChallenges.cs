@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using HappyEngine.Base;
+using Ro3Emu.Shared;
 using UnityEngine;
 
 namespace Ro3Emu.ClientHooks
@@ -166,7 +167,10 @@ namespace Ro3Emu.ClientHooks
             long dailyLabel = text;
             Text(texts, ++text, "Weekly");
             long weeklyLabel = text;
-            foreach (var reward in new long[] { 300, 1000 }) Award(groups, awards, reward);
+            // The previews also list what the F2P realm pays (Ro3Emu.Shared.F2PRules, server ServerOptions.F2P).
+            Award(groups, awards, 300, List((long)F2PRules.Crystal, (long)F2PRules.DailyChallengeCrystals));
+            Award(groups, awards, 1000, List((long)F2PRules.Crystal, (long)F2PRules.WeeklyChallengeCrystals),
+                List((long)F2PRules.MeowFishJerky, (long)F2PRules.WeeklyChallengeJerky));
             foreach (var c in Daily) { Text(texts, ++text, c.Text); Task(tasks, c, DailySonType, text); }
             foreach (var c in Weekly) { Text(texts, ++text, c.Text); Task(tasks, c, WeeklySonType, text); }
             var group13 = types.Obf_ruA<long, Obf_R.Obf_ff>(TaskType);
@@ -179,6 +183,7 @@ namespace Ro3Emu.ClientHooks
                 "_iID", ActivityId, "_iName", List(title), "_iActivityType", 0L,
                 "_kTaskRenew", List(List(0L, TaskType, DailySonType, 0L), List(0L, TaskType, WeeklySonType, 0L))));
             NovicePass.Inject(dbm, texts);
+            ShopPrices.Apply(dbm, texts);
             return Present();
         }
 
@@ -253,11 +258,14 @@ namespace Ro3Emu.ClientHooks
         }
 
         /// <summary>A reward preview: MultiverseGroupConfig (type 0, default value) -> AwardConfig rows -> _kPreview.</summary>
-        private static void Award(Obf_R.Obf_ff groups, Obf_R.Obf_ff awards, long reward)
+        private static void Award(Obf_R.Obf_ff groups, Obf_R.Obf_ff awards, long reward, params Obf_R.Obf_ff[] extra)
         {
             long id = AwardId(reward);
+            var preview = new object[extra.Length + 1];
+            preview[0] = List((long)PassExpItem, reward);
+            Array.Copy(extra, 0, preview, 1, extra.Length);
             RawSet(groups, id, Row("_iID", id, "_itype", 0L, "_iValue_default", id));
-            RawSet(awards, id, List(Row("_iID", id, "_kPreview", List(List((long)PassExpItem, reward)))));
+            RawSet(awards, id, List(Row("_iID", id, "_kPreview", List(preview))));
         }
 
         private static long AwardId(long reward) => TextBase / 1000 + reward; // 99_130_300 and 99_131_000

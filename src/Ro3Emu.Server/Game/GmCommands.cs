@@ -91,6 +91,7 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         }
         var parts = line[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         log.LogInformation("GM {Name}: {Line}", session.Role?.Name, line);
+        await AuditAsync(session, loopbackTool ? "tool" : "chat", line);
         if (parts.Length == 0 || !Commands().TryGetValue(parts[0].ToLowerInvariant(), out var command))
         {
             await ReplyAsync(session, $"Unknown command. {string.Join(" ", Commands().Keys.Select(k => "!" + k))}");
@@ -123,6 +124,7 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         else
         {
             log.LogInformation("GM panel {Name}: op {Op} '{Param}' list {List}", session.Role?.Name, (int)req.GmType, param, req.GmListId);
+            await AuditAsync(session, "panel", $"op {(int)req.GmType} '{param}' list {req.GmListId}");
             try
             {
                 reply = (int)req.GmType == OpNone && req.GmListId > 0
@@ -196,6 +198,35 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             default:
                 return $"GM op {op} is not implemented by the emulator.";
         }
+    }
+
+    private static readonly object AuditFile = new();
+
+    /// <summary>
+    /// ServerOptions.GmAudit: one tab-separated line per GM command (UTC time, account, role, chat/panel/tool, command)
+    /// in data/logs/gm-audit.log, so the players can see what a GM made. GmAnnounce: the same on every marquee.
+    /// </summary>
+    private async Task AuditAsync(GameSession session, string source, string line)
+    {
+        var o = options.Value;
+        if (o.GmAudit)
+        {
+            try
+            {
+                string dir = Path.Combine(o.DataDir, "logs");
+                Directory.CreateDirectory(dir);
+                string entry = string.Create(CultureInfo.InvariantCulture,
+                    $"{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss}Z\t{session.Account}\t{session.Role?.Name}\t{source}\t{line}\n");
+                lock (AuditFile) File.AppendAllText(Path.Combine(dir, "gm-audit.log"), entry);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                log.LogWarning(e, "GM audit line not written");
+            }
+        }
+        if (o.GmAnnounce)
+            foreach (var other in sessions.All().Where(s => s.Role != null))
+                await ReplyAsync(other, $"[GM] {session.Role?.Name ?? session.Account}: {line}");
     }
 
     public static Task ReplyAsync(GameSession session, string text) =>

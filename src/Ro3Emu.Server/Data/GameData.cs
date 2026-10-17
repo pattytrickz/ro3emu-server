@@ -24,10 +24,10 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
     /// <summary>Rows of a table keyed as in the client (usually the id as a string).</summary>
     public IReadOnlyDictionary<string, JsonElement> Table(string name)
     {
-        if (_frozen is { } frozen && frozen.TryGetValue(name, out var hit)) return hit;
+        if (_frozen is { } frozen && frozen.TryGetValue(name, out var hit)) return Overlaid(name, hit);
         lock (_sync)
         {
-            if (_tables.TryGetValue(name, out var table)) return table;
+            if (_tables.TryGetValue(name, out var table)) return Overlaid(name, table);
             var path = Path.Combine(Root, "config", name + ".json");
             if (File.Exists(path)) table = LoadConfig(path);
             else
@@ -36,8 +36,39 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
                 log.LogWarning("No {Path}; run tools/ConfigExport", path);
             }
             _tables[name] = table;
-            return table;
+            return Overlaid(name, table);
         }
+    }
+
+    private volatile Dictionary<string, JsonElement>? _f2pShop;
+
+    /// <summary>
+    /// ServerOptions.F2P: ShopCommodityConfig as Ro3Emu.Shared.F2PRules prices and caps it, for every reader (the shop's
+    /// payment and limits, the Fashion tab), the same rows the hooked client shows (Ro3Emu.ClientHooks.ShopPrices).
+    /// </summary>
+    private IReadOnlyDictionary<string, JsonElement> Overlaid(string name, Dictionary<string, JsonElement> table)
+    {
+        if (name != "ShopCommodityConfig" || !options.Value.F2P.Enabled) return table;
+        return _f2pShop ??= F2PShop(table);
+    }
+
+    private static Dictionary<string, JsonElement> F2PShop(Dictionary<string, JsonElement> table)
+    {
+        var patched = new Dictionary<string, JsonElement>(table);
+        foreach (var rule in Ro3Emu.Shared.F2PRules.Commodities)
+        {
+            string key = rule.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!patched.TryGetValue(key, out var row) || System.Text.Json.Nodes.JsonNode.Parse(row.GetRawText()) is not System.Text.Json.Nodes.JsonObject node)
+                continue;
+            long payment = row.TryGetProperty("_kItemPerPrice", out var price) && price.ValueKind == JsonValueKind.Array
+                && price.GetArrayLength() > 0 && Number(price[0]) is { } p ? (long)p : Ro3Emu.Shared.F2PRules.Crystal;
+            node["_kItemPerPrice"] = new System.Text.Json.Nodes.JsonArray(payment, rule.Price);
+            node["_iDiscount"] = 0;
+            node["_iPurchaseTimesLimit"] = rule.Period;
+            node["_iPurchaseNum"] = rule.Count;
+            patched[key] = JsonDocument.Parse(node.ToJsonString()).RootElement;
+        }
+        return patched;
     }
 
     // The rows reference one document per table, which lives as long as the table (never disposed: its buffers are
