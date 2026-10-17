@@ -82,6 +82,15 @@ public sealed class ServerOptions
     /// <summary>Battle pass policy: the premium track is free for now.</summary>
     public PassOptions Pass { get; set; } = new();
 
+    /// <summary>House rules for a free-to-play realm (Ro3Emu.Shared.F2PRules); off by default.</summary>
+    public F2POptions F2P { get; set; } = new();
+
+    /// <summary>Every GM command (chat, GM panel, loopback tool) is appended to data/logs/gm-audit.log.</summary>
+    public bool GmAudit { get; set; }
+
+    /// <summary>Every GM command is also announced on every online player's marquee.</summary>
+    public bool GmAnnounce { get; set; }
+
     /// <summary>
     /// Accounts allowed to use GM commands in game ("!" lines in chat, the client's GM panel, 1031/1034). Empty:
     /// <see cref="GmOpenWhenEmpty"/> decides. docs/guide/gm-access.md.
@@ -156,6 +165,26 @@ public sealed class PassOptions
 
     /// <summary>Pass EXP from play: challenges, daily activity, monsters, dungeons, MVPs and story (NewActivityService.PassPlay).</summary>
     public bool Play { get; set; }
+}
+
+/// <summary>
+/// House rules for a free-to-play realm, not evidenced in RO3 (whose Crystals were bought with money). Prices, caps and
+/// Crystal amounts are in Ro3Emu.Shared.F2PRules, which the client hook shares; the chances below are server-only.
+/// The play rewards ride on the pass challenges, so they need <see cref="PassOptions.Play"/> as well.
+/// </summary>
+public sealed class F2POptions
+{
+    /// <summary>The shop overlay (prices, weekly caps), Crystals from challenges and MVP fights, and the drops below.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Each settled MVP fight: chance of one Blessed Weapon or Armor Ore (half each).</summary>
+    public double MvpBlessedOreChance { get; set; } = 0.2;
+
+    /// <summary>Each settled MVP fight: chance of 1-2 High-Density Enriched Oridecon or Elunium (half each).</summary>
+    public double MvpRefineOreChance { get; set; } = 0.3;
+
+    /// <summary>Each dungeon clear among the first five of a day: chance of one Blessed Weapon or Armor Ore.</summary>
+    public double DungeonBlessedOreChance { get; set; } = 0.05;
 }
 
 /// <summary>

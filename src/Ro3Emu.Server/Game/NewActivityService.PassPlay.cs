@@ -1,5 +1,6 @@
 using System.Globalization;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Shared;
 
 namespace Ro3Emu.Server.Game;
 
@@ -8,7 +9,9 @@ namespace Ro3Emu.Server.Game;
 /// server's sources are unknown (inferred): three daily challenges of 300 and seven weekly ones of 1000, daily
 /// activity points, monsters, dungeons, MVP fights and story chapters. +20% in a party, double while the player is
 /// behind the season pace, and past the last level a bonus chest every 2000. The novice pass 9201 (currency 920132)
-/// levels from main story quests. Players read their challenges with /pass and /pass week.
+/// levels from main story quests. Players read their challenges with /pass and /pass week. With ServerOptions.F2P the
+/// challenges and MVP fights also pay Crystals (and the weekly ones Meow Fish Jerky), and MVP fights and dungeon clears
+/// can drop the refine ores the original sold (Ro3Emu.Shared.F2PRules).
 /// </summary>
 public sealed partial class NewActivityService
 {
@@ -16,6 +19,11 @@ public sealed partial class NewActivityService
     private const long PassDailyReward = 300, PassWeeklyReward = 1000;
     private const long KillExp = 3, KillExpDailyCap = 300, DungeonExp = 200, DungeonsPaidPerDay = 5, MvpExp = 200,
         MvpsPaidPerDay = 3, ChapterExp = 500, LivenessExp = 6, NoviceQuestExp = 300, OverflowChestExp = 2000;
+    /// <summary>ServerOptions.F2P drops: Blessed Weapon/Armor Ore (refine without losing levels) and the +13 and higher ores.</summary>
+    private const int BlessedWeaponOre = 1200100, BlessedArmorOre = 1200102, HighDensityOridecon = 1200004, HighDensityElunium = 1200005;
+
+    private static AwardGrant BlessedOre() => new(Random.Shared.Next(2) == 0 ? BlessedWeaponOre : BlessedArmorOre, 1);
+
     /// <summary>60 levels of 2000 in about six and a half weeks of regular play.</summary>
     private const double PacePerDay = 120_000 / 45.5;
 
@@ -204,6 +212,18 @@ public sealed partial class NewActivityService
         bool dirty = Roll(play, role, day, week);
         var notices = new List<string>();
         long baseExp = 0;
+        // ServerOptions.F2P: Crystals and Meow Fish Jerky for challenges and MVP fights, refine ores from MVPs and dungeons.
+        long crystals = 0, jerky = 0;
+        var drops = new List<AwardGrant>();
+        string Paid(long exp, bool weekly)
+        {
+            if (!f2p.Enabled) return $"+{exp} Pass EXP";
+            int gems = weekly ? F2PRules.WeeklyChallengeCrystals : F2PRules.DailyChallengeCrystals;
+            crystals += gems;
+            if (!weekly) return $"+{exp} Pass EXP, +{gems} Crystals";
+            jerky += F2PRules.WeeklyChallengeJerky;
+            return $"+{exp} Pass EXP, +{gems} Crystals, +{F2PRules.WeeklyChallengeJerky} Meow Fish Jerky";
+        }
 
         long liveness = session.Progress!.Currency.GetValueOrDefault(Liveness);
         if (liveness < play.LivenessSeen) play.LivenessSeen = 0; // the daily reset came before ours
@@ -221,8 +241,28 @@ public sealed partial class NewActivityService
             play.KillExpToday += paid;
             baseExp += paid;
         }
-        if (dungeons > 0 && play.DungeonsToday < DungeonsPaidPerDay) { play.DungeonsToday++; baseExp += DungeonExp; }
-        if (mvps > 0 && play.MvpsToday < MvpsPaidPerDay) { play.MvpsToday++; baseExp += MvpExp; }
+        if (dungeons > 0 && play.DungeonsToday < DungeonsPaidPerDay)
+        {
+            play.DungeonsToday++;
+            baseExp += DungeonExp;
+            if (f2p.Enabled && Random.Shared.NextDouble() < f2p.DungeonBlessedOreChance) drops.Add(BlessedOre());
+        }
+        if (mvps > 0 && play.MvpsToday < MvpsPaidPerDay)
+        {
+            play.MvpsToday++;
+            baseExp += MvpExp;
+            if (f2p.Enabled)
+            {
+                crystals += F2PRules.MvpCrystals;
+                notices.Add($"MVP fight: +{F2PRules.MvpCrystals} Crystals");
+            }
+        }
+        if (mvps > 0 && f2p.Enabled)
+        {
+            if (Random.Shared.NextDouble() < f2p.MvpBlessedOreChance) drops.Add(BlessedOre());
+            if (Random.Shared.NextDouble() < f2p.MvpRefineOreChance)
+                drops.Add(new AwardGrant(Random.Shared.Next(2) == 0 ? HighDensityOridecon : HighDensityElunium, Random.Shared.Next(1, 3)));
+        }
         if (quest != 0 && ChapterEnds().Contains(quest) && !play.ChaptersPaid.Contains(quest))
         {
             play.ChaptersPaid.Add(quest);
@@ -240,7 +280,7 @@ public sealed partial class NewActivityService
                 if (now < c.Target) continue;
                 play.DailyDone.Add(c.Id);
                 challengeExp += PassDailyReward;
-                notices.Add($"Daily challenge done: {c.Text}, +{PassDailyReward} Pass EXP");
+                notices.Add($"Daily challenge done: {c.Text}, {Paid(PassDailyReward, weekly: false)}");
             }
             foreach (var c in WeeklyChallenges.Where(c => c.Goal == goal && !play.WeeklyDone.Contains(c.Id)))
             {
@@ -248,7 +288,7 @@ public sealed partial class NewActivityService
                 if (now < c.Target) continue;
                 play.WeeklyDone.Add(c.Id);
                 challengeExp += PassWeeklyReward;
-                notices.Add($"Weekly challenge done: {c.Text}, +{PassWeeklyReward} Pass EXP");
+                notices.Add($"Weekly challenge done: {c.Text}, {Paid(PassWeeklyReward, weekly: true)}");
             }
         }
         // Play on 5 days counts on the first event of a day (Roll), so check it here too.
@@ -257,10 +297,17 @@ public sealed partial class NewActivityService
         {
             play.WeeklyDone.Add(c.Id);
             challengeExp += PassWeeklyReward;
-            notices.Add($"Weekly challenge done: {c.Text}, +{PassWeeklyReward} Pass EXP");
+            notices.Add($"Weekly challenge done: {c.Text}, {Paid(PassWeeklyReward, weekly: true)}");
         }
 
         var grants = new List<AwardGrant>();
+        if (crystals > 0) grants.Add(new AwardGrant(F2PRules.Crystal, checked((int)crystals)));
+        if (jerky > 0) grants.Add(new AwardGrant(F2PRules.MeowFishJerky, checked((int)jerky)));
+        foreach (var drop in drops)
+        {
+            grants.Add(drop);
+            notices.Add($"Bonus drop: {data.ItemName(drop.Entry)} x{drop.Count}");
+        }
         if (OpenPass(session) is long passId && baseExp + challengeExp > 0)
         {
             double multiplier = 1;
@@ -344,12 +391,16 @@ public sealed partial class NewActivityService
             finished.Contains(c.Id) ? $"{c.Text} (done)" : $"{c.Text} {done.GetValueOrDefault(c.Id)}/{c.Target}";
         if (args.Trim().Equals("week", StringComparison.OrdinalIgnoreCase))
         {
+            string weekly = f2p.Enabled
+                ? $"+{PassWeeklyReward} EXP, {F2PRules.WeeklyChallengeCrystals} Crystals, {F2PRules.WeeklyChallengeJerky} Jerky each"
+                : $"+{PassWeeklyReward} each";
             await GmCommands.ReplyAsync(session, $"{head}. This week ({play.WeeklyDone.Count}/{WeeklyChallenges.Length} done, "
-                + $"+{PassWeeklyReward} each): " + string.Join(" | ", WeeklyChallenges.Select(c => Line(c, play.WeeklyProgress, play.WeeklyDone))));
+                + $"{weekly}): " + string.Join(" | ", WeeklyChallenges.Select(c => Line(c, play.WeeklyProgress, play.WeeklyDone))));
             return;
         }
         var today = DailyChallenges.Where(c => play.Daily.Contains(c.Id));
-        await GmCommands.ReplyAsync(session, $"{head}. Today (+{PassDailyReward} each): "
+        string daily = f2p.Enabled ? $"+{PassDailyReward} EXP, {F2PRules.DailyChallengeCrystals} Crystals each" : $"+{PassDailyReward} each";
+        await GmCommands.ReplyAsync(session, $"{head}. Today ({daily}): "
             + string.Join(" | ", today.Select(c => Line(c, play.DailyProgress, play.DailyDone))) + ". Weekly: /pass week");
     }
 
