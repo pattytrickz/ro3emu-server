@@ -166,6 +166,27 @@ public sealed class F2PTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task SupporterCosmeticsCostSupporterTokensNotCrystals()
+    {
+        const int SupporterMount = 5000008, SupporterMountLook = 60040010;
+        await using var alice = await InWorld("Alice");
+        await Gm(alice, "!lvl 50");
+        await Gm(alice, "!item 3 5000");
+        long crystals = await Crystals(alice);
+
+        // Crystals alone do not buy it: the price is in Supporter Tokens.
+        Assert.NotEqual(0, (await Buy(alice, SupporterMount)).Result);
+        Assert.Equal(crystals, await Crystals(alice));
+
+        await Gm(alice, $"!item {F2PRules.SupporterToken} 7");
+        var bought = await Buy(alice, SupporterMount);
+        Assert.Equal((0, 5), (bought.Result, bought.Price));
+        Assert.Equal(2, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.SupporterToken)));
+        Assert.Equal(crystals, await Crystals(alice));
+        Assert.True(await OnLoop(() => Session(alice).Wardrobe!.AllLightUpAppearances.ContainsKey(SupporterMountLook)));
+    }
+
+    [ClientDataFact]
     public async Task EveryRuleChangesAnExistingCrystalRowAndOnlyWhileF2PIsOn()
     {
         var data = Service<GameData>();
@@ -174,7 +195,7 @@ public sealed class F2PTests : IAsyncLifetime
             var row = data.Row("ShopCommodityConfig", rule.Id);
             Assert.True(row.HasValue, $"commodity {rule.Id}");
             var price = row.Value.GetProperty("_kItemPerPrice");
-            Assert.Equal((F2PRules.Crystal, rule.Price), (price[0].GetInt32(), price[1].GetInt32()));
+            Assert.Equal((rule.Payment > 0 ? rule.Payment : F2PRules.Crystal, rule.Price), (price[0].GetInt32(), price[1].GetInt32()));
             Assert.Equal((rule.Period, rule.Count, 0), ((int)GameData.Int(row.Value, "_iPurchaseTimesLimit"),
                 (int)GameData.Int(row.Value, "_iPurchaseNum"), (int)GameData.Int(row.Value, "_iDiscount")));
         }

@@ -27,7 +27,7 @@ public static class SdkEndpoints
     {
         app.MapGet(GateKeyPath, (Net.GateCrypto crypto) => Results.Text(crypto.PublicKeyPem, "application/x-pem-file"));
 
-        app.MapPost(LoginPath, async (HttpRequest request, AccountStore accounts, ILogger<AccountStore> log) =>
+        app.MapPost(LoginPath, async (HttpRequest request, AccountStore accounts, AccessList access, ILogger<AccountStore> log) =>
         {
             var form = await request.ReadFormAsync();
             string identity = form["identity"].ToString().Trim();
@@ -36,7 +36,20 @@ public static class SdkEndpoints
             {
                 return Results.Json(new { code = 401 });
             }
+            // ServerOptions.Access: blocked names, approval-only registration and admin password resets.
+            var (decision, why) = access.Decide(identity, await accounts.ExistsAsync(identity));
+            if (decision == AccessList.Decision.Refuse)
+            {
+                log.LogInformation("SDK login {Identity}: refused ({Why})", identity, why);
+                return Results.Json(new { code = 401 });
+            }
+            if (decision == AccessList.Decision.ResetPassword && await accounts.SetPasswordAsync(identity, credential))
+            {
+                access.Used(identity);
+                log.LogInformation("SDK login {Identity}: password reset", identity);
+            }
             var result = await accounts.LoginAsync(identity, credential);
+            if (result == AccountStore.LoginResult.Registered) access.Used(identity);
             log.LogInformation("SDK login {Identity}: {Result}", identity, result);
             if (result == AccountStore.LoginResult.BadPassword)
             {
