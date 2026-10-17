@@ -44,6 +44,7 @@ public static class ServerHost
         builder.Services.AddHostedService<GameLoopTickers>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GameLoop>());
         builder.Services.AddSingleton<AccountStore>();
+        builder.Services.AddSingleton<AccessList>();
         builder.Services.AddSingleton<RoleStore>();
         builder.Services.AddSingleton<Game.Ownership.OwnerRegistry>();
         builder.Services.AddSingleton<Game.Ownership.RoleHandover>();
@@ -219,6 +220,16 @@ public static class ServerHost
                 await gm.RunAsync(session, line, loopbackTool: true);
                 return Results.Ok("done");
             });
+        });
+        // Who may play (loopback only, AccessList): POST /ro3emu/access body "approve name" | "block name" | "reset name" | "list".
+        app.MapPost("/ro3emu/access", async (HttpContext context, AccessList access, IOptions<ServerOptions> options) =>
+        {
+            if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
+            using var reader = new StreamReader(context.Request.Body);
+            var line = (await reader.ReadToEndAsync()).Trim();
+            string reply = access.Run(line);
+            if (options.Value.GmAudit) GmCommands.AppendAudit(options.Value, "-", "-", "host", "access " + line);
+            return Results.Text(reply + "\n");
         });
         // In-game bug reports (loopback only, docs/guide/feedback.md): GET /ro3emu/reports?since=<id or ISO time>&limit=&format=text
         app.MapGet("/ro3emu/reports", (HttpContext context, FeedbackService feedback) =>

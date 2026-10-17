@@ -209,24 +209,29 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
     private async Task AuditAsync(GameSession session, string source, string line)
     {
         var o = options.Value;
-        if (o.GmAudit)
-        {
-            try
-            {
-                string dir = Path.Combine(o.DataDir, "logs");
-                Directory.CreateDirectory(dir);
-                string entry = string.Create(CultureInfo.InvariantCulture,
-                    $"{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss}Z\t{session.Account}\t{session.Role?.Name}\t{source}\t{line}\n");
-                lock (AuditFile) File.AppendAllText(Path.Combine(dir, "gm-audit.log"), entry);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                log.LogWarning(e, "GM audit line not written");
-            }
-        }
+        if (o.GmAudit && !AppendAudit(o, session.Account ?? "", session.Role?.Name ?? "", source, line))
+            log.LogWarning("GM audit line not written");
         if (o.GmAnnounce)
             foreach (var other in sessions.All().Where(s => s.Role != null))
                 await ReplyAsync(other, $"[GM] {session.Role?.Name ?? session.Account}: {line}");
+    }
+
+    /// <summary>One gm-audit.log line; also used by the host's /ro3emu/access tool. False when the file could not be written.</summary>
+    internal static bool AppendAudit(ServerOptions o, string account, string role, string source, string line)
+    {
+        try
+        {
+            string dir = Path.Combine(o.DataDir, "logs");
+            Directory.CreateDirectory(dir);
+            string entry = string.Create(CultureInfo.InvariantCulture,
+                $"{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss}Z\t{account}\t{role}\t{source}\t{line}\n");
+            lock (AuditFile) File.AppendAllText(Path.Combine(dir, "gm-audit.log"), entry);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     public static Task ReplyAsync(GameSession session, string text) =>
@@ -236,6 +241,8 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
     {
         ["help"] = ("", (s, _) => ReplyAsync(s, "Commands: " + string.Join("  ", Commands().Select(c => $"!{c.Key} {c.Value.Usage}".Trim())))),
         ["where"] = ("", Where),
+        ["access"] = (Accounts.AccessList.Usage, (s, a) =>
+            ReplyAsync(s, services.GetRequiredService<Accounts.AccessList>().Run(string.Join(' ', a)))),
         ["dungeonsolo"] = ("on|off (test aid, this role session only)", async (s, a) =>
         {
             if (a.Length != 1 || a[0].ToLowerInvariant() is not ("on" or "off")) throw new ArgumentException("on|off");

@@ -16,19 +16,32 @@ namespace Ro3Emu.Shared
         /// <summary>Paid for the first NewActivityService.MvpsPaidPerDay MVP fights of a day, with their Pass EXP.</summary>
         public const int MvpCrystals = 20;
 
+        /// <summary>
+        /// ItemConfig 4 "Credit Points": a currency nothing in the data grants or spends (trade credit is a separate
+        /// score), renamed by the client hook. Admins grant it to supporters ("!item 4 n"); it buys only the Supporter
+        /// cosmetics below, never anything with stats.
+        /// </summary>
+        public const int SupporterToken = 4;
+        public const long SupporterTokenNameText = 12390000245, SupporterTokenDescriptionText = 12390100004;
+        public const string SupporterTokenName = "Supporter Token";
+        public const string SupporterTokenDescription =
+            "A thank-you for supporting the server. Buys Supporter cosmetics in the Fashion tab; it has no other use.";
+
         /// <summary>ItemConfig 3/16 _iDescription: says where Crystals come from on this realm.</summary>
         public const long CrystalDescriptionText = 12390100003;
         public const string CrystalDescription =
             "Earned by playing: daily and weekly pass challenges (type /pass) and MVP fights. Spend it in the Crystal Shop and the Fashion tab.";
 
         /// <summary>
-        /// A ShopCommodityConfig row's new price (in its own payment item), _iPurchaseTimesLimit period (0 none,
-        /// 2 weekly, 4 lifetime) and _iPurchaseNum cap (0 none). _iDiscount becomes 0: <see cref="Price"/> is final.
+        /// A ShopCommodityConfig row's new price, _iPurchaseTimesLimit period (0 none, 2 weekly, 4 lifetime) and
+        /// _iPurchaseNum cap (0 none). _iDiscount becomes 0: <see cref="Price"/> is final. <see cref="Payment"/> 0 keeps the
+        /// row's own payment item.
         /// </summary>
         public sealed class Commodity
         {
-            public readonly int Id, Price, Period, Count;
-            public Commodity(int id, int price, int period, int count) { Id = id; Price = price; Period = period; Count = count; }
+            public readonly int Id, Price, Period, Count, Payment;
+            public Commodity(int id, int price, int period, int count, int payment = 0)
+            { Id = id; Price = price; Period = period; Count = count; Payment = payment; }
         }
 
         private const int None = 0, Weekly = 2, Lifetime = 4;
@@ -59,8 +72,10 @@ namespace Ro3Emu.Shared
             new Commodity(5000002, 450, Lifetime, 0), new Commodity(5000003, 450, Lifetime, 0), new Commodity(5000004, 450, Lifetime, 0),
             new Commodity(5000005, 450, Lifetime, 0), new Commodity(5000006, 450, Lifetime, 0),  // outfit sets (1880)
             new Commodity(5000007, 160, Lifetime, 0),                                            // outfit set (680)
-            new Commodity(5000008, 600, Lifetime, 0), new Commodity(5000012, 600, Lifetime, 0), new Commodity(5000013, 600, Lifetime, 0),
-            new Commodity(5000014, 600, Lifetime, 0),                                            // mounts (2380)
+            // Supporter cosmetics: the four 2380 mounts and the character effect, for Supporter Tokens only.
+            new Commodity(5000008, 5, Lifetime, 0, SupporterToken), new Commodity(5000012, 5, Lifetime, 0, SupporterToken),
+            new Commodity(5000013, 5, Lifetime, 0, SupporterToken), new Commodity(5000014, 5, Lifetime, 0, SupporterToken),
+            new Commodity(5000037, 3, Lifetime, 0, SupporterToken),
             new Commodity(5000009, 500, Lifetime, 0), new Commodity(5000010, 500, Lifetime, 0), new Commodity(5000011, 500, Lifetime, 0), // mounts (1980)
             new Commodity(5000038, 250, Lifetime, 0),                                            // mount (980)
             new Commodity(5000015, 120, Lifetime, 0),                                            // hairstyle (480)
@@ -69,7 +84,9 @@ namespace Ro3Emu.Shared
             new Commodity(5000030, 450, Lifetime, 0), new Commodity(5000031, 450, Lifetime, 0),  // backwear (1880)
             new Commodity(5000032, 160, Lifetime, 0), new Commodity(5000033, 160, Lifetime, 0), new Commodity(5000034, 160, Lifetime, 0),
             new Commodity(5000035, 160, Lifetime, 0),                                            // backwear (680)
-            new Commodity(5000037, 320, Lifetime, 0),                                            // character effect (1280)
         };
+
+        /// <summary>The Fashion tab's ShopConfig rows (shop 502): their currency bar also shows Supporter Tokens.</summary>
+        public static readonly int[] FashionShopRows = { 25, 26, 33, 36, 39, 410 };
     }
 }

@@ -474,6 +474,18 @@ public sealed partial class AccountStore : IDisposable
         return credentials != null && await MatchesAsync(password, credentials).ConfigureAwait(false);
     }
 
+    /// <summary>True when an account of exactly this name exists (AccessList decides before a login may register).</summary>
+    public async Task<bool> ExistsAsync(string name) =>
+        await ReadAsync<AccountCredentials?>(new AccountCredentialsRead(name)).ConfigureAwait(false) != null;
+
+    /// <summary>A new password for an existing account (AccessList "reset": the player's next login sets it).</summary>
+    public async Task<bool> SetPasswordAsync(string name, string password)
+    {
+        byte[] salt = RandomNumberGenerator.GetBytes(16);
+        byte[] hash = await Task.Run(() => AccountHash.Hash(password, salt)).ConfigureAwait(false);
+        return await WriteAsync<bool>(new AccountPasswordPlan(name, hash, salt)).ConfigureAwait(false);
+    }
+
     public LoginResult Login(string name, string password)
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();

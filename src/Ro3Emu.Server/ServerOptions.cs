@@ -85,6 +85,9 @@ public sealed class ServerOptions
     /// <summary>House rules for a free-to-play realm (Ro3Emu.Shared.F2PRules); off by default.</summary>
     public F2POptions F2P { get; set; } = new();
 
+    /// <summary>Who may register and log in (Accounts.AccessList, data/access.json).</summary>
+    public AccessOptions Access { get; set; } = new();
+
     /// <summary>Every GM command (chat, GM panel, loopback tool) is appended to data/logs/gm-audit.log.</summary>
     public bool GmAudit { get; set; }
 
@@ -165,6 +168,13 @@ public sealed class PassOptions
 
     /// <summary>Pass EXP from play: challenges, daily activity, monsters, dungeons, MVPs and story (NewActivityService.PassPlay).</summary>
     public bool Play { get; set; }
+}
+
+/// <summary>House rule: who may play. Existing accounts keep logging in unless blocked.</summary>
+public sealed class AccessOptions
+{
+    /// <summary>"open": a new name registers on its first login (default). "approved": only names an admin approved.</summary>
+    public string Mode { get; set; } = "open";
 }
 
 /// <summary>

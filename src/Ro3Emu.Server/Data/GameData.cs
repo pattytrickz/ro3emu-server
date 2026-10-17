@@ -60,8 +60,9 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
             string key = rule.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (!patched.TryGetValue(key, out var row) || System.Text.Json.Nodes.JsonNode.Parse(row.GetRawText()) is not System.Text.Json.Nodes.JsonObject node)
                 continue;
-            long payment = row.TryGetProperty("_kItemPerPrice", out var price) && price.ValueKind == JsonValueKind.Array
-                && price.GetArrayLength() > 0 && Number(price[0]) is { } p ? (long)p : Ro3Emu.Shared.F2PRules.Crystal;
+            long payment = rule.Payment > 0 ? rule.Payment
+                : row.TryGetProperty("_kItemPerPrice", out var price) && price.ValueKind == JsonValueKind.Array
+                    && price.GetArrayLength() > 0 && Number(price[0]) is { } p ? (long)p : Ro3Emu.Shared.F2PRules.Crystal;
             node["_kItemPerPrice"] = new System.Text.Json.Nodes.JsonArray(payment, rule.Price);
             node["_iDiscount"] = 0;
             node["_iPurchaseTimesLimit"] = rule.Period;

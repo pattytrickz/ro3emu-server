@@ -20,6 +20,14 @@ namespace Ro3Emu.ClientHooks
             try
             {
                 PassChallenges.Text(texts, F2PRules.CrystalDescriptionText, F2PRules.CrystalDescription);
+                PassChallenges.Text(texts, F2PRules.SupporterTokenNameText, F2PRules.SupporterTokenName);
+                PassChallenges.Text(texts, F2PRules.SupporterTokenDescriptionText, F2PRules.SupporterTokenDescription);
+                // The Fashion tab's currency bar: Crystals and Supporter Tokens.
+                var shops = PassChallenges.Values(dbm, "m_kCFG_ShopConfig");
+                if (shops != null)
+                    foreach (int id in F2PRules.FashionShopRows)
+                        if (shops.Obf_ruA<long, Obf_R.Obf_ff>(id) is { } shop)
+                            PassChallenges.RawSet(shop, "_kCurrencyDisplay", PassChallenges.List((long)F2PRules.Crystal, (long)F2PRules.SupporterToken));
                 var rows = PassChallenges.Values(dbm, Config);
                 if (rows == null)
                 {
@@ -32,7 +40,8 @@ namespace Ro3Emu.ClientHooks
                     var row = rows.Obf_ruA<long, Obf_R.Obf_ff>(rule.Id);
                     if (row == null) continue;
                     var price = row.Obf_RuA<Obf_R.Obf_ff>("_kItemPerPrice");
-                    long payment = price != null && price.Obf_ruA<long, object>(1) is { } p ? Convert.ToInt64(p) : F2PRules.Crystal;
+                    long payment = rule.Payment > 0 ? rule.Payment
+                        : price != null && price.Obf_ruA<long, object>(1) is { } p ? Convert.ToInt64(p) : F2PRules.Crystal;
                     PassChallenges.RawSet(row, "_kItemPerPrice", PassChallenges.List(payment, (long)rule.Price));
                     PassChallenges.RawSet(row, "_iDiscount", 0L);
                     PassChallenges.RawSet(row, "_iPurchaseTimesLimit", (long)rule.Period);
@@ -42,7 +51,7 @@ namespace Ro3Emu.ClientHooks
                 var wrapper = dbm.Obf_RuA<Obf_R.Obf_ff>(Config);
                 wrapper?.Obf_RuA<Obf_R.Obf_Ef>("OnInitDatas")?.Obf_HuA(wrapper);
                 Debug.Log("[Ro3Emu.F2P] " + set + "/" + F2PRules.Commodities.Length + " shop prices set; Coin Bag now "
-                    + Describe(rows, 13123) + ", first outfit " + Describe(rows, 5000002));
+                    + Describe(rows, 13123) + ", first outfit " + Describe(rows, 5000002) + ", supporter mount " + Describe(rows, 5000008));
             }
             catch (Exception e)
             {
@@ -56,7 +65,7 @@ namespace Ro3Emu.ClientHooks
             var row = rows.Obf_ruA<long, Obf_R.Obf_ff>(id);
             var price = row?.Obf_RuA<Obf_R.Obf_ff>("_kItemPerPrice");
             if (price == null) return "?";
-            return price.Obf_ruA<long, object>(2) + " (cap " + row.Obf_RuA<object>("_iPurchaseNum") + ")";
+            return price.Obf_ruA<long, object>(2) + " of item " + price.Obf_ruA<long, object>(1) + " (cap " + row.Obf_RuA<object>("_iPurchaseNum") + ")";
         }
     }
 }

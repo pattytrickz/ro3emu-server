@@ -1,0 +1,124 @@
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+
+namespace Ro3Emu.Server.Accounts;
+
+/// <summary>
+/// Who may play (ServerOptions.Access, house rule). "open": any new name registers on its first login, as the research
+/// server always did. "approved": a new name registers only after an admin approved it (GM "!access approve name", or
+/// POST /ro3emu/access from the host); the approval is used up by that registration. In either mode a blocked name is
+/// refused, existing accounts included, and "reset" lets the next login of an existing name set a new password (the
+/// admin never sees one). Kept in data/access.json; names compare case-insensitively.
+/// </summary>
+public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessList> log)
+{
+    public sealed class State
+    {
+        public List<string> Approved { get; set; } = new();
+        public List<string> Blocked { get; set; } = new();
+        public List<string> Reset { get; set; } = new();
+    }
+
+    private readonly object _sync = new();
+    private State? _state;
+
+    private string PathOf() => Path.Combine(options.Value.DataDir, "access.json");
+
+    public bool ApprovalRequired => string.Equals(options.Value.Access.Mode, "approved", StringComparison.OrdinalIgnoreCase);
+
+    private State Load()
+    {
+        if (_state != null) return _state;
+        var path = PathOf();
+        _state = File.Exists(path) ? JsonSerializer.Deserialize<State>(File.ReadAllBytes(path)) ?? new State() : new State();
+        return _state;
+    }
+
+    private void Save(State state)
+    {
+        var path = PathOf();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp";
+        File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(state, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temp, path, overwrite: true);
+    }
+
+    private static bool Has(List<string> list, string name) => list.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>What a login of <paramref name="name"/> may do: refuse (with the reason for the log), register, or log in.</summary>
+    public enum Decision { Login, Register, ResetPassword, Refuse }
+
+    public (Decision Decision, string Why) Decide(string name, bool exists)
+    {
+        lock (_sync)
+        {
+            var state = Load();
+            if (Has(state.Blocked, name)) return (Decision.Refuse, "blocked");
+            if (exists) return Has(state.Reset, name) ? (Decision.ResetPassword, "password reset") : (Decision.Login, "existing account");
+            if (!ApprovalRequired) return (Decision.Register, "open registration");
+            return Has(state.Approved, name) ? (Decision.Register, "approved") : (Decision.Refuse, "not approved");
+        }
+    }
+
+    /// <summary>After the registration or reset a <see cref="Decide"/> allowed: the approval or reset is used up.</summary>
+    public void Used(string name)
+    {
+        lock (_sync)
+        {
+            var state = Load();
+            int removed = state.Approved.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase))
+                + state.Reset.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+            if (removed > 0) Save(state);
+        }
+    }
+
+    public const string Usage = "approve|unapprove|block|unblock|reset <name> | list";
+
+    /// <summary>"approve name", "block name", "list"...: the admin side, shared by the GM command and the host's HTTP tool.</summary>
+    public string Run(string line)
+    {
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string verb = parts.Length > 0 ? parts[0].ToLowerInvariant() : "list";
+        lock (_sync)
+        {
+            var state = Load();
+            if (verb == "list" || parts.Length < 2)
+                return $"Registration {(ApprovalRequired ? "needs approval" : "is open")}. Approved (not yet registered): "
+                    + Names(state.Approved) + ". Blocked: " + Names(state.Blocked) + ". Password reset pending: " + Names(state.Reset)
+                    + ". Usage: " + Usage;
+            string name = parts[1];
+            if (name.Length > 64 || name.Any(char.IsWhiteSpace)) return "Names have no spaces and at most 64 characters.";
+            string reply;
+            switch (verb)
+            {
+                case "approve":
+                    if (!Has(state.Approved, name)) state.Approved.Add(name);
+                    reply = $"{name} may now register: their first login with that name sets the password.";
+                    break;
+                case "unapprove":
+                    state.Approved.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+                    reply = $"{name} is no longer approved (an account already made stays).";
+                    break;
+                case "block":
+                    if (!Has(state.Blocked, name)) state.Blocked.Add(name);
+                    reply = $"{name} is blocked: logins are refused from now on.";
+                    break;
+                case "unblock":
+                    state.Blocked.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+                    reply = $"{name} is unblocked.";
+                    break;
+                case "reset":
+                    if (!Has(state.Reset, name)) state.Reset.Add(name);
+                    reply = $"{name}'s next login sets a new password (whatever they type then).";
+                    break;
+                default:
+                    return "Usage: " + Usage;
+            }
+            Save(state);
+            log.LogInformation("Access: {Line} -> {Reply}", line, reply);
+            return reply;
+        }
+    }
+
+    private static string Names(List<string> names) => names.Count == 0 ? "none" : string.Join(", ", names);
+}
