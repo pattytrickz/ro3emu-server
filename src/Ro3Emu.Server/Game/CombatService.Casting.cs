@@ -32,6 +32,9 @@ public sealed partial class CombatService
 {
     public const uint SkillMove = 31112, TrapDamage = 31128;
 
+    /// <summary>SkillConfig._iIfAutoAtk = enum_AutoNormalAttackType.NotInterrupt (None 0, NotInterrupt 1, AutoNormalAttack 2).</summary>
+    private const int NotInterruptAttack = 1;
+
     /// <summary>
     /// 31102: row identity, ownership, selector, mode, all costs and cooldowns are checked before the cast commits.
     /// Target/position come from CastSkillReq; m_kSelectInfo uses relation masks, never _iDmgType as a selector.
@@ -110,7 +113,10 @@ public sealed partial class CombatService
         if (lease?.Cancelled == true || !ReferenceEquals(s.Attachment, lease) ||
             s.SceneGeneration != scene || s.WorldScene != worldScene || s.SceneLoading) return;
         await CancelCastAsync(s, SkillInterruptedInfo.Types.SkillInterruptType.Skill);
-        eventAttacks.Remove(s);
+        // LC_Skill_RunTimeContext, at the local player's skill end: _iIfAutoAtk <= None clears the normal-attack cache,
+        // AutoNormalAttack sets it, NotInterrupt leaves it: a running auto-attack goes on after a NotInterrupt skill.
+        bool keepsAttack = GameData.Int(row!.Value, "_iIfAutoAtk") == NotInterruptAttack && owned == null;
+        if (!keepsAttack) eventAttacks.Remove(s);
         await PayCostsAsync(s, costs);
         await buffs.SpendEnergyAsync(s, row!.Value);
         await s.SendGameAsync(UseSkill, new CastSkillRsp { SessionId = id, IsAutoCast = req.IsAutoCast });
@@ -126,7 +132,7 @@ public sealed partial class CombatService
                 NextSwingMs = Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
                 StartX = s.Position.X, StartZ = s.Position.Z };
         }
-        else s.Attack = null;
+        else if (!keepsAttack) s.Attack = null;
         if (GameData.Int(row.Value, "_iIfAutoAtk") == 2 && owned == null && playerTarget != null)
             eventAttacks[s] = new EventAttack(playerTarget, loopSkill,
                 Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
