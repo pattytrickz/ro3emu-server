@@ -48,9 +48,16 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
     internal static bool Allowed(ServerOptions options, string? account, bool loopbackTool)
     {
         var allowed = options.GmAccounts;
+        if (loopbackTool && ToolAccount(options, account)) return true;
         if (allowed.Length == 0) return loopbackTool || options.GmOpenWhenEmpty != false;
         return account != null && allowed.Contains(account, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>ServerOptions.GmToolAccounts: exact names, or prefixes written with a trailing *.</summary>
+    private static bool ToolAccount(ServerOptions options, string? account) =>
+        account != null && options.GmToolAccounts.Any(e => e.EndsWith('*')
+            ? e.Length > 1 && account.StartsWith(e[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(e, account, StringComparison.OrdinalIgnoreCase));
 
     internal static bool IsEventOwnerCommand(string line)
     {

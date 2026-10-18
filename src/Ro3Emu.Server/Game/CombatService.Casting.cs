@@ -125,7 +125,8 @@ public sealed partial class CombatService
         // _iIfAutoAtk 2 (enum_AutoNormalAttackType.AutoNormalAttack) follows the cast with the career's normal attack
         // (LC_AutoAttackAppendState: GetNormalSkill). Repeating the cast skill itself bypassed its cooldown: Blade
         // Smash and Sonic Slash fired every swing.
-        int loopSkill = GameData.Int(row!.Value, "_iIsNormalAtk") == 1 ? req.SkillId : skills.NormalAttack(s.Progress!.Career);
+        int loopSkill = GameData.Int(row!.Value, "_iIsNormalAtk") == 1 ? req.SkillId
+            : skills.NormalAttack(s.Progress!.Career, WeaponType(s, 1), WeaponType(s, 2));
         if (GameData.Int(row!.Value, "_iIfAutoAtk") == 2 && owned == null && target != null && CanHitMonster(s, target))
         {
             s.Attack = new AttackLoop { Target = target, SkillId = loopSkill,
@@ -176,9 +177,14 @@ public sealed partial class CombatService
         if (GameData.Int(row, "_iID") == PublicSkill("WorldTreeSkillId")) return true; // paid item skill, LC_ReviveHelper.
         // A Survivor Battle career owns the match skill set (TimedBattleService.Chicken), not the job tree.
         if (MatchSkillRule?.Invoke(s, (int)GameData.Int(row, "_iID")) is { } granted) return granted;
-        if (GameData.Int(row, "_iID") == skills.NormalAttack(s.Progress!.Career)) return true;
+        if (skills.IsNormalAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID"))) return true;
         return skills.Level(s.Progress, (int)GameData.Int(row, "_iSkillID")) >= GameData.Int(row, "_iLevel");
     }
+
+    /// <summary>ItemConfig._iSubType of the item worn in an equipment grid (1 main hand, 2 off hand), 0 when empty.</summary>
+    private int WeaponType(GameSession s, int grid) =>
+        s.Items.FirstOrDefault(i => i.Pack == 2 && i.Grid == grid) is { } item && data.Row("ItemConfig", item.Entry) is { } row
+            ? (int)GameData.Int(row, "_iSubType") : 0;
 
     private MonsterUnit? FindMonster(long sceneId, long uid) => world.Map(sceneId).Units.OfType<MonsterUnit>().FirstOrDefault(m => m.Uid == uid && !m.Dead);
     private GameSession? FindPlayer(GameSession s, long uid, bool dead = false) => world.PlayersIn(s.WorldScene).FirstOrDefault(p => p.Role?.Id == uid && p.Dead == dead);

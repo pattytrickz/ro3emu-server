@@ -28,6 +28,7 @@ public sealed class SkillService
     private readonly ILogger<SkillService> log;
     private Dictionary<(int Group, int Level), int>? _rowIds;
     private Dictionary<int, int>? upgradedGroupByBase;
+    private Dictionary<int, (int[] Weapons, int Skill)[]>? _jobAttacks;
 
     /// <summary>Combat-owned dynamic queue eligibility (LC_DynamicParamMgr).</summary>
     public Func<GameSession, int, bool>? QueueEligibility { get; set; }
@@ -60,6 +61,47 @@ public sealed class SkillService
         data.Row("JobConfig", career) is { } job && job.TryGetProperty("_kSkillNormalID", out var n) && n.ValueKind == JsonValueKind.Array && n.GetArrayLength() > 0
             ? n[0].GetInt32()
             : 1000001;
+
+    /// <summary>
+    /// JobAttackConfig (mount 0): a career's normal attack by what it holds. _kWeaponType {} = anything, [0] = bare
+    /// hands, [type] = that main-hand weapon type (ItemConfig._iSubType), [main, off] = also that off hand (0 = none).
+    /// A Magician with a rod swings 1299901, a Lord Knight 1001101; their _kSkillNormalID (1200001, 1100001) is not
+    /// what the client casts, and 1200001 has no SkillConfig row at all.
+    /// </summary>
+    private (int[] Weapons, int Skill)[] JobAttacks(int career)
+    {
+        _jobAttacks ??= data.Table("JobAttackConfig").Values
+            .Where(r => GameData.Int(r, "_iMountID") == 0)
+            .GroupBy(r => (int)GameData.Int(r, "_iJobID"))
+            .ToDictionary(g => g.Key, g => g.Select(r => (
+                r.TryGetProperty("_kWeaponType", out var w) && w.ValueKind == JsonValueKind.Array
+                    ? w.EnumerateArray().Select(v => (int)(GameData.Number(v) ?? 0)).ToArray() : Array.Empty<int>(),
+                (int)GameData.Int(r, "_iSkillID"))).ToArray());
+        return _jobAttacks.GetValueOrDefault(career, []);
+    }
+
+    /// <summary>Whether a row id is one of the career's normal attacks (any weapon), so it needs no learning.</summary>
+    public bool IsNormalAttack(int career, int skillId) =>
+        skillId == NormalAttack(career) || JobAttacks(career).Any(a => a.Skill == skillId);
+
+    /// <summary>
+    /// The normal attack for the weapons held (main and off-hand ItemConfig._iSubType, 0 = none), as the client picks
+    /// it; the career's _kSkillNormalID when JobAttackConfig has nothing that fits.
+    /// </summary>
+    public int NormalAttack(int career, int mainType, int offType)
+    {
+        var rows = JobAttacks(career);
+        foreach (var match in new Func<int[], bool>[]
+                 {
+                     w => w.Length == 2 && w[0] == mainType && w[1] == offType,
+                     w => w.Length == 1 && w[0] == mainType && mainType != 0,
+                     w => w.Length == 0,
+                     w => w.Length == 1 && w[0] == 0 && mainType == 0,
+                 })
+            if (rows.FirstOrDefault(r => match(r.Weapons)) is { Skill: > 0 } row && data.Row("SkillConfig", row.Skill) != null)
+                return row.Skill;
+        return NormalAttack(career);
+    }
 
     internal int Rank(int career) => (int)(data.Row("JobConfig", career) is { } job ? Math.Max(1, GameData.Int(job, "_iJobRank")) : 1);
 

@@ -45,6 +45,21 @@ public sealed class GmAccessTests
         Assert.Equal(expected, GmCommands.Allowed(options, account, loopbackTool));
     }
 
+    [Theory]
+    // tool accounts, account, loopback tool, expected
+    [InlineData("aibot*", "aibot07", true, true)]   // a prefix entry
+    [InlineData("aibot*", "AIBOT07", true, true)]
+    [InlineData("aibot*", "aibot07", false, false)] // never GM in game
+    [InlineData("aibot*", "tester", true, false)]
+    [InlineData("helper", "helper", true, true)]    // an exact entry
+    [InlineData("helper", "helper2", true, false)]
+    [InlineData("*", "tester", true, false)]        // a bare * matches nobody
+    public void ToolAccountsOpenOnlyTheLoopbackTool(string tool, string account, bool loopbackTool, bool expected)
+    {
+        var options = new ServerOptions { GmAccounts = ["admin"], GmOpenWhenEmpty = false, GmToolAccounts = tool.Split(',') };
+        Assert.Equal(expected, GmCommands.Allowed(options, account, loopbackTool));
+    }
+
     [Fact]
     public async Task InProductionAnEmptyListRefusesChatGmButTheLoopbackToolStillRuns()
     {

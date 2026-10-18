@@ -108,6 +108,13 @@ public sealed class ServerOptions
     /// </summary>
     public bool? GmOpenWhenEmpty { get; set; }
 
+    /// <summary>
+    /// Accounts the loopback POST /ro3emu/gm may run commands for even when <see cref="GmAccounts"/> lists others
+    /// (operator tooling such as the AI players' setup, docs/guide/ai-bots.md). It grants nothing in game. An entry
+    /// ending in * matches a prefix: "aibot*".
+    /// </summary>
+    public string[] GmToolAccounts { get; set; } = [];
+
     /// <summary>In-game bug reports (FeedbackService, docs/guide/feedback.md).</summary>
     public FeedbackOptions Feedback { get; set; } = new();
 
