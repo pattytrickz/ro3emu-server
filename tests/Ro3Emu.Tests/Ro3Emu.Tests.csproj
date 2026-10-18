@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The quest auto-battle hook's pure logic (the hooks project builds against the client's own DLLs). -->
+    <Compile Include="..\..\src\Ro3Emu.ClientHooks\QuestKillTargets.cs" Link="Linked\QuestKillTargets.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Ro3Emu.Server\Ro3Emu.Server.csproj" />
     <ProjectReference Include="..\..\src\Ro3Emu.Bot\Ro3Emu.Bot.csproj" />
     <ProjectReference Include="..\..\src\Ro3Emu.LoadTest\Ro3Emu.LoadTest.csproj" />

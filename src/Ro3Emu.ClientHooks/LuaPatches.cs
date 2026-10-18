@@ -27,6 +27,8 @@ namespace Ro3Emu.ClientHooks
     /// the season's hidden first week (ServerDayGates).</item>
     /// <item>Map config modules this build does not ship (Dracula's Lair, the territory maps) go into package.loaded
     /// before any scene needs them (MapModules).</item>
+    /// <item>Clicking a quest with a kill objective starts the client's Auto Battle on its monsters once the player
+    /// arrives, and stops it when the kills are done, as the client already does for Ring Tasks (QuestAutoBattle).</item>
     /// </list>
     /// </summary>
     public static class LuaPatches
@@ -97,6 +99,7 @@ namespace Ro3Emu.ClientHooks
                 ServerDayGates.Install(global, functionHelper, Module(manager, global, "lc_conditiondefine"),
                     global.Obf_RuA<Obf_R.Obf_ff>("LC_SeasonHelper") ?? Module(manager, global, "lc_seasonhelper"),
                     global.Obf_RuA<Obf_R.Obf_ff>("LC_SeasonExplorationHelper") ?? Module(manager, global, "lc_seasonexplorationhelper"));
+                QuestAutoBattle.Install(global);
                 Debug.Log("[Ro3Emu.LuaPatches] lc_itemshowfunc: " + added + " card show-func method(s) added; stall name limit "
                     + (param != null ? StallNameMaxLength.ToString() : "not set (publicparamconfig missing)"));
             }
