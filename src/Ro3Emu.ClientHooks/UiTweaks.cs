@@ -45,6 +45,7 @@ namespace Ro3Emu.ClientHooks
                 LuaPatches.Tick();
                 PassChallenges.Tick();
                 PassButton.Tick();
+                QuestAutoBattle.Tick();
             }
             catch (Exception e)
             {
