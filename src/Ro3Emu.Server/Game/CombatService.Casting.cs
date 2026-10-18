@@ -504,13 +504,17 @@ public sealed partial class CombatService
     /// Ends the server's auto-attack and tells the client, which otherwise keeps showing an attack that no longer
     /// runs. The reason is logged (except the ordinary end, a dead target) so a stop can be traced to its cause.
     /// </summary>
-    internal void StopAttack(GameSession s, string reason, SkillInterruptedInfo.Types.SkillInterruptType cause, bool quiet = false)
+    internal void StopAttack(GameSession s, string reason, SkillInterruptedInfo.Types.SkillInterruptType cause, bool quiet = false,
+        bool cancelCast = true)
     {
         if (s.Attack is not { } a) return;
         s.Attack = null;
         if (!quiet) log.LogInformation("{Name} auto-attack on {Target} ended: {Reason}", s.Role?.Name, a.Target.Uid, reason);
-        if (s.SkillCast?.Request.SkillId == a.SkillId)
-            loop.TrackRuntimeDetached("cast cancellation", () => CancelCastAsync(s, cause));
+        if (s.SkillCast is { Cancelled: false } cast && cast.Request.SkillId == a.SkillId)
+        {
+            // A swing in progress follows its own movement rules (PlayerMoved below); it ends, and says so, by itself.
+            if (cancelCast) loop.TrackRuntimeDetached("cast cancellation", () => CancelCastAsync(s, cause));
+        }
         else if (s.Role is { } role)
             loop.TrackRuntimeDetached("skill end send", () => s.SendGameAsync(SkillEnd, new SkillEndNotify
             {
@@ -525,9 +529,13 @@ public sealed partial class CombatService
             && MonsterService.Distance(eventAttack.StartX, eventAttack.StartZ, s.Position.X, s.Position.Z) > 1.5f) eventAttacks.Remove(s);
         if (s.Attack is { } a)
         {
-            if (s.Walking) StopAttack(s, "walked away", SkillInterruptedInfo.Types.SkillInterruptType.Move);
+            // The client casts on reaching range while still walking and sends its stop just after (see below): that
+            // stop is where the attack really started, not a move away from it.
+            if (!s.Walking && s.SkillCast is { StartedWalking: true } arriving && Now - arriving.StartMs <= 300)
+                (a.StartX, a.StartZ) = (s.Position.X, s.Position.Z);
+            else if (s.Walking) StopAttack(s, "walked away", SkillInterruptedInfo.Types.SkillInterruptType.Move, cancelCast: false);
             else if (MonsterService.Distance(a.StartX, a.StartZ, s.Position.X, s.Position.Z) > AttackLeash)
-                StopAttack(s, "moved off", SkillInterruptedInfo.Types.SkillInterruptType.Move);
+                StopAttack(s, "moved off", SkillInterruptedInfo.Types.SkillInterruptType.Move, cancelCast: false);
         }
         if (s.SkillCast is not { } cast || Distance(cast.Origin, s.Position) <= 0.1f || GameData.Int(cast.Row, "_bMovement") != 0) return;
         // The client casts on reaching range and stops 1 ms later (in-game 11.10): that first stop is the cast's real

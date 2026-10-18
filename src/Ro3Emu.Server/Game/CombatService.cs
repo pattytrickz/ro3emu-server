@@ -13,8 +13,9 @@ public sealed class AttackLoop
     public required MonsterUnit Target { get; init; }
     public required int SkillId { get; init; }
     public long NextSwingMs { get; set; }
-    public float StartX { get; init; }
-    public float StartZ { get; init; }
+    /// <summary>Where the loop started: the cast position, or the client's arrival stop right after it.</summary>
+    public float StartX { get; set; }
+    public float StartZ { get; set; }
     /// <summary>When the target was first seen out of reach (0 = in reach); see CombatService.AttackOutOfReachMs.</summary>
     public long OutOfReachSinceMs { get; set; }
 }
