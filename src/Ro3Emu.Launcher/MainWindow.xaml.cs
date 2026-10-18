@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     public MainWindow(LauncherConfig config, string exePath)
     {
         InitializeComponent();
+        Title = config.ServerName;
         _controller = new LauncherController(config, exePath, Post, PickFolder, () => WindowState = WindowState.Minimized);
         SourceInitialized += (_, _) => RoundCorners();
         Loaded += async (_, _) => await InitializeWebAsync();
@@ -41,7 +42,7 @@ public partial class MainWindow : Window
         catch (WebView2RuntimeNotFoundException)
         {
             var answer = MessageBox.Show("The launcher needs the Microsoft Edge WebView2 Runtime, which is not installed on this PC.\n\nOpen the download page?",
-                "RO3Emu", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                Title, MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (answer == MessageBoxResult.Yes) OpenExternal("https://go.microsoft.com/fwlink/p/?LinkId=2124703");
             Application.Current.Shutdown();
             return;
@@ -106,6 +107,9 @@ public partial class MainWindow : Window
         ".js" => "text/javascript; charset=utf-8",
         ".png" => "image/png",
         ".jpg" or ".jpeg" => "image/jpeg",
+        ".webp" => "image/webp",
+        ".svg" => "image/svg+xml",
+        ".ico" => "image/x-icon",
         ".woff2" => "font/woff2",
         _ => "application/octet-stream",
     };

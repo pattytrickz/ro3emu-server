@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The players' launcher: installs/updates the RO3 client patched for our server from a Ro3Emu.Patcher repository
-       (published with `Ro3Emu.ClientTools release`) and starts ro3.exe with the launch proof. -->
+  <!-- The players' launcher. Two ways to get the game (launcher.json "game"):
+       - "repository": installs/updates the RO3 client patched for our server from a Ro3Emu.Patcher repository
+         (published with `Ro3Emu.ClientTools release`);
+       - "publisher": installs/updates the official client from the publisher's update service (as RO3Emu.exe install)
+         and patches it on the player's PC for our server (as RO3Emu.exe join), so the server hosts no game files.
+       Either way it updates itself from the repository and starts ro3.exe with the launch proof. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -22,20 +26,50 @@
     <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
 
+  <!-- A server's own build keeps its settings, page, art and icon outside this repository:
+       -p:LauncherConfigFile=... -p:LauncherUiDir=... -p:LauncherIcon=... -p:Product=... (docs/guide/launcher.md). -->
   <PropertyGroup>
     <LauncherConfigFile Condition="'$(LauncherConfigFile)' == ''">launcher.json</LauncherConfigFile>
+    <LauncherUiDir Condition="'$(LauncherUiDir)' == ''">ui</LauncherUiDir>
+    <!-- -p: values are global and can't be reassigned here, so the normalized paths get their own names. -->
+    <UiDir>$([MSBuild]::EnsureTrailingSlash('$(LauncherUiDir)'))</UiDir>
+    <!-- Ro3Emu.ClientHooks.dll and Ro3Emu.Loc.dll for "publisher" mode: built against a client (tools/release/pack.ps1
+         shows how), or the committed prebuilt ones. -->
+    <ClientDllsDir Condition="'$(ClientDllsDir)' == ''">..\..\prebuilt\client</ClientDllsDir>
+    <ClientDlls>$([MSBuild]::EnsureTrailingSlash('$(ClientDllsDir)'))</ClientDlls>
+    <ApplicationIcon Condition="'$(LauncherIcon)' != ''">$(LauncherIcon)</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <ProjectReference Include="..\Ro3Emu.Patcher\Ro3Emu.Patcher.csproj" />
+    <ProjectReference Include="..\Ro3Emu.DataExport\Ro3Emu.DataExport.csproj" />
+  </ItemGroup>
+
+  <!-- "publisher" mode: the official download (RO3Emu.exe install) and the client patch (RO3Emu.exe join), the same
+       sources Ro3Emu.Setup and Ro3Emu.ClientTools compile. -->
+  <ItemGroup>
+    <!-- Those sources expect the console SDK's implicit usings, which WPF projects leave out. -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
+    <Compile Include="..\Ro3Emu.Setup\Install\ClientInstaller.cs" Link="Shared\ClientInstaller.cs" />
+    <Compile Include="..\Ro3Emu.Setup\Install\PublisherConfig.cs" Link="Shared\PublisherConfig.cs" />
+    <Compile Include="..\Ro3Emu.Setup\Install\ReleaseManifest.cs" Link="Shared\ReleaseManifest.cs" />
+    <Compile Include="..\Ro3Emu.Setup\SetupException.cs" Link="Shared\SetupException.cs" />
+    <Compile Include="..\Ro3Emu.ClientTools\ClientPatcher.cs" Link="Shared\ClientPatcher.cs" />
+    <Compile Include="..\Ro3Emu.ClientTools\TextSink.cs" Link="Shared\TextSink.cs" />
+    <Compile Include="..\Ro3Emu.ClientTools\ImageSwapPatch.cs" Link="Shared\ImageSwapPatch.cs" />
+    <EmbeddedResource Include="..\Ro3Emu.Loc\translations\*.tsv" LogicalName="translations/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(ClientDlls)Ro3Emu.ClientHooks.dll" LogicalName="Ro3Emu.ClientHooks.dll" Condition="Exists('$(ClientDlls)Ro3Emu.ClientHooks.dll')" />
+    <EmbeddedResource Include="$(ClientDlls)Ro3Emu.Loc.dll" LogicalName="Ro3Emu.Loc.dll" Condition="Exists('$(ClientDlls)Ro3Emu.Loc.dll')" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The shipped settings live in the exe; a launcher.json beside it still wins. -->
     <EmbeddedResource Include="$(LauncherConfigFile)" LogicalName="launcher.json" />
-    <!-- The page (ui/index.html + app.css/js + assets), served to WebView2 from the exe. -->
-    <EmbeddedResource Include="ui\**\*" LogicalName="ui/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <!-- The page (index.html + app.css/js + assets), served to WebView2 from the exe. -->
+    <EmbeddedResource Include="$(UiDir)**\*" LogicalName="ui/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
