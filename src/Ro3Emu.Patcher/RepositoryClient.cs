@@ -48,6 +48,10 @@ public sealed class RepositoryClient : IDisposable
 
     public async Task<(Manifest Manifest, byte[] Raw)> GetManifestAsync(ChannelInfo channel, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(channel.Manifest))
+        {
+            throw new PatcherException($"Channel '{channel.Channel}' has no game release on the update server.");
+        }
         PathRules.ValidateRelative(channel.Manifest);
         byte[] raw = await _http.GetByteArrayAsync(channel.Manifest, ct);
         if (!string.Equals(Hashing.Sha256Hex(raw), channel.ManifestSha256, StringComparison.OrdinalIgnoreCase))

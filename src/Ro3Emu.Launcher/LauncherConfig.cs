@@ -11,6 +11,16 @@ public sealed class LauncherConfig
     [JsonPropertyName("channel")] public string Channel { get; set; } = "test";
     [JsonPropertyName("server")] public string? Server { get; set; }
     [JsonPropertyName("serverName")] public string ServerName { get; set; } = "RO3Emu";
+    /// <summary>
+    /// "repository": the patched client comes from the repository. "publisher": the official client comes from the
+    /// publisher's update service and is patched on this PC for <see cref="Server"/>; the repository then only carries
+    /// launcher updates and news.
+    /// </summary>
+    [JsonPropertyName("game")] public string Game { get; set; } = "repository";
+    /// <summary>Buttons on the page (website, Discord, ...): label, url and an optional icon name the page knows.</summary>
+    [JsonPropertyName("links")] public List<LauncherLink> Links { get; set; } = new();
+
+    public bool PublisherGame => string.Equals(Game, "publisher", StringComparison.OrdinalIgnoreCase);
 
     static readonly JsonSerializerOptions Options = new() { ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
@@ -29,10 +39,21 @@ public sealed class LauncherConfig
     }
 }
 
-/// <summary>Per-user choices (%APPDATA%\RO3Emu\launcher-settings.json): only the client folder so far.</summary>
+public sealed class LauncherLink
+{
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("url")] public string Url { get; set; } = "";
+    [JsonPropertyName("icon")] public string? Icon { get; set; }
+}
+
+/// <summary>Per-user choices and records (%APPDATA%\RO3Emu\launcher-settings.json).</summary>
 public sealed class UserSettings
 {
     [JsonPropertyName("clientDirectory")] public string? ClientDirectory { get; set; }
+    /// <summary>"publisher" mode: the publisher's release sequence each game folder was last installed or checked at.</summary>
+    [JsonPropertyName("installedSequence")] public Dictionary<string, long> InstalledSequence { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>"publisher" mode: what each game folder was last patched with (see PublisherGame.PatchStamp).</summary>
+    [JsonPropertyName("patchStamp")] public Dictionary<string, string> PatchStamp { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RO3Emu", "launcher-settings.json");
 

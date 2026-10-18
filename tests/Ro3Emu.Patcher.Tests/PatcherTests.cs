@@ -343,6 +343,73 @@ public sealed class PatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task LauncherOnlyChannel_CarriesTheLauncherAndNoGame()
+    {
+        string exe = Path.Combine(_root, "launcher.exe");
+        File.WriteAllBytes(exe, Random(5000, 63));
+        await Publisher.PublishLauncherAsync(Repo, "live", exe, "1.1.0");
+
+        using var client = new RepositoryClient(new Uri("http://repo.test/"), new FileRepoHandler(Repo));
+        var channel = await client.GetChannelAsync("live", CancellationToken.None);
+        Assert.Equal("1.1.0", channel.Launcher?.Version);
+        Assert.Equal(File.ReadAllBytes(exe), await client.TryGetBytesAsync(channel.Launcher!.Url, CancellationToken.None));
+        var error = await Assert.ThrowsAsync<PatcherException>(() => client.GetManifestAsync(channel, CancellationToken.None));
+        Assert.Contains("no game release", error.Message);
+    }
+
+    [Fact]
+    public async Task LauncherSelfUpdate_ReplacesTheExeAndCleansUpTheOldBuild()
+    {
+        string current = Path.Combine(_root, "current.exe"), next = Path.Combine(_root, "next.exe");
+        byte[] oldBytes = Random(1000, 91), newBytes = Random(2000, 92);
+        File.WriteAllBytes(current, oldBytes);
+        File.WriteAllBytes(next, newBytes);
+        var channel = await Publisher.PublishLauncherAsync(Repo, "live", next, "1.1.0");
+        using var client = new RepositoryClient(new Uri("https://repo.test/"), new FileRepoHandler(Repo));
+
+        Assert.True(await SelfUpdate.ApplyAsync(client, channel.Launcher!, "1.0.0", current, CancellationToken.None));
+        Assert.Equal(newBytes, File.ReadAllBytes(current));
+        Assert.Equal(oldBytes, File.ReadAllBytes(current + ".old"));
+        SelfUpdate.DeleteLeftovers(current);
+        Assert.False(File.Exists(current + ".old"));
+        Assert.False(File.Exists(current + ".new"));
+    }
+
+    [Fact]
+    public async Task LauncherSelfUpdate_DamagedDownloadKeepsTheWorkingExe()
+    {
+        string current = Path.Combine(_root, "current.exe"), next = Path.Combine(_root, "next.exe");
+        byte[] original = Random(1000, 93);
+        File.WriteAllBytes(current, original);
+        File.WriteAllBytes(next, Random(2000, 94));
+        var channel = await Publisher.PublishLauncherAsync(Repo, "live", next, "1.1.0");
+        File.AppendAllText(Path.Combine(Repo, channel.Launcher!.Url), "damaged");
+        using var client = new RepositoryClient(new Uri("https://repo.test/"), new FileRepoHandler(Repo));
+
+        Assert.False(await SelfUpdate.ApplyAsync(client, channel.Launcher, "1.0.0", current, CancellationToken.None));
+        Assert.Equal(original, File.ReadAllBytes(current));
+        Assert.False(File.Exists(current + ".old"));
+        Assert.False(File.Exists(current + ".new"));
+    }
+
+    [Theory]
+    [InlineData("1.1.0")]
+    [InlineData("1.2.0")]
+    public async Task LauncherSelfUpdate_SameOrOlderReleaseKeepsTheWorkingExe(string currentVersion)
+    {
+        string current = Path.Combine(_root, "current.exe"), next = Path.Combine(_root, "next.exe");
+        byte[] original = Random(1000, 95);
+        File.WriteAllBytes(current, original);
+        File.WriteAllBytes(next, Random(2000, 96));
+        var channel = await Publisher.PublishLauncherAsync(Repo, "live", next, "1.1.0");
+        using var client = new RepositoryClient(new Uri("https://repo.test/"), new FileRepoHandler(Repo));
+
+        Assert.False(await SelfUpdate.ApplyAsync(client, channel.Launcher!, currentVersion, current, CancellationToken.None));
+        Assert.Equal(original, File.ReadAllBytes(current));
+        Assert.False(File.Exists(current + ".old"));
+    }
+
+    [Fact]
     public async Task DataFolderElsewhere_InstallsAndPatchesThere()
     {
         _dataDir = Path.Combine(_root, "otherdrive", "GameData");

@@ -240,7 +240,10 @@ public static class Publisher
         return channel;
     }
 
-    /// <summary>Publishes a launcher exe (launcher/&lt;version&gt;/) and points the channel's launcher field at it.</summary>
+    /// <summary>
+    /// Publishes a launcher exe (launcher/&lt;version&gt;/) and points the channel's launcher field at it, creating a
+    /// launcher-only channel when it has no game release.
+    /// </summary>
     public static async Task<ChannelInfo> PublishLauncherAsync(string repoDirectory, string channelName, string exePath, string version, CancellationToken ct = default)
     {
         if (!Version.TryParse(version, out _))
@@ -248,13 +251,14 @@ public static class Publisher
             throw new ArgumentException($"Launcher version must look like 1.2.3, got '{version}'.");
         }
         string repo = Path.GetFullPath(repoDirectory);
+        Directory.CreateDirectory(repo);
         using var repoLock = AcquireLock(repo);
         string channelPath = Path.Combine(repo, "channels", channelName + ".json");
-        if (!File.Exists(channelPath))
-        {
-            throw new InvalidOperationException($"Channel '{channelName}' has no release yet; publish the game first.");
-        }
-        var channel = JsonSerializer.Deserialize<ChannelInfo>(await File.ReadAllBytesAsync(channelPath, ct), Json.Compact)!;
+        // A channel without a game release carries only the launcher: launchers that get the game from the publisher
+        // (launcher.json "game": "publisher") read nothing else from it.
+        var channel = File.Exists(channelPath)
+            ? JsonSerializer.Deserialize<ChannelInfo>(await File.ReadAllBytesAsync(channelPath, ct), Json.Compact)!
+            : new ChannelInfo { Channel = channelName, Published = DateTimeOffset.UtcNow };
         byte[] exe = await File.ReadAllBytesAsync(exePath, ct);
         string relative = $"launcher/{version}/Ro3EmuLauncher.exe";
         string target = Path.Combine(repo, relative);

@@ -41,6 +41,30 @@ local repository.
 
 Set `repository` to the public URL of your repository folder and `server` to your game server's public HTTP address.
 
+### Download the game from the publisher
+
+Set `"game": "publisher"` to download the official game directly from its publisher instead of hosting game files.
+The patch repository then carries only launcher builds, its channel pointer, and news. Publishing a launcher creates
+a launcher-only channel automatically; no game manifest is needed. The default, `"game": "repository"`, keeps the
+client distribution described below.
+
+In publisher mode, the launcher finds an existing installation or offers a new folder, verifies signed publisher
+manifests, resumes downloads, and patches the game locally before Play. Hooks, the localization DLL and translation
+overrides travel inside the launcher. A launcher update therefore delivers client fixes; the English map is generated
+from the player's own game files. Original game DLLs remain in `ro3emu-backup`. A changed server key, embedded patch
+resources, or installed DLL makes the launcher patch again. Close the game before updating or repairing it.
+
+Keep each server's branding outside the source repository. Build with `-p:Version=<version>`,
+`-p:LauncherConfigFile=<absolute json path>`, `-p:LauncherUiDir=<absolute ui folder>`,
+`-p:LauncherIcon=<absolute ico path>` and `-p:ClientDllsDir=<absolute folder>` (containing
+`Ro3Emu.ClientHooks.dll` and `Ro3Emu.Loc.dll`). Compile those two DLLs against the client's original managed DLLs
+using `-p:ClientManaged=<folder>` and use `-p:Ro3EmuNoClientData=true` for Loc so game-derived text is not embedded.
+The same properties are needed when building ClientTools to run `release-launcher`.
+
+Windows 10/11 and Microsoft Edge WebView2 are required; the launcher offers Microsoft's runtime download page
+when WebView2 is absent. .NET itself is bundled. Unsigned builds can trigger Windows publisher/reputation warnings.
+The launcher executable and its config contain the server address; account approval remains a server-side rule.
+
 ## Releasing
 
 All commands below use placeholders: `<client dir>` is a clean official RO3 PC install (the folder with `ro3.exe`),
