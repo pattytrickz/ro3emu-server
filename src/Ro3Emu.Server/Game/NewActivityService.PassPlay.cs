@@ -302,6 +302,12 @@ public sealed partial class NewActivityService
 
         var grants = new List<AwardGrant>();
         if (crystals > 0) grants.Add(new AwardGrant(F2PRules.Crystal, checked((int)crystals)));
+        // Supporters (AccessList "supporter") earn Supporter Tokens 1:1 with these Crystals; earned tokens are theirs to keep.
+        if (crystals > 0 && access.IsSupporter(session.Account))
+        {
+            grants.Add(new AwardGrant(F2PRules.SupporterToken, checked((int)crystals)));
+            notices.Add($"Supporter bonus: +{crystals} Supporter Tokens");
+        }
         if (jerky > 0) grants.Add(new AwardGrant(F2PRules.MeowFishJerky, checked((int)jerky)));
         foreach (var drop in drops)
         {

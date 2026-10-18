@@ -18,14 +18,14 @@ namespace Ro3Emu.Shared
 
         /// <summary>
         /// ItemConfig 4 "Credit Points": a currency nothing in the data grants or spends (trade credit is a separate
-        /// score), renamed by the client hook. Admins grant it to supporters ("!item 4 n"); it buys only the Supporter
-        /// cosmetics below, never anything with stats.
+        /// score), renamed by the client hook. Supporters earn it 1:1 with the Crystals they earn in play (admins can also
+        /// grant it, "!item 4 n"); it buys only the Supporter cosmetics below, never anything with stats.
         /// </summary>
         public const int SupporterToken = 4;
         public const long SupporterTokenNameText = 12390000245, SupporterTokenDescriptionText = 12390100004;
         public const string SupporterTokenName = "Supporter Token";
         public const string SupporterTokenDescription =
-            "A thank-you for supporting the server. Buys Supporter cosmetics in the Fashion tab; it has no other use.";
+            "A thank-you for supporting the server: supporters earn one with every Crystal. Buys Supporter cosmetics in the Fashion tab; it has no other use.";
 
         /// <summary>ItemConfig 3/16 _iDescription: says where Crystals come from on this realm.</summary>
         public const long CrystalDescriptionText = 12390100003;
@@ -72,10 +72,11 @@ namespace Ro3Emu.Shared
             new Commodity(5000002, 450, Lifetime, 0), new Commodity(5000003, 450, Lifetime, 0), new Commodity(5000004, 450, Lifetime, 0),
             new Commodity(5000005, 450, Lifetime, 0), new Commodity(5000006, 450, Lifetime, 0),  // outfit sets (1880)
             new Commodity(5000007, 160, Lifetime, 0),                                            // outfit set (680)
-            // Supporter cosmetics: the four 2380 mounts and the character effect, for Supporter Tokens only.
-            new Commodity(5000008, 5, Lifetime, 0, SupporterToken), new Commodity(5000012, 5, Lifetime, 0, SupporterToken),
-            new Commodity(5000013, 5, Lifetime, 0, SupporterToken), new Commodity(5000014, 5, Lifetime, 0, SupporterToken),
-            new Commodity(5000037, 3, Lifetime, 0, SupporterToken),
+            // Supporter cosmetics: the four 2380 mounts and the character effect, for Supporter Tokens only. Supporters earn
+            // tokens 1:1 with their Crystals (server AccessList "supporter"), so the prices are on the Crystal scale.
+            new Commodity(5000008, 600, Lifetime, 0, SupporterToken), new Commodity(5000012, 600, Lifetime, 0, SupporterToken),
+            new Commodity(5000013, 600, Lifetime, 0, SupporterToken), new Commodity(5000014, 600, Lifetime, 0, SupporterToken),
+            new Commodity(5000037, 320, Lifetime, 0, SupporterToken),
             new Commodity(5000009, 500, Lifetime, 0), new Commodity(5000010, 500, Lifetime, 0), new Commodity(5000011, 500, Lifetime, 0), // mounts (1980)
             new Commodity(5000038, 250, Lifetime, 0),                                            // mount (980)
             new Commodity(5000015, 120, Lifetime, 0),                                            // hairstyle (480)

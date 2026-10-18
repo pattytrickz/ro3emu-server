@@ -125,6 +125,36 @@ public sealed class F2PTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task SupportersEarnSupporterTokensOneForOneWithCrystalsAndKeepThem()
+    {
+        var access = Service<Ro3Emu.Server.Accounts.AccessList>();
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        Assert.Contains("is a supporter", access.Run("supporter alice"));
+        foreach (var bot in new[] { alice, bob })
+        {
+            await Service<NewActivityService>().ReconcileAsync(Session(bot));
+            await Event(bot, []);
+        }
+        Task<long> Tokens(BotClient bot) => OnLoop(() => Service<CharacterService>().CountOf(Session(bot), F2PRules.SupporterToken));
+
+        // An MVP fight pays 20 Crystals to both; only the supporter also gets 20 tokens.
+        long aliceCrystals = await Crystals(alice), bobCrystals = await Crystals(bob);
+        await Event(alice, [(NewActivityService.PassGoal.Mvps, 1)], mvps: 1);
+        await Event(bob, [(NewActivityService.PassGoal.Mvps, 1)], mvps: 1);
+        Assert.Equal(aliceCrystals + F2PRules.MvpCrystals, await Crystals(alice));
+        Assert.Equal(bobCrystals + F2PRules.MvpCrystals, await Crystals(bob));
+        Assert.Equal(F2PRules.MvpCrystals, await Tokens(alice));
+        Assert.Equal(0, await Tokens(bob));
+
+        // No longer a supporter: new Crystals bring no tokens, the earned ones stay.
+        access.Run("unsupporter alice");
+        await Event(alice, [(NewActivityService.PassGoal.Mvps, 1)], mvps: 1);
+        Assert.Equal(aliceCrystals + 2 * F2PRules.MvpCrystals, await Crystals(alice));
+        Assert.Equal(F2PRules.MvpCrystals, await Tokens(alice));
+    }
+
+    [ClientDataFact]
     public async Task WithoutF2PTheChallengesPayPassExpOnly()
     {
         F2P.Enabled = false;
@@ -178,10 +208,10 @@ public sealed class F2PTests : IAsyncLifetime
         Assert.NotEqual(0, (await Buy(alice, SupporterMount)).Result);
         Assert.Equal(crystals, await Crystals(alice));
 
-        await Gm(alice, $"!item {F2PRules.SupporterToken} 7");
+        await Gm(alice, $"!item {F2PRules.SupporterToken} 700");
         var bought = await Buy(alice, SupporterMount);
-        Assert.Equal((0, 5), (bought.Result, bought.Price));
-        Assert.Equal(2, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.SupporterToken)));
+        Assert.Equal((0, 600), (bought.Result, bought.Price));
+        Assert.Equal(100, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.SupporterToken)));
         Assert.Equal(crystals, await Crystals(alice));
         Assert.True(await OnLoop(() => Session(alice).Wardrobe!.AllLightUpAppearances.ContainsKey(SupporterMountLook)));
     }

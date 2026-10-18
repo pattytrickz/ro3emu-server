@@ -8,7 +8,8 @@ namespace Ro3Emu.Server.Accounts;
 /// server always did. "approved": a new name registers only after an admin approved it (GM "!access approve name", or
 /// POST /ro3emu/access from the host); the approval is used up by that registration. In either mode a blocked name is
 /// refused, existing accounts included, and "reset" lets the next login of an existing name set a new password (the
-/// admin never sees one). Kept in data/access.json; names compare case-insensitively.
+/// admin never sees one). "supporter" marks an account that earns Supporter Tokens alongside its Crystals
+/// (NewActivityService.PassPlay). Kept in data/access.json; names compare case-insensitively.
 /// </summary>
 public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessList> log)
 {
@@ -17,6 +18,15 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
         public List<string> Approved { get; set; } = new();
         public List<string> Blocked { get; set; } = new();
         public List<string> Reset { get; set; } = new();
+        /// <summary>Accounts that earn Supporter Tokens alongside their Crystals (F2PRules.SupporterToken).</summary>
+        public List<string> Supporters { get; set; } = new();
+    }
+
+    /// <summary>The account earns Supporter Tokens 1:1 with the Crystals it earns in play.</summary>
+    public bool IsSupporter(string? account)
+    {
+        if (account == null) return false;
+        lock (_sync) return Has(Load().Supporters, account);
     }
 
     private readonly object _sync = new();
@@ -72,7 +82,7 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
         }
     }
 
-    public const string Usage = "approve|unapprove|block|unblock|reset <name> | list";
+    public const string Usage = "approve|unapprove|block|unblock|reset|supporter|unsupporter <name> | list";
 
     /// <summary>"approve name", "block name", "list"...: the admin side, shared by the GM command and the host's HTTP tool.</summary>
     public string Run(string line)
@@ -85,6 +95,7 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
             if (verb == "list" || parts.Length < 2)
                 return $"Registration {(ApprovalRequired ? "needs approval" : "is open")}. Approved (not yet registered): "
                     + Names(state.Approved) + ". Blocked: " + Names(state.Blocked) + ". Password reset pending: " + Names(state.Reset)
+                    + ". Supporters: " + Names(state.Supporters)
                     + ". Usage: " + Usage;
             string name = parts[1];
             if (name.Length > 64 || name.Any(char.IsWhiteSpace)) return "Names have no spaces and at most 64 characters.";
@@ -110,6 +121,14 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
                 case "reset":
                     if (!Has(state.Reset, name)) state.Reset.Add(name);
                     reply = $"{name}'s next login sets a new password (whatever they type then).";
+                    break;
+                case "supporter":
+                    if (!Has(state.Supporters, name)) state.Supporters.Add(name);
+                    reply = $"{name} is a supporter: they now earn Supporter Tokens with every Crystal they earn.";
+                    break;
+                case "unsupporter":
+                    state.Supporters.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+                    reply = $"{name} is no longer a supporter: tokens already earned stay, new ones stop.";
                     break;
                 default:
                     return "Usage: " + Usage;
