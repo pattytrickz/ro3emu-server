@@ -36,6 +36,7 @@ public sealed class SceneView
     private const int HpId = 2000, MaxHpId = 101, LevelId = 2002, SpeedId = 113;
     private readonly object _lock = new();
     private readonly Dictionary<ulong, Unit> _units = new();
+    private readonly Dictionary<long, int> _bag = new();
     private readonly Channel<ViewEvent> _events = Channel.CreateBounded<ViewEvent>(
         new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.DropOldest });
 
@@ -51,6 +52,9 @@ public sealed class SceneView
     public float X, Y, Z;
     public long Hp = 1, MaxHp = 1, Level = 1, Speed = 550;
     public bool Dead;
+    /// <summary>The bot's job (its entity template), and the last GM tool reply it was shown (the marquee).</summary>
+    public int Career;
+    public string LastNotice = "";
     /// <summary>The monster that last hit the bot, and when.</summary>
     public ulong LastAttacker;
     public DateTime LastHitUtc;
@@ -83,6 +87,7 @@ public sealed class SceneView
                     SelfUid = self.Uuid;
                     if (self.MovementInfo?.Pos is { } p) (X, Y, Z) = (p.X, p.Y, p.Z);
                     Dead = self.State == EntityState.Dead;
+                    if (self.EntityTemplateID != 0) Career = (int)self.EntityTemplateID;
                     foreach (var prop in self.Property) ApplySelf(prop.Idx, prop.Data);
                 }
                 break;
@@ -125,7 +130,11 @@ public sealed class SceneView
                 lock (_lock)
                     foreach (var b in change.Bases)
                     {
-                        if (b.Uuid == SelfUid) Dead = b.State == EntityState.Dead;
+                        if (b.Uuid == SelfUid)
+                        {
+                            Dead = b.State == EntityState.Dead;
+                            if (b.EntityTemplateID != 0) Career = (int)b.EntityTemplateID; // 31049 after a job change
+                        }
                         else if (_units.TryGetValue(b.Uuid, out var unit)) unit.Dead = b.State == EntityState.Dead;
                     }
                 break;
@@ -149,6 +158,16 @@ public sealed class SceneView
                 var msg = Tencent.IM.NotifyNewTextChatMessage.Parser.ParseFrom(body.AsSpan(8)).Msg;
                 if (msg != null && long.TryParse(msg.SenderId, out long sender))
                     _events.Writer.TryWrite(new ChatHeard(sender, msg.ReceiveId, msg.Content));
+                break;
+            case CharacterService.ItemsSync:
+                // 5009 is a dataset increment: every item it adds or rewrites appears whole as an ItemBaseInfo.
+                var items = new List<ItemBaseInfo>();
+                CollectItems(DBItemsInfoIncrement.Parser.ParseFrom(body), items);
+                lock (_lock) foreach (var item in items) if (item.ItemGuid != 0) _bag[item.ItemGuid] = item.ItemEntry;
+                break;
+            case GmCommands.BroadcastNotify:
+                string notice = BroadCastNotify.Parser.ParseFrom(body).Content;
+                lock (_lock) LastNotice = notice;
                 break;
             case TeamService.TeamNotifyInvitee:
                 var invite = NotifyInvitee.Parser.ParseFrom(body);
@@ -186,6 +205,29 @@ public sealed class SceneView
             case MaxHpId: unit.MaxHp = Math.Max(1, value); break;
             case LevelId: unit.Level = value; break;
         }
+    }
+
+    private static void CollectItems(Google.Protobuf.IMessage message, List<ItemBaseInfo> into)
+    {
+        if (message is ItemBaseInfo item) { into.Add(item); return; }
+        foreach (var field in message.Descriptor.Fields.InFieldNumberOrder())
+        {
+            if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message) continue;
+            var value = field.Accessor.GetValue(message);
+            if (field.IsMap)
+            {
+                foreach (var entry in (System.Collections.IDictionary)value)
+                    if (((System.Collections.DictionaryEntry)entry).Value is Google.Protobuf.IMessage m) CollectItems(m, into);
+            }
+            else if (field.IsRepeated) { foreach (var m in (System.Collections.IEnumerable)value) if (m is Google.Protobuf.IMessage child) CollectItems(child, into); }
+            else if (value is Google.Protobuf.IMessage child) CollectItems(child, into);
+        }
+    }
+
+    /// <summary>Bag item guids holding <paramref name="entry"/>.</summary>
+    public long[] Guids(int entry)
+    {
+        lock (_lock) return _bag.Where(p => p.Value == entry).Select(p => p.Key).ToArray();
     }
 
     public Unit[] Units(int type)

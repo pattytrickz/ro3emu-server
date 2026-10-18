@@ -22,6 +22,9 @@ void SaveRoster() { lock (rosterLock) Json.WritePrivate(rosterPath, roster); }
 using var http = new HttpClient { BaseAddress = new Uri(options.Server), Timeout = TimeSpan.FromSeconds(15) };
 string pem = await http.GetStringAsync("/ro3emu/metrics/public-key");
 var atlas = new Atlas(options);
+var progression = new Progression(atlas.Data);
+if (Planner.Plan(roster, progression, new Random())) SaveRoster();
+var gm = new GmTool(options.Server, Log);
 Log($"{atlas.HuntMaps.Count} hunting maps: {string.Join(", ", atlas.HuntMaps.OrderBy(m => m.MinLevel).Select(m => $"{m.Name} {m.MinLevel}-{m.MedianLevel}"))}");
 var hub = new ChatHub(options.Chat, new ChatModel(options.Llm, options.Directory, Log));
 var crowd = new Crowd();
@@ -31,7 +34,7 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
 using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, c => { c.Cancel = true; stop.Cancel(); });
 
 var bots = roster.Take(options.Count)
-    .Select(entry => new AiBot(entry, options, atlas, hub, crowd, pem, Log, SaveRoster)).ToArray();
+    .Select(entry => new AiBot(entry, options, atlas, progression, gm, hub, crowd, pem, Log, SaveRoster)).ToArray();
 Log($"starting {bots.Length} bot(s) against {options.Server}");
 var running = bots.Select(async (bot, i) =>
 {

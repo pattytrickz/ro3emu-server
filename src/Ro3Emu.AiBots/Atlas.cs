@@ -27,6 +27,8 @@ public sealed class Atlas
         _huntMaps = new(LoadHuntMaps);
     }
 
+    public GameData Data => _data;
+
     public MapWorld? Map(long sceneEntry) => _world.Map(sceneEntry);
 
     public string MapName(long sceneEntry)
@@ -55,7 +57,7 @@ public sealed class Atlas
 
     /// <summary>Fields a bot of <paramref name="level"/> can take on, best level match first.</summary>
     public IEnumerable<HuntMap> Fitting(long level) =>
-        HuntMaps.Where(m => m.MinLevel <= level + 2).OrderBy(m => Math.Abs(m.MedianLevel - (level - 1)));
+        HuntMaps.Where(m => m.MinLevel <= level).OrderBy(m => Math.Abs(m.MedianLevel - (level - 6)));
 
     private IReadOnlyList<HuntMap> LoadHuntMaps()
     {

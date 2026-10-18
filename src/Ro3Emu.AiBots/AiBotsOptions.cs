@@ -80,10 +80,20 @@ public sealed class LlmOptions
     /// <summary>Off: canned lines only.</summary>
     public bool Enabled { get; set; } = true;
 
-    public string Model { get; set; } = "claude-opus-5-5";
+    /// <summary>"openrouter" (OpenRouter's chat completions, its model names) or "anthropic" (the Claude API).</summary>
+    public string Provider { get; set; } = "openrouter";
 
-    /// <summary>A file holding only the Anthropic API key (chmod 600). ANTHROPIC_API_KEY wins when set.</summary>
-    public string ApiKeyFile { get; set; } = "anthropic.key";
+    /// <summary>Empty: anthropic/claude-opus-5.5 on OpenRouter, claude-opus-5-5 on the Claude API.</summary>
+    public string Model { get; set; } = "";
+
+    /// <summary>
+    /// A file holding only the API key (chmod 600), relative to the config: empty means openrouter.key or
+    /// anthropic.key. OPENROUTER_API_KEY / ANTHROPIC_API_KEY win when set.
+    /// </summary>
+    public string ApiKeyFile { get; set; } = "";
+
+    /// <summary>OpenRouter's API base (a test can point it elsewhere).</summary>
+    public string OpenRouterUrl { get; set; } = "https://openrouter.ai/api/v1/";
 
     /// <summary>Model calls per UTC day across all bots; past it the bots fall back to canned lines.</summary>
     public int MaxCallsPerDay { get; set; } = 400;
@@ -100,6 +110,45 @@ public sealed class RosterEntry
     public int Sex { get; set; } = 1;
     public int Persona { get; set; }
     public bool Town { get; set; }
+
+    /// <summary>The job the bot grows into (Planner), and the base level it starts at when the GM tool is available.</summary>
+    public int Job { get; set; }
+    public int Level { get; set; }
+
+    /// <summary>The first job of its line (decided even for a bot that starts as a Novice): its stats follow it.</summary>
+    public int FirstJob { get; set; }
+
+    /// <summary>The bot's level when it last got gear (0: never); it gets better gear every 15 levels.</summary>
+    public int GearLevel { get; set; }
+
+    /// <summary>ItemConfig._iSubType of the weapon it was given (0: none), which picks its normal attack.</summary>
+    public int WeaponType { get; set; }
+}
+
+/// <summary>
+/// Spreads the bots over the whole game: starting levels evenly from 1 to <see cref="MaxLevel"/> (each bot a random
+/// spot in its own slice), the first jobs dealt round-robin, then the highest rank the level allows down a random branch.
+/// </summary>
+public static class Planner
+{
+    public const int MaxLevel = 95;
+
+    public static bool Plan(IList<RosterEntry> roster, Progression progression, Random random)
+    {
+        var unplanned = roster.Where(e => e.Job == 0).ToList();
+        if (unplanned.Count == 0) return false;
+        var slices = Enumerable.Range(0, unplanned.Count).OrderBy(_ => random.Next()).ToArray();
+        var firsts = progression.FirstJobs.OrderBy(_ => random.Next()).ToArray();
+        for (int i = 0; i < unplanned.Count; i++)
+        {
+            var e = unplanned[i];
+            e.Level = Math.Clamp((int)((slices[i] + random.NextDouble()) / unplanned.Count * MaxLevel) + 1, 1, MaxLevel);
+            int rank = Progression.RankFor(e.Level);
+            e.FirstJob = firsts[i % firsts.Length];
+            e.Job = rank <= 1 ? Progression.Novice : progression.PlanJob(e.FirstJob, rank, e.Sex, random);
+        }
+        return true;
+    }
 }
 
 public static class Roster

@@ -12,8 +12,7 @@ namespace Ro3Emu.AiBots;
 /// </summary>
 public sealed class AiBot
 {
-    private const int BasicAttack = 1000001;
-    private const float AttackRange = 2f, PlayerBuffer = 6f, SightRange = 35f;
+    private const float PlayerBuffer = 6f, SightRange = 35f;
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(200);
 
     private readonly RosterEntry _entry;
@@ -21,6 +20,8 @@ public sealed class AiBot
     private readonly Atlas _atlas;
     private readonly ChatHub _hub;
     private readonly Crowd _crowd;
+    private readonly Progression _progression;
+    private readonly GmTool _gm;
     private readonly string _pem;
     private readonly Action<string> _log;
     private readonly Action _saveRoster;
@@ -40,16 +41,22 @@ public sealed class AiBot
     private DateTime _idleUntil, _nextMapCheck, _nextSwing, _restUntil, _pathAt;
     private DateTime? _deadSince;
     private ulong _target, _locked;
-    private int _refusals, _badSteps;
+    private int _refusals, _badSteps, _attackRefusals, _statsLevel;
+    private DateTime _nextGrow, _lastDeath;
+    private readonly Queue<DateTime> _deaths = new();
+    private int _handicap;
+    private bool _tooHard;
     private bool _resting;
     private readonly Dictionary<ulong, DateTime> _avoid = new();
     private long _leader;
     private DateTime _leaderSeen;
     private string _activity = "just arrived";
 
-    public AiBot(RosterEntry entry, AiBotsOptions options, Atlas atlas, ChatHub hub, Crowd crowd, string pem, Action<string> log, Action saveRoster)
+    public AiBot(RosterEntry entry, AiBotsOptions options, Atlas atlas, Progression progression, GmTool gm, ChatHub hub, Crowd crowd,
+        string pem, Action<string> log, Action saveRoster)
     {
-        (_entry, _options, _atlas, _hub, _crowd, _pem, _saveRoster) = (entry, options, atlas, hub, crowd, pem, saveRoster);
+        (_entry, _options, _atlas, _progression, _gm, _hub, _crowd, _pem, _saveRoster) =
+            (entry, options, atlas, progression, gm, hub, crowd, pem, saveRoster);
         _log = line => log($"{entry.Name}: {line}");
         _talker = NewTalker();
     }
@@ -58,7 +65,7 @@ public sealed class AiBot
     public bool Online { get; private set; }
 
     public string Status => Online
-        ? $"{_entry.Name} lv{_view.Level} {_atlas.MapName(_view.SceneEntry)} ({_view.X:F0},{_view.Z:F0}) hp {_view.Hp}/{_view.MaxHp}: {_activity}"
+        ? $"{_entry.Name} lv{_view.Level} {_progression.JobName(_view.Career)} {_atlas.MapName(_view.SceneEntry)} ({_view.X:F0},{_view.Z:F0}) hp {_view.Hp}/{_view.MaxHp}: {_activity}"
         : $"{_entry.Name} offline";
 
     private Talker NewTalker() => new(_hub, Personas.Of(_entry.Persona), _entry.Name,
@@ -111,6 +118,8 @@ public sealed class AiBot
 
         using var session = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var heartbeat = HeartbeatAsync(session.Token);
+        try { await SetupAsync(); }
+        catch (Exception e) when (e is TimeoutException or InvalidOperationException) { _log($"setup incomplete: {e.Message}"); }
         try { await BrainAsync(session.Token); }
         finally
         {
@@ -186,6 +195,7 @@ public sealed class AiBot
             else if (_entry.Town) await TownAsync();
             else await HuntAsync();
             await StepAsync();
+            await GrowAsync();
             await AmbientAsync();
         }
     }
@@ -263,7 +273,16 @@ public sealed class AiBot
             _target = _locked = 0;
             _resting = false;
             _activity = "just got knocked out";
-            _log("died");
+            _deaths.Enqueue(DateTime.UtcNow);
+            while (_deaths.Count > 0 && DateTime.UtcNow - _deaths.Peek() > TimeSpan.FromMinutes(5)) _deaths.Dequeue();
+            if (_deaths.Count >= 2 && !_entry.Town && Volatile.Read(ref _leader) == 0)
+            {
+                _handicap = Math.Min(40, _handicap + 10);
+                _tooHard = true;
+                _deaths.Clear();
+            }
+            _lastDeath = DateTime.UtcNow;
+            _log(_tooHard ? $"died again; looking for an easier field (hunting {_handicap} levels lower)" : "died");
             return;
         }
         if (now - _deadSince < TimeSpan.FromSeconds(6)) return;
@@ -279,32 +298,36 @@ public sealed class AiBot
     private async Task HuntAsync()
     {
         var now = DateTime.UtcNow;
-        long level = _view.Level;
-        if (now >= _nextMapCheck)
+        // Dying keeps sending the bot to easier fields (the handicap), so it never stays where it cannot win.
+        long level = Math.Max(1, _view.Level - _handicap);
+        if (now >= _nextMapCheck || _tooHard)
         {
             _nextMapCheck = now.AddMinutes(3 + _random.NextDouble() * 4);
             var here = _atlas.Hunt(_view.SceneEntry);
-            bool wrong = here == null || here.MinLevel > level + 3 || level > here.MedianLevel + 8;
+            // Bots fight with normal attacks only, so they hunt a few levels below themselves (Atlas.Fitting); a field
+            // is wrong when it is not among the few that fit best (at the top end nothing fits well, and that is fine).
+            bool wrong = here == null || _tooHard || !_atlas.Fitting(level).Take(4).Any(m => m.Id == here.Id);
+            _tooHard = false;
             // Spread out: a field holding more than its share of the hunters sends some elsewhere.
             int crowd = _crowd.Hunters(_view.SceneEntry);
             bool crowded = crowd > Math.Max(4, _crowd.AllHunters / 3 + 1) && _random.NextDouble() < 0.5;
             if ((wrong || crowded) && _atlas.Choose(level, _random, _crowd.Hunters) is { } pick && pick.Id != _view.SceneEntry
                 && (wrong || _crowd.Hunters(pick.Id) + 1 < crowd))
             {
-                await TeleportAsync(pick.Id, here == null ? "time to hunt" : wrong ? $"level {level}" : "too crowded here");
+                await TeleportAsync(pick.Id, here == null ? "time to hunt" : wrong ? $"level {_view.Level}, hunting like {level}" : "too crowded here");
                 return;
             }
         }
-        if (Attacker() is { } attacker) { await EngageAsync(attacker); return; }
+        if (Attacker() is { } attacker) { await DefendAsync(attacker); return; }
         if (await RestAsync()) return;
-        var target = CurrentTarget() ?? PickTarget(_view.X, _view.Z, SightRange, level + 3, partyLeader: 0);
+        var target = CurrentTarget() ?? PickTarget(_view.X, _view.Z, SightRange, level + 1, partyLeader: 0);
         if (target != null) { await EngageAsync(target); return; }
         _target = 0;
         if (_path != null || now < _idleUntil) return;
         // Nothing in sight: head for a spawn point that suits the bot's level.
         if (_atlas.Hunt(_view.SceneEntry) is { } map)
         {
-            var points = map.Spawns.Where(s => s.Level <= level + 3).Select(s => s.Point)
+            var points = map.Spawns.Where(s => s.Level <= level + 1).Select(s => s.Point)
                 .OrderBy(p => Dist(p.X, p.Z)).Take(12).ToArray();
             if (points.Length > 0)
             {
@@ -358,7 +381,7 @@ public sealed class AiBot
         }
         _leaderSeen = now;
         _activity = $"in a party with {leader.Name}, following them";
-        if (Attacker() is { } attacker) { await EngageAsync(attacker); return; }
+        if (Attacker() is { } attacker) { await DefendAsync(attacker); return; }
         if (await RestAsync()) return;
         float toLeader = Dist(leader.X, leader.Z);
         var target = CurrentTarget();
@@ -377,7 +400,7 @@ public sealed class AiBot
     {
         var now = DateTime.UtcNow;
         long hp = _view.Hp, max = Math.Max(1, _view.MaxHp);
-        if (!_resting && hp * 100 / max < 35)
+        if (!_resting && hp * 100 / max < 50)
         {
             _resting = true;
             _restUntil = now.AddMinutes(2);
@@ -398,6 +421,22 @@ public sealed class AiBot
     // ---------------------------------------------------------------- combat
 
     /// <summary>A monster that hit the bot in the last few seconds and is still close: fight back rather than stand there.</summary>
+    /// <summary>Fight back, unless the attacker is well above the bot's level: then run for the revive point.</summary>
+    private async Task DefendAsync(Unit attacker)
+    {
+        if (attacker.Level <= _view.Level + 3) { await EngageAsync(attacker); return; }
+        if (_path != null && DateTime.UtcNow - _pathAt < TimeSpan.FromSeconds(3)) return;
+        _target = 0;
+        _activity = "running from something way too strong";
+        var map = _atlas.Map(_view.SceneEntry);
+        if ((map?.Revive ?? map?.Born) is { } safe) PathTo(safe.X, safe.Z, TimeSpan.FromSeconds(20));
+        else
+        {
+            float dx = _view.X - attacker.X, dz = _view.Z - attacker.Z, d = MathF.Max(0.1f, MathF.Sqrt(dx * dx + dz * dz));
+            PathTo(_view.X + dx / d * 25, _view.Z + dz / d * 25, TimeSpan.FromSeconds(10));
+        }
+    }
+
     private Unit? Attacker()
     {
         if (DateTime.UtcNow - _view.LastHitUtc > TimeSpan.FromSeconds(4)) return null;
@@ -443,14 +482,14 @@ public sealed class AiBot
         _activity = string.IsNullOrEmpty(monster) ? "fighting monsters" : $"fighting a {monster}";
         var nav = _atlas.Map(_view.SceneEntry)?.Nav;
         var (sx, sy, sz) = _view.Position;
-        bool reach = Dist(target.X, target.Z) <= AttackRange && (nav == null || nav.CanWalk(sx, sy, sz, target.X, target.Z));
+        bool reach = Dist(target.X, target.Z) <= Attack.Range && (nav == null || nav.CanWalk(sx, sy, sz, target.X, target.Z));
         if (!reach)
         {
             bool stale = _path == null || now - _pathAt > TimeSpan.FromSeconds(1.5)
                 || Flat(_path[^1].X, _path[^1].Z, target.X, target.Z) > 1.5f;
             // Close but with something in the way, again and again: give that one up.
-            if (stale && Dist(target.X, target.Z) <= AttackRange) _refusals++;
-            if (stale && (_refusals > 6 || !PathTo(target.X, target.Z, TimeSpan.Zero, slack: AttackRange)))
+            if (stale && Dist(target.X, target.Z) <= Attack.Range) _refusals++;
+            if (stale && (_refusals > 6 || !PathTo(target.X, target.Z, TimeSpan.Zero, slack: Attack.Range)))
             {
                 _avoid[target.Uid] = now.AddMinutes(1);
                 _target = 0;
@@ -466,11 +505,26 @@ public sealed class AiBot
             await SendAsync(() => _bot.SendGameAsync(CombatService.LockEnemy, new LockEnemyReq { EnemyId = (long)target.Uid }));
         }
         using var reply = _bot.Inbox.Expect(x => x.IsGame(CombatService.UseSkill));
-        await SendAsync(() => _bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = BasicAttack, TargetId = (long)target.Uid }));
+        int skill = Attack.Skill;
+        await SendAsync(() => _bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = skill, TargetId = (long)target.Uid }));
         int result;
         try { result = CastSkillRsp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(4))).Body).Result; }
         catch (TimeoutException) { result = -1; }
         if (result == 0) { _refusals = 0; return; }
+        // Refused outright (unknown, not learned, wrong weapon): move on to the job's next candidate attack.
+        if (result is ErrorCodes.SkillUnknown or ErrorCodes.SkillNotLearned or ErrorCodes.SkillRequirements && ++_attackRefusals >= 2)
+        {
+            var key = (_view.Career, _entry.WeaponType);
+            int index = WorkingAttack.GetValueOrDefault(key);
+            if (index + 1 < _progression.Attacks(key.Career, key.WeaponType).Count)
+            {
+                WorkingAttack[key] = index + 1;
+                _log($"attack {skill} refused ({result}); trying {Attack.Skill}");
+            }
+            _attackRefusals = 0;
+            _refusals = 0;
+            return;
+        }
         if (result == ErrorCodes.SkillBlocked || ++_refusals >= 4)
         {
             _log($"giving up on monster {target.Uid} (attack refused: {result})");
@@ -548,10 +602,144 @@ public sealed class AiBot
         await SendAsync(() => _bot.SendGameAsync(MsgId.Walk, new WalkReq { Pos = new Vec3 { X = x, Y = y, Z = z }, BStop = true, SpeedRate = 1 }));
     }
 
+    // ---------------------------------------------------------------- growing up
+
+    /// <summary>Which of a job's candidate attacks the server accepted, shared by all bots ((job, weapon type) -> index).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), int> WorkingAttack = new();
+
+    /// <summary>The normal attack for the job and weapon and its reach: the first candidate the server accepts.</summary>
+    private (int Skill, float Range) Attack
+    {
+        get
+        {
+            var options = _progression.Attacks(_view.Career, _entry.WeaponType);
+            return options[Math.Min(WorkingAttack.GetValueOrDefault((_view.Career, _entry.WeaponType)), options.Count - 1)];
+        }
+    }
+
+    /// <summary>
+    /// First login (with the server's GM tool): jump to the planned level, advancing through the planned job line the
+    /// way a player does (the GM tool sets the base and job level each advance needs), then stats and gear.
+    /// </summary>
+    private async Task SetupAsync()
+    {
+        if (_view.Level < _entry.Level && _gm.Available)
+        {
+            int level = _entry.Level;
+            bool ok = await GmLevelAsync(level, 50);
+            for (int next; ok && (next = _progression.NextJob(_view.Career, _entry.Job)) != 0 && Progression.Needs(_progression.JobOf(next)!.Rank).Base <= level;)
+            {
+                if (!await TransformAsync(next)) break;
+                ok = await GmLevelAsync(level, 50);
+            }
+            if (ok)
+            {
+                await GmLevelAsync(level, _random.Next(20, 51));
+                _log($"set up as a level {_view.Level} {_progression.JobName(_view.Career)}");
+            }
+        }
+        await GrowAsync(force: true);
+    }
+
+    /// <summary>Job advances as the levels come, stat points as they are earned, better gear every 15 levels.</summary>
+    private async Task GrowAsync(bool force = false)
+    {
+        var now = DateTime.UtcNow;
+        if (!force && now < _nextGrow) return;
+        _nextGrow = now.AddSeconds(45);
+        if (_handicap > 0 && now - _lastDeath > TimeSpan.FromMinutes(15)) { _handicap -= 5; _lastDeath = now; }
+        int level = (int)_view.Level;
+        // A bot that has reached its planned job keeps going down a random branch when its level allows more.
+        if (_entry.FirstJob == 0) { _entry.FirstJob = _progression.FirstJobOf(_entry.Job); _saveRoster(); }
+        if (_view.Career == _entry.Job && _progression.JobOf(_entry.Job) is { } planned && planned.Rank < Progression.RankFor(level))
+        {
+            int from = _entry.Job == Progression.Novice && _entry.FirstJob != Progression.Novice ? _entry.FirstJob : _entry.Job;
+            _entry.Job = _progression.PlanJob(from, Progression.RankFor(level), _entry.Sex, _random);
+            _saveRoster();
+        }
+        int next = _progression.NextJob(_view.Career, _entry.Job);
+        if (next != 0 && Progression.Needs(_progression.JobOf(next)!.Rank).Base <= level && await TransformAsync(next))
+            _log($"advanced to {_progression.JobName(next)}");
+        if (level != _statsLevel) await AllocateStatsAsync(level);
+        if (_gm.Available && (_entry.GearLevel == 0 || level >= _entry.GearLevel + 15)) await GearUpAsync(level);
+    }
+
+    private async Task<bool> GmLevelAsync(int level, int jobLevel)
+    {
+        if (!await _gm.RunAsync(_entry.Account, $"!lvl {level} {jobLevel}")) { _gm.Refused(); return false; }
+        var until = DateTime.UtcNow.AddSeconds(6);
+        while (_view.Level != level && DateTime.UtcNow < until) await Task.Delay(200);
+        if (_view.Level == level) return true;
+        if (_view.LastNotice.Contains("not enabled", StringComparison.OrdinalIgnoreCase)) _gm.Refused();
+        return false;
+    }
+
+    /// <summary>31176, the change-job panel's request: the server checks the rank's base and job level.</summary>
+    private async Task<bool> TransformAsync(int job)
+    {
+        using var reply = _bot.Inbox.Expect(x => x.IsGame(CharacterService.PlayerTransformJob));
+        await SendAsync(() => _bot.SendGameAsync(CharacterService.PlayerTransformJob, new PlayerTransformJobReq { JobId = job }));
+        var result = PlayerTransformJobResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10))).Body).Result;
+        if (result != 0) return false;
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (_view.Career != job && DateTime.UtcNow < until) await Task.Delay(100);
+        _view.Career = job;
+        _attackRefusals = 0;
+        return true;
+    }
+
+    /// <summary>31500 with the stat values for this level (Progression.Stats only ever grows, as the server requires).</summary>
+    private async Task AllocateStatsAsync(int level)
+    {
+        _statsLevel = level;
+        var stats = _progression.Stats(_entry.FirstJob != 0 ? _entry.FirstJob : _progression.FirstJobOf(_entry.Job), level);
+        var req = new AllocateAttrPointReq { PlanIndex = 0 };
+        for (int i = 0; i < 6; i++) req.Points[i + 1] = stats[i];
+        using var reply = _bot.Inbox.Expect(x => x.IsGame(CharacterService.AllocateAttrPoints));
+        await SendAsync(() => _bot.SendGameAsync(CharacterService.AllocateAttrPoints, req));
+        var result = AllocateAttrPointRsp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10))).Body).Result;
+        if (result != 0) _log($"stat points refused ({result})");
+    }
+
+    /// <summary>Gear for the job and level through the GM tool, worn straight from the bag (31400).</summary>
+    private async Task GearUpAsync(int level)
+    {
+        var pieces = _progression.Gear(_view.Career, level, _entry.Sex, _random);
+        int worn = 0;
+        int accessoryGrid = 6;
+        foreach (var (item, part) in pieces)
+        {
+            var before = _view.Guids(item).ToHashSet();
+            if (!await _gm.RunAsync(_entry.Account, $"!item {item} 1")) { _gm.Refused(); return; }
+            long guid = 0;
+            var until = DateTime.UtcNow.AddSeconds(5);
+            while (guid == 0 && DateTime.UtcNow < until)
+            {
+                guid = _view.Guids(item).FirstOrDefault(g => !before.Contains(g));
+                if (guid == 0) await Task.Delay(200);
+            }
+            if (guid == 0)
+            {
+                if (_view.LastNotice.Contains("not enabled", StringComparison.OrdinalIgnoreCase)) { _gm.Refused(); return; }
+                continue;
+            }
+            int grid = part switch { 1 or 2 => 1, 3 => 2, 4 => 3, 5 => 4, 6 => 5, 7 => accessoryGrid++, _ => 0 };
+            using var reply = _bot.Inbox.Expect(x => x.IsGame(CharacterService.EquipItemOpr));
+            await SendAsync(() => _bot.SendGameAsync(CharacterService.EquipItemOpr,
+                new EquipItemOprReq { Opr = (EquipItemOprType)0, Pos = (EquipGridType)grid, ItemGUID = guid }));
+            if (EquipItemOprResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10))).Body).Result != 0) continue;
+            worn++;
+            if (part is 1 or 2) { _entry.WeaponType = _progression.WeaponType(item); _attackRefusals = 0; }
+        }
+        _entry.GearLevel = level;
+        _saveRoster();
+        if (worn > 0) _log($"geared up for level {level} ({worn} pieces)");
+    }
+
     // ---------------------------------------------------------------- chat and parties
 
     private string Situation() =>
-        $"you are a level {_view.Level} novice on {_atlas.MapName(_view.SceneEntry)}, {_activity}";
+        $"you are a level {_view.Level} {_progression.JobName(_view.Career)} on {_atlas.MapName(_view.SceneEntry)}, {_activity}";
 
     private async Task AmbientAsync()
     {

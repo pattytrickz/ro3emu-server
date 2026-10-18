@@ -40,6 +40,10 @@ or through environment variables, one per account: `Ro3Emu__GmAccounts__0=your-a
 keeps its own rule: with an empty list it runs for any online account, with a list only for listed accounts.
 Production does not close it; it is the operator's tool on the server machine.
 
+`Ro3Emu:GmToolAccounts` lets the tool act on more accounts without giving them GM in game: exact names, or a prefix
+with a trailing `*`. The AI players (`docs/guide/ai-bots.md`) use it to set their bots' levels and gear:
+`Ro3Emu__GmToolAccounts__0=aibot*`.
+
 ## A public server
 
 On a server that other people can reach, start the host as Production and list the GM accounts. With systemd, a
