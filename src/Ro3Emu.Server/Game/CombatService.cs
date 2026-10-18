@@ -15,6 +15,8 @@ public sealed class AttackLoop
     public long NextSwingMs { get; set; }
     public float StartX { get; init; }
     public float StartZ { get; init; }
+    /// <summary>When the target was first seen out of reach (0 = in reach); see CombatService.AttackOutOfReachMs.</summary>
+    public long OutOfReachSinceMs { get; set; }
 }
 
 /// <summary>
@@ -855,20 +857,19 @@ public sealed partial class CombatService : IGameTicker
             if (s.Attack is { } a && !s.Dead && now >= a.NextSwingMs)
             {
                 if (s.SceneLoading || !CanHitMonster(s, a.Target) || MonsterService.Distance(a.Target, s) > 30)
+                    StopAttack(s, a.Target.Dead ? "target dead" : s.SceneLoading ? "scene change" : "target lost",
+                        SkillInterruptedInfo.Types.SkillInterruptType.LockerInvalid, quiet: a.Target.Dead);
+                else if (s.SkillCast == null && EffectiveSkillRow(s, a.SkillId) is { } row)
                 {
-                    s.Attack = null;
-                    if (s.SkillCast?.Request.SkillId == a.SkillId)
-            loop.TrackRuntimeDetached("cast cancellation", () => CancelCastAsync(s, SkillInterruptedInfo.Types.SkillInterruptType.LockerInvalid));
-        else loop.TrackRuntimeDetached("skill end send", () => s.SendGameAsync(SkillEnd, new SkillEndNotify
+                    if (MonsterService.Distance(a.Target, s) <= Range(row) + 1.5f)
                     {
-                        SrcID = s.Role.Id, Type = SkillEndNotify.Types.SkillEndType.Interrupted,
-                        InterruptedInfo = new SkillInterruptedInfo { Type = SkillInterruptedInfo.Types.SkillInterruptType.LockerInvalid },
-                    }));
-                }
-                else if (s.SkillCast == null && EffectiveSkillRow(s, a.SkillId) is { } row && MonsterService.Distance(a.Target, s) <= Range(row) + 1.5f)
-                {
-                    a.NextSwingMs = now + SkillMs(s, row);
-                loop.TrackRuntimeDetached("combat swing", () => SwingAsync(s, a.Target, a.SkillId, ++_sessionIds));
+                        a.OutOfReachSinceMs = 0;
+                        a.NextSwingMs = now + SkillMs(s, row);
+                        loop.TrackRuntimeDetached("combat swing", () => SwingAsync(s, a.Target, a.SkillId, ++_sessionIds));
+                    }
+                    else if (a.OutOfReachSinceMs == 0) a.OutOfReachSinceMs = now;
+                    else if (now - a.OutOfReachSinceMs >= AttackOutOfReachMs)
+                        StopAttack(s, "target out of reach", SkillInterruptedInfo.Types.SkillInterruptType.LockerInvalid);
                 }
             }
             if ((s.StatusBits & FightBit) != 0 && now - s.LastCombatMs > OutOfCombatMs)

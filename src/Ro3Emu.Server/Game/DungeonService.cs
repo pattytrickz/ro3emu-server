@@ -836,5 +836,38 @@ public sealed partial class DungeonService
         }
         // A disconnected member's channel must never prevent another participant's committed award.
         foreach (var notify in notifications) await notify();
+        if (won && StoryInstance(a.Plan)) await ScheduleStoryReturnAsync(a);
+    }
+
+    /// <summary>Seconds between clearing a story instance and the automatic return to the map.</summary>
+    internal const int StoryReturnSeconds = 10;
+
+    /// <summary>
+    /// A quest's solo story instance (DungeonConfig _iGamePlayType 6, the "plane map" copies of a field, e.g. 1051001
+    /// "Ferocious Mother Bird"). No quest step or plot runs inside one after it is cleared (their PlotInterpretation
+    /// triggers and quest tracks name the field, never the instance), yet nothing took the player out: the next quest's
+    /// plot waits on the field, so players were stuck inside. Wave, boss, Valhalla and multiplayer runs keep their exits.
+    /// </summary>
+    internal static bool StoryInstance(DungeonCatalog.Plan plan) => plan.Multi == null && plan.Boss == null && plan.LayerId == 0
+        && GameData.Int(plan.Config, "_iGamePlayType") == 6;
+
+    /// <summary>
+    /// After a story instance is cleared: a notice on the banner, then the return to the map the player came from
+    /// (the same exit as the client's leave button, with dead-member recovery), unless the player already left.
+    /// </summary>
+    private async Task ScheduleStoryReturnAsync(Attempt a)
+    {
+        foreach (var s in LoadedMembers(a))
+            try { await GmCommands.ReplyAsync(s, $"Area cleared! Returning you to the map in {StoryReturnSeconds} seconds."); }
+            catch (Exception e) { log.LogWarning(e, "Story return notice failed for {Role}", s.Role?.Name); }
+        loop.ScheduleLegacy(TimeSpan.FromSeconds(StoryReturnSeconds), async () =>
+        {
+            foreach (var s in LoadedMembers(a))
+            {
+                if (!ReferenceEquals(s.DungeonAttempt, a) || s.InstanceId != a.Room.Id || s.SceneLoading || a.Room.Closed) continue;
+                log.LogInformation("{Name} leaves cleared story instance {Scene}", s.Role?.Name, a.Plan.SceneEntry);
+                await instances.LeaveAsync(s, recoverDeadOnReturn: true);
+            }
+        });
     }
 }
