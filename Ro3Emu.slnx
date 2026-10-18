@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Ro3Emu.AiBots/Ro3Emu.AiBots.csproj" />
     <Project Path="src/Ro3Emu.Bot/Ro3Emu.Bot.csproj" />
     <Project Path="src/Ro3Emu.BotCli/Ro3Emu.BotCli.csproj" />
     <Project Path="src/Ro3Emu.LoadTest/Ro3Emu.LoadTest.csproj" />
