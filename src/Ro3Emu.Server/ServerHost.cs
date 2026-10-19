@@ -229,6 +229,18 @@ public static class ServerHost
             if (options.Value.GmAudit) GmCommands.AppendAudit(options.Value, "-", "-", "host", "access " + audited);
             return Results.Text(reply + "\n");
         });
+        // Announcements (loopback only; the admin bridge): POST /ro3emu/announce body = the text, on every online
+        // player's marquee. Answers "announced to N".
+        app.MapPost("/ro3emu/announce", async (HttpContext context, GmCommands gm, IOptions<ServerOptions> options) =>
+        {
+            if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
+            using var reader = new StreamReader(context.Request.Body);
+            var text = (await reader.ReadToEndAsync()).Trim();
+            if (text.Length == 0) return Results.BadRequest("empty announcement");
+            int reached = await gm.AnnounceAsync(text);
+            if (options.Value.GmAudit) GmCommands.AppendAudit(options.Value, "-", "-", "host", "announce " + text);
+            return Results.Text($"announced to {reached}\n");
+        });
         // In-game bug reports (loopback only, docs/guide/feedback.md): GET /ro3emu/reports?since=<id or ISO time>&limit=&format=text
         app.MapGet("/ro3emu/reports", (HttpContext context, FeedbackService feedback) =>
         {
