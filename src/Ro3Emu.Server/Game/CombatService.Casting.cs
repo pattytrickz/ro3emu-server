@@ -20,6 +20,8 @@ public sealed class ActiveSkillCast
     /// <summary>Accepted while the caster still walked (WalkSlack): its stop right after is where it cast from.</summary>
     public bool StartedWalking { get; set; }
     public required long StartMs { get; init; }
+    /// <summary>A swing of the server's own attack loop (SwingAsync), not a client request.</summary>
+    public bool Automatic { get; init; }
     public required int ChantMs { get; init; }
     public required int ActionMs { get; init; }
     public bool Cancelled { get; set; }
@@ -380,7 +382,7 @@ public sealed partial class CombatService
         var request = new CastSkillReq { SkillId = (int)GameData.Int(row, "_iID"), TargetId = target?.Uid ?? 0,
             TargetPos = target?.Pos ?? s.Position.Clone(), Face = s.Face };
         if (!await AdmitAutomaticCostAsync(s, row, request, id)) { s.Attack = null; return; }
-        await StartCastAsync(s, row, request, id);
+        await StartCastAsync(s, row, request, id, automatic: true);
     }
 
     private async Task<bool> AdmitAutomaticCostAsync(GameSession s, JsonElement row, CastSkillReq request, long id)
@@ -398,7 +400,7 @@ public sealed partial class CombatService
         return Current();
     }
 
-    private async Task StartCastAsync(GameSession s, JsonElement row, CastSkillReq req, long id, SkillObject? actor = null)
+    private async Task StartCastAsync(GameSession s, JsonElement row, CastSkillReq req, long id, SkillObject? actor = null, bool automatic = false)
     {
         var origin = actor?.Pos ?? s.Position.Clone();
         var target = FindMonster(s.WorldScene, req.TargetId);
@@ -408,6 +410,7 @@ public sealed partial class CombatService
             Id = id, OwnerId = s.Role!.Id, WorldScene = s.WorldScene, SceneGeneration = s.SceneGeneration,
             Attachment = s.Attachment, Request = req, Row = row, Origin = origin, StartedWalking = actor == null && s.Walking,
             StartMs = Now, ChantMs = (int)Math.Max(0, GameData.Int(row, "_iChantFix") + GameData.Int(row, "_iChantVar")), ActionMs = SkillMs(s, row), Operator = actor,
+            Automatic = automatic,
         };
         s.SkillCast = action;
         s.WorldState.ResurrectionCastId = Script(row) == "Resurrection" ? id : 0;
@@ -426,6 +429,7 @@ public sealed partial class CombatService
         {
             if (!Live(s, action)) return;
             action.Resolved = true;
+            if (!PaceNormalAttack(s, action)) return;
             await ResolveCastAsync(s, action);
         });
         ScheduleRuntime(action.WorldScene, TimeSpan.FromMilliseconds(Math.Max(at, action.ChantMs + action.ActionMs) + 1), () =>

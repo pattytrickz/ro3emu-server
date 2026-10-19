@@ -74,6 +74,13 @@ public sealed class ServerOptions
     public bool BonusExpAlways { get; set; }
 
     /// <summary>
+    /// Normal-attack pacing at startup (CombatService.NormalAttackMinGap): an impact sooner than this fraction of the
+    /// swing time after the previous one deals nothing. 0 only measures; the loopback POST /ro3emu/pacing reads the
+    /// measured gaps and changes it live.
+    /// </summary>
+    public double NormalAttackMinGap { get; set; }
+
+    /// <summary>
     /// The live season playbook (SeasonService). 101 is the only one this client has season content for; a value
     /// set in game with "!season" overrides it.
     /// </summary>

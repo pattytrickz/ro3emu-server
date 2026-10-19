@@ -217,6 +217,14 @@ public static class ServerHost
                 return Results.Ok("done");
             });
         });
+        // Normal-attack pacing (loopback only): POST /ro3emu/pacing body "" (report) | "set 0.5" | "reset".
+        app.MapPost("/ro3emu/pacing", async (HttpContext context, Game.CombatService combat, GameLoop loop) =>
+        {
+            if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
+            using var reader = new StreamReader(context.Request.Body);
+            var line = (await reader.ReadToEndAsync()).Trim();
+            return Results.Text(await loop.InvokeAsync(() => Task.FromResult(combat.PacingCommand(line))));
+        });
         // Who may play (loopback only, AccessList): POST /ro3emu/access body "approve name" | "block name" | "reset name" | "list".
         app.MapPost("/ro3emu/access", async (HttpContext context, AccessList access, AccountStore accounts, IOptions<ServerOptions> options) =>
         {
