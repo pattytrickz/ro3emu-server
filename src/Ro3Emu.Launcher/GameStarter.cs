@@ -13,12 +13,31 @@ namespace Ro3Emu.Launcher;
 /// </summary>
 public static class GameStarter
 {
+    private const string GpuPreferences = @"Software\Microsoft\DirectX\UserGpuPreferences";
+
+    /// <summary>
+    /// Windows' per-app graphics choice (Settings > Display > Graphics), "High performance" for ro3.exe: on laptops
+    /// that also have integrated graphics the game ran there by default, where its text shaders failed (names over
+    /// heads drawn as white blocks, dialogue text without its outline; players' reports 19.10, gone on the dedicated
+    /// GPU). A choice the player already made for ro3.exe is left alone; a PC with one GPU is unaffected.
+    /// </summary>
+    internal static void PreferHighPerformanceGpu(string exe)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(GpuPreferences);
+            if (key.GetValue(exe) == null) key.SetValue(exe, "GpuPreference=2;");
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException) { }
+    }
+
     /// <summary>Returns null when the game is running, or the reason it stopped within the first seconds.</summary>
     public static async Task<string?> StartAsync(string clientDir)
     {
         string exe = Path.Combine(clientDir, "ro3.exe");
         if (!File.Exists(exe)) return "ro3.exe not found";
 
+        PreferHighPerformanceGpu(exe);
         using var pipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
         var start = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = clientDir };
         start.Environment["RO3_LAUNCH_PIPE_HANDLE"] = pipe.GetClientHandleAsString();

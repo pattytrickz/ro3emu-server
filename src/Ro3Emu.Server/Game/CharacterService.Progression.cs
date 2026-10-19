@@ -158,7 +158,13 @@ public sealed partial class CharacterService
         return $"{TotalPoints(p) - UsedPoints(p)} free stat points.";
     }
 
-    /// <summary>31500: six absolute values in one saved plan; the active plan also changes combat stats.</summary>
+    /// <summary>
+    /// 31500: six absolute values in one saved plan; the active plan also changes combat stats. A value may be lower
+    /// than the saved one: the client's "-" button goes down to 1 (LC_DAL_PlayerInfo.CanMinusBaseAttr: local value &gt; 1)
+    /// and sends the whole plan, and the stat reset (31501) is free, so redistributing within the plan's points is
+    /// the same as reset + allocate. Refusing it (the earlier "never below the saved value" rule) bounced every
+    /// redistribution players made in the panel.
+    /// </summary>
     public async Task AllocateAsync(GameSession session, AllocateAttrPointReq req)
     {
         using var _ = await LockAsync(session);
@@ -174,7 +180,7 @@ public sealed partial class CharacterService
         foreach (var (stat, value) in req.Points)
             if (stat is >= 1 and <= 6) wanted[stat - 1] = value;
         bool ok = req.Points.Keys.All(k => k is >= 1 and <= 6)
-            && wanted.Select((v, i) => v >= previous[i] && v <= MaxStat).All(x => x) && wanted.Sum(StatCost) <= TotalPoints(p);
+            && wanted.All(v => v >= 1 && v <= MaxStat) && wanted.Sum(StatCost) <= TotalPoints(p);
         if (ok)
         {
             for (int i = 0; i < 6; i++) selected.BaseProperty[i + 1] = wanted[i];

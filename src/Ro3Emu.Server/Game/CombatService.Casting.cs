@@ -84,9 +84,9 @@ public sealed partial class CombatService
         if (error == 0)
         {
             int group = (int)GameData.Int(row!.Value, "_iSkillID"), mode = (int)GameData.Int(row.Value, "_iMode");
-            if (Math.Max(s.SkillCds.GetValueOrDefault(group), s.SkillModeCds.GetValueOrDefault((group, mode))) > Now) error = ErrorCodes.SkillCooldown;
+            if (Math.Max(s.SkillCds.GetValueOrDefault(group), s.SkillModeCds.GetValueOrDefault((group, mode))) > Now + CastGraceMs) error = ErrorCodes.SkillCooldown;
             // Preserve the established cooldown refusal for a repeated cast, including during its action tail.
-            else if (s.SkillCast is { Cancelled: false } active && Now < active.StartMs + active.ChantMs + active.ActionMs
+            else if (s.SkillCast is { Cancelled: false } active && Now + CastGraceMs < active.StartMs + active.ChantMs + active.ActionMs
                 && GameData.Int(row.Value, "_bCancelCast") == 0) error = ErrorCodes.SkillBusy;
             else error = ValidateTarget(s, row.Value, req, origin, owned == null ? WalkSlack(s) : 0);
         }
@@ -133,7 +133,11 @@ public sealed partial class CombatService
                 NextSwingMs = Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
                 StartX = s.Position.X, StartZ = s.Position.Z };
         }
-        else if (!keepsAttack) s.Attack = null;
+        else if (!keepsAttack && s.Attack is { } replaced)
+        {
+            log.LogDebug("{Name} auto-attack on {Target} ended: cast {Skill}", s.Role?.Name, replaced.Target.Uid, req.SkillId);
+            s.Attack = null;
+        }
         if (GameData.Int(row.Value, "_iIfAutoAtk") == 2 && owned == null && playerTarget != null)
             eventAttacks[s] = new EventAttack(playerTarget, loopSkill,
                 Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
@@ -462,6 +466,9 @@ public sealed partial class CombatService
         bool interrupted = valid && (s.SkillCast != null || s.Attack != null || eventAttacks.ContainsKey(s));
         if (interrupted)
         {
+            if (s.Attack is { } running)
+                log.LogInformation("{Name} auto-attack on {Target} ended: client interrupt{Next}", s.Role?.Name, running.Target.Uid,
+                    req?.NxtSkill is { } nxt ? $" for skill {nxt.SkillId}" : "");
             s.Attack = null;
             eventAttacks.Remove(s);
             await CancelCastAsync(s, req?.NxtSkill != null ? SkillInterruptedInfo.Types.SkillInterruptType.Skill : SkillInterruptedInfo.Types.SkillInterruptType.Move);
@@ -483,11 +490,61 @@ public sealed partial class CombatService
         });
     }
 
+    /// <summary>
+    /// How far a player may drift from where the auto-attack started and keep swinging. The client reports small
+    /// corrections while standing still (turning to the target, a nudge from a hit); a 0.1 m limit ended the loop on
+    /// those, silently, so auto-attack stopped at random. Walking (a non-stop WalkReq) still ends it at once.
+    /// </summary>
+    internal const float AttackLeash = 1.5f;
+
+    /// <summary>
+    /// A cast may arrive this much before its cooldown or the previous cast's action ends. The server starts both
+    /// clocks when the request arrives, the client when the key is pressed, so a press made the moment the client's
+    /// own cooldown ends reaches the server up to one trip early; players far from the server (Asia to Helsinki,
+    /// ~250 ms) saw quick presses ignored ("mashing Mammonite only works at the speed of a GCD", 19.10).
+    /// </summary>
+    internal const long CastGraceMs = 150;
+
+    /// <summary>A target that stays out of reach this long ends the loop (it waited forever before, swinging nothing).</summary>
+    internal const long AttackOutOfReachMs = 3000;
+
+    /// <summary>
+    /// Ends the server's auto-attack and tells the client, which otherwise keeps showing an attack that no longer
+    /// runs. The reason is logged (except the ordinary end, a dead target) so a stop can be traced to its cause.
+    /// </summary>
+    internal void StopAttack(GameSession s, string reason, SkillInterruptedInfo.Types.SkillInterruptType cause, bool quiet = false,
+        bool cancelCast = true)
+    {
+        if (s.Attack is not { } a) return;
+        s.Attack = null;
+        if (!quiet) log.LogInformation("{Name} auto-attack on {Target} ended: {Reason}", s.Role?.Name, a.Target.Uid, reason);
+        if (s.SkillCast is { Cancelled: false } cast && cast.Request.SkillId == a.SkillId)
+        {
+            // A swing in progress follows its own movement rules (PlayerMoved below); it ends, and says so, by itself.
+            if (cancelCast) loop.TrackRuntimeDetached("cast cancellation", () => CancelCastAsync(s, cause));
+        }
+        else if (s.Role is { } role)
+            loop.TrackRuntimeDetached("skill end send", () => s.SendGameAsync(SkillEnd, new SkillEndNotify
+            {
+                SrcID = role.Id, Type = SkillEndNotify.Types.SkillEndType.Interrupted,
+                InterruptedInfo = new SkillInterruptedInfo { Type = cause },
+            }));
+    }
+
     public void PlayerMoved(GameSession s)
     {
         if (eventAttacks.TryGetValue(s, out var eventAttack)
             && MonsterService.Distance(eventAttack.StartX, eventAttack.StartZ, s.Position.X, s.Position.Z) > 1.5f) eventAttacks.Remove(s);
-        if (s.Attack is { } a && MonsterService.Distance(a.StartX, a.StartZ, s.Position.X, s.Position.Z) > 0.1f) s.Attack = null;
+        if (s.Attack is { } a)
+        {
+            // The client casts on reaching range while still walking and sends its stop just after (see below): that
+            // stop is where the attack really started, not a move away from it.
+            if (!s.Walking && s.SkillCast is { StartedWalking: true } arriving && Now - arriving.StartMs <= 300)
+                (a.StartX, a.StartZ) = (s.Position.X, s.Position.Z);
+            else if (s.Walking) StopAttack(s, "walked away", SkillInterruptedInfo.Types.SkillInterruptType.Move, cancelCast: false);
+            else if (MonsterService.Distance(a.StartX, a.StartZ, s.Position.X, s.Position.Z) > AttackLeash)
+                StopAttack(s, "moved off", SkillInterruptedInfo.Types.SkillInterruptType.Move, cancelCast: false);
+        }
         if (s.SkillCast is not { } cast || Distance(cast.Origin, s.Position) <= 0.1f || GameData.Int(cast.Row, "_bMovement") != 0) return;
         // The client casts on reaching range and stops 1 ms later (in-game 11.10): that first stop is the cast's real
         // origin, within the distance the walk can have covered, not a move that interrupts it.

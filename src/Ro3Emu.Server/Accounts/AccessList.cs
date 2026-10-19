@@ -140,4 +140,40 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
     }
 
     private static string Names(List<string> names) => names.Count == 0 ? "none" : string.Join(", ", names);
+
+    /// <summary>
+    /// The host tool's commands, the <see cref="Run"/> ones plus two for the website's sign-up (through the admin
+    /// bridge), which make the account at approval so no first login can claim an approved name:
+    /// <list type="bullet">
+    /// <item>"taken name": "taken Name" when an account has the name in any case, "approved Name" when a first-login
+    /// approval is waiting for it, "blocked Name", else "free".</item>
+    /// <item>"create name hash salt" (base64; AccountHash format): "created name", or "taken Name" / "blocked name".
+    /// A waiting approval for the name is used up.</item>
+    /// </list>
+    /// </summary>
+    public async Task<string> RunAsync(string line, AccountStore accounts)
+    {
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string verb = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+        if (verb is not ("taken" or "create")) return Run(line);
+        if (parts.Length < 2 || parts[1].Length > 64) return "Usage: taken <name> | create <name> <hash> <salt>";
+        string name = parts[1];
+        if (await accounts.FindNameAsync(name) is { } existing) return "taken " + existing;
+        lock (_sync)
+        {
+            var state = Load();
+            if (Has(state.Blocked, name)) return "blocked " + name;
+            if (verb == "taken")
+                return state.Approved.FirstOrDefault(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) is { } waiting
+                    ? "approved " + waiting : "free";
+        }
+        byte[] hash, salt;
+        try { hash = Convert.FromBase64String(parts.Length > 2 ? parts[2] : ""); salt = Convert.FromBase64String(parts.Length > 3 ? parts[3] : ""); }
+        catch (FormatException) { return "Usage: create <name> <hash base64> <salt base64>"; }
+        if (hash.Length != 32 || salt.Length != 16) return "Usage: create <name> <hash base64> <salt base64> (32-byte hash, 16-byte salt)";
+        if (!await accounts.CreateAsync(name, hash, salt)) return "taken " + (await accounts.FindNameAsync(name) ?? name);
+        Used(name);
+        log.LogInformation("Access: create {Name} -> created", name);
+        return "created " + name;
+    }
 }

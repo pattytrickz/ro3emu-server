@@ -82,6 +82,51 @@ public sealed class AccessListTests : IAsyncLifetime
         Assert.Contains("Password reset pending: none", await Access("list"));
     }
 
+    /// <summary>The website's sign-up: the password hash chosen in the form, in the server's own format.</summary>
+    private static string Create(string name, string password)
+    {
+        byte[] salt = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        byte[] hash = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2(System.Text.Encoding.UTF8.GetBytes(password), salt, 100_000,
+            System.Security.Cryptography.HashAlgorithmName.SHA256, 32);
+        return $"create {name} {Convert.ToBase64String(hash)} {Convert.ToBase64String(salt)}";
+    }
+
+    [ClientDataFact]
+    public async Task ASignUpMakesTheAccountWithItsChosenPasswordSoNoFirstLoginCanClaimIt()
+    {
+        Assert.Equal("free", (await Access("taken Ragepingu")).Trim());
+        Assert.Equal("created Ragepingu", (await Access(Create("Ragepingu", "chosen"))).Trim());
+        Assert.Equal(401, await Login("Ragepingu", "squatter"));   // the name is not up for grabs at any login
+        Assert.Equal(401, await Login("ragepingu", "squatter"));   // nor in other capitals
+        Assert.Equal(0, await Login("Ragepingu", "chosen"));
+        Assert.Equal(0, await Login("RAGEPINGU", "chosen"));        // a login names the account in any case
+        Assert.Equal("taken Ragepingu", (await Access("taken ragepingu")).Trim());
+        Assert.Equal("taken Ragepingu", (await Access(Create("RagePingu", "other"))).Trim());
+
+        // A first-login approval waiting for a name is reported, and a sign-up of that name uses it up.
+        await Access("approve Lynx");
+        Assert.Equal("approved Lynx", (await Access("taken lynx")).Trim());
+        Assert.Equal("created lynx", (await Access(Create("lynx", "pw"))).Trim());
+        Assert.Contains("Approved (not yet registered): none", await Access("list"));
+        await Access("block Mallory");
+        Assert.Equal("blocked Mallory", (await Access(Create("Mallory", "pw"))).Trim());
+
+        // The audit log never holds the hash.
+        var audit = File.ReadAllLines(Path.Combine(dataDir, "logs", "gm-audit.log"));
+        Assert.Contains(audit, l => l.EndsWith("\thost\taccess create Ragepingu", StringComparison.Ordinal));
+        Assert.DoesNotContain(audit, l => l.Contains("create Ragepingu ", StringComparison.Ordinal));
+    }
+
+    [ClientDataFact]
+    public async Task AnApprovedFirstLoginCannotMakeASecondAccountInOtherCapitals()
+    {
+        await Access("approve Bob");
+        Assert.Equal(0, await Login("Bob", "bobs"));
+        await Access("approve BOB");                                // even with the name approved again
+        Assert.Equal(401, await Login("bob", "someone else"));     // logs in as Bob, wrong password
+        Assert.Equal(0, await Login("bob", "bobs"));
+    }
+
     [ClientDataFact]
     public async Task OpenModeRegistersAnyNewNameButStillRefusesBlockedOnes()
     {

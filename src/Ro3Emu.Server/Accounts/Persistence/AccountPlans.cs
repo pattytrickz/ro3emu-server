@@ -25,6 +25,48 @@ internal sealed class AccountCredentialsRead(string name) : DbReadPlan
     }
 }
 
+/// <summary>The stored name of the account whose name equals this one ignoring case, or null (names are unique that way).</summary>
+internal sealed class AccountNameRead(string name) : DbReadPlan
+{
+    internal override int Bytes => 128 + Encoding.UTF8.GetByteCount(name);
+    internal override string Label => "account/name";
+    internal override object? Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        using var select = DbSql.Command(db, tx, "SELECT name FROM account WHERE name=$name COLLATE NOCASE ORDER BY name=$name DESC LIMIT 1");
+        select.Parameters.AddWithValue("$name", name);
+        return select.ExecuteScalar() as string;
+    }
+}
+
+/// <summary>
+/// An account made ahead of its first login, from a password hash chosen at registration (the website's sign-up). It is
+/// only made when no account has the name in any case; true when it was made.
+/// </summary>
+internal sealed class AccountCreatePlan : DbPlan
+{
+    private readonly string _name, _createdUtc;
+    private readonly byte[] _hash, _salt;
+    internal AccountCreatePlan(string name, byte[] hash, byte[] salt, string createdUtc)
+    {
+        _name = name; _createdUtc = createdUtc;
+        _hash = (byte[])hash.Clone(); _salt = (byte[])salt.Clone();
+    }
+    internal override int Bytes => 256 + Encoding.UTF8.GetByteCount(_name) + _hash.Length + _salt.Length;
+    internal override string Label => "account/create";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        using var insert = DbSql.Command(db, tx, """
+            INSERT INTO account(name,password_hash,salt,created_utc)
+            SELECT $name,$hash,$salt,$now WHERE NOT EXISTS (SELECT 1 FROM account WHERE name=$name COLLATE NOCASE)
+            """);
+        insert.Parameters.AddWithValue("$name", _name);
+        insert.Parameters.AddWithValue("$hash", _hash);
+        insert.Parameters.AddWithValue("$salt", _salt);
+        insert.Parameters.AddWithValue("$now", _createdUtc);
+        return insert.ExecuteNonQuery() == 1;
+    }
+}
+
 internal sealed class AccountRegisterPlan : DbPlan
 {
     private readonly string _name, _createdUtc;
