@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Google.Protobuf;
+using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
@@ -32,6 +33,7 @@ public sealed class WildAfkService : IGameTicker
     private readonly SessionRegistry sessions;
     private readonly World world;
     private readonly GameLoop loop;
+    private readonly IOptions<ServerOptions> options;
 
     /// <summary>Durable dataset and reset/accounting metadata; clock anchors and the UI power-saving flag are session-only.</summary>
     public sealed class State
@@ -55,8 +57,10 @@ public sealed class WildAfkService : IGameTicker
     }
 
     public WildAfkService(GameData data, RoleStore roles, FunctionService functions, TaskService tasks, DailyActivityService daily,
-        SessionRegistry sessions, World world, GameLoop loop, SceneService scene, CombatService combat, RewardService rewards)
+        SessionRegistry sessions, World world, GameLoop loop, SceneService scene, CombatService combat, RewardService rewards,
+        IOptions<ServerOptions> options)
     {
+        this.options = options;
         this.data = data;
         this.roles = roles;
         this.functions = functions;
@@ -521,7 +525,10 @@ public sealed class WildAfkService : IGameTicker
     /// configured Bonus Time environment (localization 10960000077; environment mapping inferred).</summary>
     private async Task<bool> BeforeKillAsync(GameSession s, MonsterUnit monster)
     {
-        if (!Unlocked(s) || !Field(s) || !Ordinary(monster) || s.WildAfk is not { } state) return false;
+        if (!Field(s) || !Ordinary(monster)) return false;
+        // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field kill, locked panel or not.
+        bool always = options.Value.BonusExpAlways;
+        if (!Unlocked(s) || s.WildAfk is not { } state) return always;
         if (BeforeKillGateForTest is { } beforeGate) await beforeGate();
         // A kill waiting behind an old state's gate must not reserve that role and block
         // its wire role-switch. This first wait only observes readiness; ReconcileAsync
@@ -533,7 +540,7 @@ public sealed class WildAfkService : IGameTicker
         if (!Owns(s, state)) return false;
         await ReconcileAsync(s);
         if (!Owns(s, state)) return false; // The old role's kill is obsolete; RewardService also aborts its grant.
-        return s.AutoBattle && !s.Dead && !s.SceneLoading && !MvpAggro(s)
+        return always || s.AutoBattle && !s.Dead && !s.SceneLoading && !MvpAggro(s)
             && state.Info.IsHighMagnification && state.Info.HighMultiplierTimeSeconds > 0;
     }
 

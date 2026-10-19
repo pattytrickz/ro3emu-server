@@ -4,6 +4,7 @@ using System.Text.Json;
 using Google.Protobuf;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Bot;
 using Ro3Emu.Server;
@@ -292,6 +293,54 @@ public sealed class WildAfkTests : IAsyncLifetime
         int bonus = await KillYoyoAndReadExp(2);
         Assert.Equal(207, bonus); // NPCDropConfig env 1: item 100 x296, same correction.
         Assert.True(bonus > reduced);
+    }
+
+    /// <summary>
+    /// ServerOptions.BonusExpAlways (house rule): a manual kill by a Base 30 player, whose battle time is still locked
+    /// (it opens at 37), pays the Bonus Time table for base and job exp alike; off, the same kill pays the reduced one.
+    /// </summary>
+    [ClientDataFact]
+    public async Task BonusExpAlwaysPaysTheBonusTableBeforeBattleTimeUnlocksAndWithoutAutoBattle()
+    {
+        await using var bot = await InWorld();
+        await Gm(bot, "!lvl 30");
+        await Warp(bot, 10113); // Yoyo (level 30): env 0 gives item 100 x30, env 1 x296
+        Assert.False(await State(bot, s => Service<FunctionService>().IsOpen(s, 18)));
+
+        async Task<(int Base, int Job)> KillYoyo()
+        {
+            long uid = 0;
+            Vec3 position = null!;
+            await OnLoop(() =>
+            {
+                var monster = Service<World>().Map(Session(bot).WorldScene).Units.OfType<MonsterUnit>()
+                    .First(m => !m.Dead && m.Template.NpcId == 5000021);
+                monster.Hp = 1; monster.Moving = false; monster.NextRoamMs = long.MaxValue;
+                uid = monster.Uid; position = monster.Pos;
+                return Task.CompletedTask;
+            });
+            await bot.SendGameAsync(MsgId.Walk, new WalkReq { Pos = position, BStop = true, SpeedRate = 1 });
+            await bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = uid });
+            Assert.Equal(0, (await Next(bot, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+            var reward = await Next(bot, CharacterService.GetRewardNotify, GetRewardNotify.Parser,
+                x => x.RewardType.Contains(1) && x.Rewards.Any(i => i.ItemEntry == 100 && i.Stack < 1000));
+            return (reward.Rewards.Single(i => i.ItemEntry == 100).Stack, reward.Rewards.Single(i => i.ItemEntry == 101).Stack);
+        }
+
+        var options = Service<IOptions<ServerOptions>>().Value;
+        var reduced = await KillYoyo();
+        options.BonusExpAlways = true;
+        try
+        {
+            var bonus = await KillYoyo();
+            Assert.Equal(bonus.Base, bonus.Job);
+            Assert.True(bonus.Base > 5 * reduced.Base, $"reduced {reduced.Base}, bonus {bonus.Base}"); // env 1: item 100 x296 against x30
+            Assert.False(await State(bot, s => s.AutoBattle));
+        }
+        finally
+        {
+            options.BonusExpAlways = false;
+        }
     }
 
     [ClientDataFact]
