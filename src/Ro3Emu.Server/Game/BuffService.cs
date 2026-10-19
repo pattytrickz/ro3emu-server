@@ -8,7 +8,7 @@ namespace Ro3Emu.Server.Game;
 /// <summary>A buff on a player: BuffConfig id, its attribute changes, when it ends (absolute server ms).</summary>
 public sealed record ActiveBuff(long Guid, int ConfigId, long ExpireMs, int DurationMs, IReadOnlyList<(long Attr, double Value)> Changes, long SourceId,
     int PileCount = 1, bool IsPassive = false, bool IsTotemOwned = false, int StateOrdinal = 0, bool ShowIcon = true,
-    long ShieldRemaining = 0);
+    long ShieldRemaining = 0, bool IsTalentOwned = false);
 
 /// <summary>
 /// Buff lifetime and control state. The explicit state map below is inferred from
@@ -124,6 +124,36 @@ public sealed partial class BuffService : IGameTicker
                 Buffs = { new BuffInfo { BuffGuid = buff.Guid, ConfigId = configId, ExpireTime = 0,
                     Duration = 0, PileCount = 1, SourceId = sourceId } },
             });
+    }
+
+    /// <summary>
+    /// Job-talent passives (SeasonTalentService): permanent while the talent is selected, reconciled to exactly
+    /// <paramref name="configIds"/>. Their BuffConfig rows carry SkillParameterRules modifiers and have no icon
+    /// (_iShowIcon 0 in every referenced row), so adding or removing one sends no buff packet.
+    /// </summary>
+    public async Task SetTalentPassivesAsync(GameSession p, IReadOnlySet<int> configIds, bool notify)
+    {
+        if (p.Role == null) return;
+        bool changed = false, stats = false;
+        foreach (var stale in p.Buffs.Where(b => b.IsTalentOwned && !configIds.Contains(b.ConfigId)).ToArray())
+        {
+            p.Buffs.Remove(stale);
+            changed = true;
+            stats |= stale.Changes.Count > 0;
+        }
+        foreach (int id in configIds)
+        {
+            if (p.Buffs.Any(b => b.IsTalentOwned && b.ConfigId == id) || data.Row("BuffConfig", id) is not { } row) continue;
+            var buff = new ActiveBuff(Interlocked.Increment(ref _guids), id, long.MaxValue, 0,
+                GameData.Pairs(row, "_kChangeAttri").Where(c => c.Value != 0).ToArray(), p.Role.Id,
+                IsPassive: true, ShowIcon: false, IsTalentOwned: true);
+            p.Buffs.Add(buff);
+            changed = true;
+            stats |= buff.Changes.Count > 0;
+        }
+        if (!changed || !notify) return;
+        if (stats) await character.RefreshStatsAsync(p);
+        foreach (var handler in Changed) await handler(p);
     }
 
     /// <summary>Apply a timed totem stack by source; refresh one GUID and broadcast the authoritative pile count.</summary>
@@ -298,7 +328,8 @@ public sealed partial class BuffService : IGameTicker
 
     private async Task ClearWhereAsync(GameSession p, string field)
     {
-        foreach (var b in p.Buffs.ToList())
+        // (inferred) A selected job talent, not the scene, owns its passive; 96 of them are marked _iSceneClear.
+        foreach (var b in p.Buffs.Where(b => !b.IsTalentOwned).ToList())
             if (data.Row("BuffConfig", b.ConfigId) is not { } row || GameData.Int(row, field) == 1)
                 await RemoveAsync(p, b);
     }

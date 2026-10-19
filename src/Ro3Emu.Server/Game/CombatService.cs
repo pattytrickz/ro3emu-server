@@ -273,6 +273,7 @@ public sealed partial class CombatService : IGameTicker
         scene.Leaving.Add(ClearSkillsAsync);
         scene.Leaving.Add(buffs.ClearOnSceneAsync);
         character.ExtraAttributes.Add(PassiveAttributes);
+        ExtraHitDamage.Add(DoubleAttackDamage);
         world.UnitRemoved.Add(unit => { if (unit is MonsterUnit m) _fightingMonsters.Remove(m); return Task.CompletedTask; });
         skills.Learned.Add(RefreshSkillParametersAsync);
         skills.Learned.Add(character.RefreshStatsAsync);

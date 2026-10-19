@@ -83,6 +83,7 @@ public sealed partial class CombatService
             if (level <= 0 || data.Row("SkillConfig", skills.RealId(group, level)) is not { } row
                 || GameData.Int(row, "_iBasicType") != 0) continue;
             foreach (var pair in GameData.Pairs(row, "_kAttri")) yield return pair;
+            foreach (var pair in WeaponPassiveAttributes(session, row)) yield return pair;
         }
     }
 
