@@ -40,6 +40,7 @@ public sealed class SkillService
         this.roles = roles;
         this.log = log;
         character.ProgressHandlers.Add(SyncAsync);
+        character.EquipmentHandlers.Add(s => s.SkillPlans == null ? Task.CompletedTask : SyncAsync(s));
     }
 
     /// <summary>SkillConfig row id of a group at a level (mode 0), or 0.</summary>
@@ -102,6 +103,30 @@ public sealed class SkillService
                 return row.Skill;
         return NormalAttack(career);
     }
+
+    /// <summary>
+    /// The normal attack the client is told to use for the weapons held: DBSkillData.currentAtkSkillId and
+    /// skillWheel.atkSkillId (LC_DAL_SkillDevelop: CurrentNormalAttackSkillId, which a click on a monster casts), and
+    /// the only normal-attack group the 5025 plan shows learned (LC_Actor_AutoAttack.GetNormalSkill swings the first
+    /// learned _iIsNormalAtk group of ServerSkillToLevelMap). A JobAttackConfig row naming the weapons wins over
+    /// _kSkillNormalID; the weapon-less default row only replaces a _kSkillNormalID that has no SkillConfig row.
+    /// A Thief with a dagger was told 1500001 "Normal Attack" (ThiefAttack, PATK 50%) rather than 1005001 "Basic
+    /// Attack" (PATK 50% + 45), the attack Double Attack's description and the skill window name (shown 0/1).
+    /// </summary>
+    public int NormalAttack(GameSession s)
+    {
+        int career = s.Progress!.Career, matched = NormalAttack(career, WeaponType(s, 1), WeaponType(s, 2)), fallback = NormalAttack(career);
+        bool named = JobAttacks(career).FirstOrDefault(a => a.Weapons.Length == 0).Skill != matched;
+        return named || data.Row("SkillConfig", fallback) == null ? matched : fallback;
+    }
+
+    /// <summary>ItemConfig._iSubType of the item worn in an equipment grid (1 main hand, 2 off hand), 0 when empty.</summary>
+    private int WeaponType(GameSession s, int grid) =>
+        s.Items.FirstOrDefault(i => i.Pack == 2 && i.Grid == grid) is { } item && data.Row("ItemConfig", item.Entry) is { } row
+            ? (int)GameData.Int(row, "_iSubType") : 0;
+
+    private bool IsNormalAttackGroup(int group) =>
+        data.Row("SkillConfig", RealId(group, 1)) is { } row && GameData.Int(row, "_iIsNormalAtk") == 1;
 
     internal int Rank(int career) => (int)(data.Row("JobConfig", career) is { } job ? Math.Max(1, GameData.Int(job, "_iJobRank")) : 1);
 
@@ -190,7 +215,7 @@ public sealed class SkillService
     private DBSkillData BuildFresh(GameSession session)
     {
         var p = session.Progress!;
-        int atk = NormalAttack(p.Career);
+        int atk = NormalAttack(session);
         int atkGroup = data.Row("SkillConfig", atk) is { } a ? (int)GameData.Int(a, "_iSkillID") : 0;
         var tree = Tree(p.Career);
         var skillData = new DBSkillData { MaxPlanCount = PlanCount, CurrentPlanIndex = 0, CurrentAtkSkillId = atk };
@@ -199,7 +224,8 @@ public sealed class SkillService
 
         var plan = new SkillPlan { IsUnlock = true };
         foreach (int group in skillData.SkillList)
-            plan.SkillAssigns[group] = new SkillData { SkillId = group, SkillLevel = Level(p, group) };
+            plan.SkillAssigns[group] = new SkillData { SkillId = group,
+                SkillLevel = group == atkGroup ? 1 : IsNormalAttackGroup(group) ? 0 : Level(p, group) }; // one attack for GetNormalSkill
         plan.SkillQueue[0] = new SkillData(); // the client pairs() it unguarded
         plan.ManualLoadSkill.Add(new SkillData()); // repeated load lists are read by the client even when empty
         plan.AutoLoadSkill.Add(new SkillData());
@@ -495,12 +521,13 @@ public sealed class SkillService
         // BuildFresh stores normal attacks in plans, but Level grants the current attack implicitly.
         // Ignore those from the current career chain when an older plan is selected after a job change.
         var normalAttacks = CareerChain(progress.Career)
-            .Select(c => data.Row("SkillConfig", NormalAttack(c)) is { } row ? (int)GameData.Int(row, "_iSkillID") : 0)
+            .SelectMany(c => JobAttacks(c).Select(a => a.Skill).Append(NormalAttack(c)))
+            .Select(id => data.Row("SkillConfig", id) is { } row ? (int)GameData.Int(row, "_iSkillID") : 0)
             .Where(group => group > 0).ToHashSet();
         progress.Skills.Clear();
         foreach (var (group, assignment) in source.SkillAssigns)
         {
-            if (assignment.SkillLevel == 1 && normalAttacks.Contains(group)) continue;
+            if (assignment.SkillLevel <= 1 && normalAttacks.Contains(group)) continue; // the held weapon's attack, or one shown 0
             if (assignment.SkillLevel < 0 || assignment.SkillLevel > MaxLevel(group)
                 || (!tree.ContainsKey(group) && assignment.SkillLevel > 0)) return ErrorCodes.SkillNotInTree;
             if (assignment.SkillId != 0 && assignment.SkillId != group) return ErrorCodes.Parameter;
