@@ -216,6 +216,24 @@ public sealed class CharacterTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task AnAnnouncementReachesEveryOnlinePlayersMarquee()
+    {
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        using var http = new HttpClient();
+        var reply = await (await http.PostAsync(_http + "/ro3emu/announce", new StringContent("Server restart in 5 minutes"))).Content.ReadAsStringAsync();
+        Assert.Equal("announced to 2", reply.Trim());
+        foreach (var bot in new[] { alice, bob })
+            await Next(bot, GmCommands.BroadcastNotify, BroadCastNotify.Parser, m => m.Content == "Server restart in 5 minutes");
+
+        // A GM (here through the loopback GM tool, as in game) does the same with !announce.
+        await Gm("alice", "!announce Back in a minute");
+        await Next(bob, GmCommands.BroadcastNotify, BroadCastNotify.Parser, m => m.Content == "Back in a minute");
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest,
+            (await http.PostAsync(_http + "/ro3emu/announce", new StringContent("  "))).StatusCode);
+    }
+
+    [ClientDataFact]
     public async Task TheHeartbeatEchoesThePingTagSoTheClientCanShowItsPing()
     {
         // RO3.PingTiming tags Ping.strDebugTag and only measures a Pong carrying the same tag (else the HUD shows 0 ms).
