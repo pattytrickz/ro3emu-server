@@ -65,6 +65,15 @@ public sealed class ServerOptions
     public bool LevelUpRefill { get; set; }
 
     /// <summary>
+    /// House rule: every ordinary field kill pays its Bonus Time table (NPCDropConfig environment 1, about ten times
+    /// the reduced environment 0), as if Bonus Time were always running. Off by default: the original pays it only
+    /// while auto-battling with battle time left, and battle time unlocks at Base 37 (FunctionConfig 18), so a player
+    /// between the end of the Base 30 story and the Base 40 job change otherwise levels on the reduced table.
+    /// Dungeon, MVP and boss kills are unchanged; battle time keeps its own accounting.
+    /// </summary>
+    public bool BonusExpAlways { get; set; }
+
+    /// <summary>
     /// The live season playbook (SeasonService). 101 is the only one this client has season content for; a value
     /// set in game with "!season" overrides it.
     /// </summary>
