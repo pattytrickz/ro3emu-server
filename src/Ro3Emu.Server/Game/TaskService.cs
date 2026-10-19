@@ -49,6 +49,7 @@ public sealed partial class TaskService
     private readonly SkillService skills;
     private readonly FunctionService functions;
     private readonly RoleStore roles;
+    private readonly FriendStore friends;
     private readonly WorldData worldData;
     private readonly GameLoop loop;
     private readonly AwardService awards;
@@ -68,8 +69,10 @@ public sealed partial class TaskService
 
     public TaskService(GameData data, CharacterService character, SkillService skills, FunctionService functions, CombatService combat,
         RoleStore roles, WorldData worldData, GameLoop loop, AwardService awards, SessionRegistry sessions,
-        EquipmentService equipment, CardService cards, SeasonTalentService talents, SceneService scene, MountService mounts, ILogger<TaskService> log)
+        EquipmentService equipment, CardService cards, SeasonTalentService talents, SceneService scene, MountService mounts, ILogger<TaskService> log,
+        FriendStore friends)
     {
+        this.friends = friends;
         this.data = data;
         this.character = character;
         this.skills = skills;
@@ -634,8 +637,29 @@ public sealed partial class TaskService
                 accepted++;
             }
         }
+        foreach (var id in RootlessGuides())
+        {
+            if (Active(session, id) || IsDelivered(session, id) || !Ready(session, defs[id])) continue;
+            Accept(session, id);
+            accepted++;
+        }
         return accepted + AcceptGrowthTitle(session);
     }
+
+    private const int TaskTypeSide = 2, TaskTypeGuide = 3; // enum_TaskType
+    private List<long>? _rootlessGuides;
+
+    /// <summary>
+    /// Side and guide quests with no _kPreTask and Auto accept open on their condition alone (TaskConfig 102000xx:
+    /// "Join a guild" at Base 21, "Learn About Auto-Battle" at 31, "Clear a Five-Player Dungeon" at 36...); with no
+    /// pre-task, no delivery ever reaches them as a follow-up. Only quests whose every target this server tracks are
+    /// offered, so none sits unfinishable in the log. Other rootless Auto rows (pass, achievement, guild, party and
+    /// event quests) belong to their own services and stay theirs.
+    /// </summary>
+    private List<long> RootlessGuides() => _rootlessGuides ??= Defs().Values
+        .Where(d => d.Type is TaskTypeSide or TaskTypeGuide && d.Pre.Length == 0 && d.Accept == ReceiveAuto
+            && d.Targets.Length > 0 && d.Targets.All(Supported))
+        .Select(d => d.Id).OrderBy(id => id).ToList();
 
     private bool Ready(GameSession session, TaskDef def) =>
         def.Pre.All(p => IsDelivered(session, p)) && (def.Condition == 0 || functions.ConditionMet(session, def.Condition))

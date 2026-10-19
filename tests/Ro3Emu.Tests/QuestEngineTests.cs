@@ -89,6 +89,61 @@ public sealed class QuestEngineTests : IAsyncLifetime
         await Next(bot, TaskService.TaskFollow, TaskFollowResp.Parser);
     }
 
+    /// <summary>
+    /// Rootless side/guide quests (102000xx, no _kPreTask, Auto) open on their level condition, with level-ups, and only
+    /// when every target is tracked; 106602 CheckTenBOSSWin completes when the role fights the listed boss.
+    /// </summary>
+    [ClientDataFact]
+    public async Task RootlessSideGuidesOpenAtTheirLevelAndABossWinCompletesTheDungeonGuide()
+    {
+        const long AutoBattleGuide = 10200140, Professions = 10200100, JoinGuild = 10200080, Friends = 10200090,
+            FivePlayerDungeon = 10200010;
+        await using var bot = await InWorld();
+        Task<bool> Has(long id) => Read(s => s.Tasks!.Infos.ContainsKey(id));
+        async Task Eventually(long id)
+        {
+            for (int i = 0; i < 100 && !await Has(id); i++) await Task.Delay(50);
+            Assert.True(await Has(id), $"quest {id} was not offered");
+        }
+
+        Assert.False(await Has(AutoBattleGuide));
+        Assert.False(await Has(JoinGuild));
+        await Gm("!lvl 31");
+        await Eventually(AutoBattleGuide); // Base 31
+        await Eventually(JoinGuild); // Base 21
+        await Eventually(Friends); // Base 30
+        Assert.False(await Has(Professions)); // Base 34
+        Assert.False(await Has(FivePlayerDungeon)); // Base 36
+        await Gm("!lvl 36");
+        await Eventually(Professions);
+        await Eventually(FivePlayerDungeon);
+        Assert.Equal(0, (await State(JoinGuild)).CompleteNum[0]); // not in a guild
+        Assert.Equal(0, (await State(Friends)).CompleteNum[0]);
+
+        var combat = Service<CombatService>();
+        var callback = combat.Killed.Single(h => h.Target is TaskService);
+        async Task Kill(int npc) => await Change(async s =>
+        {
+            var monster = new MonsterUnit
+            {
+                Uid = 910000 + npc % 1000, SceneEntry = s.SceneEntry, Dead = true,
+                Template = Service<MonsterService>().Template(npc)!,
+                Home = new SpawnPoint(0, 0, 0, 0, 0, npc), Group = new SpawnGroup(0, false, 1, 0, [], []),
+            };
+            foreach (var handler in combat.Dealt) handler(s, monster, 1);
+            await callback(s, monster);
+        });
+        await Kill(5000055); // an ordinary monster is no boss win
+        Assert.Equal(0, (await State(FivePlayerDungeon)).CompleteNum[0]);
+        await Kill(43100003); // the Orc Hero: its own line only ("Complete the Golden Thief Bug / Orc Hero / Drake Dungeon")
+        Assert.Equal([0, 1, 0], (await State(FivePlayerDungeon)).CompleteNum);
+        await Kill(4300001);
+        await Kill(43200006);
+        Assert.Equal(TaskState.Delivery, (await State(FivePlayerDungeon)).Status);
+        var offered = await Read(s => s.Tasks!.Infos.Keys.Where(id => id is >= 10200000 and < 10300000 or 306070 or 306080).OrderBy(id => id).ToList());
+        Console.WriteLine("Side guides offered at Base 36: " + string.Join(", ", offered));
+    }
+
     [ClientDataFact]
     public async Task NoviceTrialGrantsExactlySevenExpAndReplaySurvivesRelog()
     {
