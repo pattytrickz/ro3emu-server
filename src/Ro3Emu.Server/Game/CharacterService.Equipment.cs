@@ -145,6 +145,16 @@ public sealed partial class CharacterService
     };
 
     /// <summary>
+    /// JobConfig._kWeaponForm 3 is enum_WeaponFromType.DoubleHand (Assassin 5200-5400: [2, 3], TwoHandAndDoubleHand):
+    /// LC_EquipmentHelper.GetGearingEquipByEquipPosType then sends a one-handed weapon to the off hand (ViceHand grid 2)
+    /// when the main hand is taken, and JobAttackConfig has the dual-dagger attack [1, 1]. Other careers keep grid 1.
+    /// </summary>
+    private int[] GridsFor(int part, int career) => part == 2 && DualWields(career) ? [1, 2] : GridsFor(part);
+
+    internal bool DualWields(int career) => data.Row("JobConfig", career) is { } job && job.TryGetProperty("_kWeaponForm", out var forms)
+        && forms.ValueKind == JsonValueKind.Array && forms.EnumerateArray().Any(f => GameData.Number(f) == 3);
+
+    /// <summary>
     /// 31400 equip / unequip (spec §4.7): bag 5009, equipment 5007 (before the reply, so the client's gear map exists),
     /// the reply with the item, then the model (31049 equipInfo) for the owner and everyone around, then the new stats.
     /// </summary>
@@ -169,7 +179,7 @@ public sealed partial class CharacterService
         else if (item != null && (int)req.Opr == 0 && item.Grid == 0 && data.Row("ItemConfig", item.Entry) is { } row && GameData.Int(row, "_iType") == ItemTypeEquip)
         {
             int part = (int)GameData.Int(row, "_iEquipPart");
-            var grids = GridsFor(part);
+            var grids = GridsFor(part, session.Progress!.Career);
             if (grids.Length > 0)
             {
                 if (!grids.Contains(grid)) grid = grids.FirstOrDefault(g => staged.Where(i => i.Grid > 0 && i.Pack == 2 && i.Grid <= 8).All(e => e.Grid != g), grids[0]);

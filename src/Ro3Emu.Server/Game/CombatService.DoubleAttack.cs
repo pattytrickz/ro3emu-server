@@ -11,6 +11,8 @@ namespace Ro3Emu.Server.Game;
 /// Chance to deal {2} Extra hits of Neutral melee Physical damage equal to PATK * {3}%".
 /// (inferred) The extra hits join the Basic Attack's damage number like the totem extra-hit passives, each
 /// floor(PATK * {3} / 100), with no defense or element step: the text gives the amount, not a formula.
+/// A proc shows as separate numbers, like classic RO: SkillHitInfo.split N makes LC_DamageHelper.ProcessDamageWord
+/// print the hit's damage as N equal jump words at the template's display interval (damage // N, remainder kept).
 /// </summary>
 public sealed partial class CombatService
 {
@@ -18,6 +20,17 @@ public sealed partial class CombatService
 
     /// <summary>Rolls a percent chance; tests make it deterministic.</summary>
     internal Func<int, bool> DoubleAttackRoll { get; set; } = chance => Random.Shared.Next(100) < chance;
+
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<GameSession, System.Runtime.CompilerServices.StrongBox<int>> doubleAttackSplits = new();
+
+    /// <summary>The hit count of this swing's Double Attack proc (0 when none), read once by the hit publication.</summary>
+    internal int TakeDoubleAttackSplit(GameSession s)
+    {
+        if (!doubleAttackSplits.TryGetValue(s, out var box)) return 0;
+        int split = box.Value;
+        box.Value = 0;
+        return split;
+    }
 
     private long DoubleAttackDamage(GameSession s, MonsterUnit target, JsonElement row, long amount)
     {
@@ -29,6 +42,7 @@ public sealed partial class CombatService
             || desc.GetArrayLength() < 3) return 0;
         double chance = GameData.Number(desc[0]) ?? 0, hits = GameData.Number(desc[1]) ?? 0, percent = GameData.Number(desc[2]) ?? 0;
         if (chance <= 0 || hits <= 0 || percent <= 0 || !DoubleAttackRoll((int)chance)) return 0;
+        doubleAttackSplits.GetOrCreateValue(s).Value = 1 + (int)hits;
         return (long)hits * (long)Math.Floor(character.Stats(s)[103] * percent / 100d);
     }
 
