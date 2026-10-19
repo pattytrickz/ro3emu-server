@@ -171,11 +171,13 @@ public sealed partial class CombatService
             {
                 var defender = new Fighter(0, 0, target.Template.Flee, 0, target.Template.Level, target.Template.Element)
                 { Def = target.Template.Def, Mdef = target.Template.Mdef, Flee = target.Template.Flee };
-                var (amount, result) = Damage(attacker, defender, row, script == "Heal" ? 1 : 0);
+                var (amount, result) = Damage(attacker, defender, row,
+                    script == "Heal" ? 1 : script == "SonicBlow" ? SonicBlowBranch(s, target, row) : 0);
                 if (amount > 0)
                 {
                     foreach (var modifier in DamageAdjusters) amount = Math.Max(0, modifier(s, target, row, result, amount));
                     foreach (var extra in ExtraHitDamage) amount += Math.Max(0, extra(s, target, row, amount));
+                    if (TakeDoubleAttackSplit(s) is > 1 and var split) hit.Split = Math.Max(hit.Split, split);
                 }
                 long beforeHp = target.Hp;
                 target.Hp = Math.Max(0, beforeHp - amount);

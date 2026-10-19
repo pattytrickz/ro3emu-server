@@ -85,6 +85,16 @@ public sealed partial class CombatService
         {
             int group = (int)GameData.Int(row!.Value, "_iSkillID"), mode = (int)GameData.Int(row.Value, "_iMode");
             if (Math.Max(s.SkillCds.GetValueOrDefault(group), s.SkillModeCds.GetValueOrDefault((group, mode))) > Now + CastGraceMs) error = ErrorCodes.SkillCooldown;
+            // Normal attacks have no cooldown and _bCancelCast 1, so each tap cancelled the running swing after its hit
+            // and started another: tapping out-paced the attack speed (and made AGI look useless). A swing now runs
+            // its ASPD-scaled action first, as the server's own loop does (_iASPDPubCD: an ASPD-based shared CD). Only while
+            // that auto-attack runs on a living monster: after a kill, the next monster is attacked at once.
+            else if (owned == null && GameData.Int(row.Value, "_iIsNormalAtk") == 1 && Now + CastGraceMs < s.NormalAttackReadyMs
+                && s.Attack is { Target: { Dead: false, Hp: > 0 } })
+            {
+                error = ErrorCodes.SkillCooldown;
+                RetargetEarlyAttack(s, row.Value, req);
+            }
             // Preserve the established cooldown refusal for a repeated cast, including during its action tail.
             else if (s.SkillCast is { Cancelled: false } active && Now + CastGraceMs < active.StartMs + active.ChantMs + active.ActionMs
                 && GameData.Int(row.Value, "_bCancelCast") == 0) error = ErrorCodes.SkillBusy;
@@ -369,6 +379,15 @@ public sealed partial class CombatService
         if (notice.Infos.Count > 0) await s.SendGameAsync(SkillCdUpdate, notice);
     }
 
+    /// <summary>An early tap on another monster still switches the running auto-attack to it, at the next swing.</summary>
+    private void RetargetEarlyAttack(GameSession s, JsonElement row, CastSkillReq req)
+    {
+        if (FindMonster(s.WorldScene, req.TargetId) is not { } target || !CanHitMonster(s, target)
+            || s.Attack?.Target == target) return;
+        s.Attack = new AttackLoop { Target = target, SkillId = (int)GameData.Int(row, "_iID"),
+            NextSwingMs = s.NormalAttackReadyMs, StartX = s.Position.X, StartZ = s.Position.Z };
+    }
+
     /// <summary>Legacy auto-attack entry point, using the same cancellation-safe cast owner as manual skills.</summary>
     private async Task SwingAsync(GameSession s, MonsterUnit? target, int skillId, long id)
     {
@@ -410,6 +429,8 @@ public sealed partial class CombatService
             StartMs = Now, ChantMs = (int)Math.Max(0, GameData.Int(row, "_iChantFix") + GameData.Int(row, "_iChantVar")), ActionMs = SkillMs(s, row), Operator = actor,
         };
         s.SkillCast = action;
+        if (actor == null && GameData.Int(row, "_iIsNormalAtk") == 1)
+            s.NormalAttackReadyMs = action.StartMs + action.ChantMs + action.ActionMs;
         s.WorldState.ResurrectionCastId = Script(row) == "Resurrection" ? id : 0;
         s.Face = face;
         req.Face = face;

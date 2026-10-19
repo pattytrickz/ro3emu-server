@@ -128,8 +128,7 @@ public sealed partial class MapTests
                 Assert.DoesNotContain(alice.Inbox.Snapshot(), e => e.IsGame(CombatService.SkillHit)
                     && SkillHitInfo.Parser.ParseFrom(e.Body).Dsts.Any(d => d.DstID == uid && d.IsDead));
                 accounts.BeforeOwnedCommitForTest = null;
-                await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = uid });
-                Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+                // The running auto-attack's next swing finishes the boss (a tap inside that swing is paced away).
                 await Next(alice, MvpService.DeadNotify, MVPDeadNotify.Parser);
                 await WaitMergedBossAsync(uid, m => m.Dead);
                 Assert.Equal(1, MergedMvpSourceCount());

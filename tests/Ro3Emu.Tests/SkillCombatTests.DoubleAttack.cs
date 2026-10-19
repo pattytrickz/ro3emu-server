@@ -45,6 +45,8 @@ public sealed partial class SkillCombatTests
             long patk = character.Stats(s)[103];
             Assert.True(patk > 0);
             Assert.Equal((long)Math.Floor(patk * 50 / 100d), Extra(daggerAttack));
+            Assert.Equal(2, combat.TakeDoubleAttackSplit(s)); // shown as two numbers, like classic RO
+            Assert.Equal(0, combat.TakeDoubleAttackSplit(s));
             Assert.Equal(0, Extra(BladeSmash)); // only Basic Attacks
             int? rolled = null;
             combat.DoubleAttackRoll = chance => { rolled = chance; return false; };
