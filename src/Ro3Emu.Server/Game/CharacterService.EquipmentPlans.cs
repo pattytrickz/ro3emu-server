@@ -89,6 +89,7 @@ public sealed partial class CharacterService
         look.EquipInfo.Add(EquipInfo(session));
         await ToSelfAndViewersAsync(session, EntityBaseChange, look);
         await SendStatsAsync(session);
+        foreach (var handler in EquipmentHandlers) await handler(session);
     }
 
     /// <summary>
