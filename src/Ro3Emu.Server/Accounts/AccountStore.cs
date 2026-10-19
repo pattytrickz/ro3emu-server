@@ -478,6 +478,16 @@ public sealed partial class AccountStore : IDisposable
     public async Task<bool> ExistsAsync(string name) =>
         await ReadAsync<AccountCredentials?>(new AccountCredentialsRead(name)).ConfigureAwait(false) != null;
 
+    /// <summary>The stored name of the account that has this name in any case (an exact match first), or null.</summary>
+    public Task<string?> FindNameAsync(string name) => ReadAsync<string?>(new AccountNameRead(name));
+
+    /// <summary>
+    /// An account made from a password hash chosen at registration (AccountHash: PBKDF2-SHA256, 100 000 rounds, 32 bytes;
+    /// a 16-byte salt). False when an account already has the name in any case.
+    /// </summary>
+    public Task<bool> CreateAsync(string name, byte[] hash, byte[] salt) =>
+        WriteAsync<bool>(new AccountCreatePlan(name, hash, salt, DateTime.UtcNow.ToString("O")));
+
     /// <summary>A new password for an existing account (AccessList "reset": the player's next login sets it).</summary>
     public async Task<bool> SetPasswordAsync(string name, string password)
     {

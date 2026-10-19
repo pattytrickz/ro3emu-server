@@ -84,9 +84,9 @@ public sealed partial class CombatService
         if (error == 0)
         {
             int group = (int)GameData.Int(row!.Value, "_iSkillID"), mode = (int)GameData.Int(row.Value, "_iMode");
-            if (Math.Max(s.SkillCds.GetValueOrDefault(group), s.SkillModeCds.GetValueOrDefault((group, mode))) > Now) error = ErrorCodes.SkillCooldown;
+            if (Math.Max(s.SkillCds.GetValueOrDefault(group), s.SkillModeCds.GetValueOrDefault((group, mode))) > Now + CastGraceMs) error = ErrorCodes.SkillCooldown;
             // Preserve the established cooldown refusal for a repeated cast, including during its action tail.
-            else if (s.SkillCast is { Cancelled: false } active && Now < active.StartMs + active.ChantMs + active.ActionMs
+            else if (s.SkillCast is { Cancelled: false } active && Now + CastGraceMs < active.StartMs + active.ChantMs + active.ActionMs
                 && GameData.Int(row.Value, "_bCancelCast") == 0) error = ErrorCodes.SkillBusy;
             else error = ValidateTarget(s, row.Value, req, origin, owned == null ? WalkSlack(s) : 0);
         }
@@ -496,6 +496,14 @@ public sealed partial class CombatService
     /// those, silently, so auto-attack stopped at random. Walking (a non-stop WalkReq) still ends it at once.
     /// </summary>
     internal const float AttackLeash = 1.5f;
+
+    /// <summary>
+    /// A cast may arrive this much before its cooldown or the previous cast's action ends. The server starts both
+    /// clocks when the request arrives, the client when the key is pressed, so a press made the moment the client's
+    /// own cooldown ends reaches the server up to one trip early; players far from the server (Asia to Helsinki,
+    /// ~250 ms) saw quick presses ignored ("mashing Mammonite only works at the speed of a GCD", 19.10).
+    /// </summary>
+    internal const long CastGraceMs = 150;
 
     /// <summary>A target that stays out of reach this long ends the loop (it waited forever before, swinging nothing).</summary>
     internal const long AttackOutOfReachMs = 3000;

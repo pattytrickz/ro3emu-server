@@ -218,13 +218,15 @@ public static class ServerHost
             });
         });
         // Who may play (loopback only, AccessList): POST /ro3emu/access body "approve name" | "block name" | "reset name" | "list".
-        app.MapPost("/ro3emu/access", async (HttpContext context, AccessList access, IOptions<ServerOptions> options) =>
+        app.MapPost("/ro3emu/access", async (HttpContext context, AccessList access, AccountStore accounts, IOptions<ServerOptions> options) =>
         {
             if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
             using var reader = new StreamReader(context.Request.Body);
             var line = (await reader.ReadToEndAsync()).Trim();
-            string reply = access.Run(line);
-            if (options.Value.GmAudit) GmCommands.AppendAudit(options.Value, "-", "-", "host", "access " + line);
+            string reply = await access.RunAsync(line, accounts);
+            // A "create" line carries a password hash: the audit keeps only the verb and the name.
+            string audited = line.StartsWith("create ", StringComparison.OrdinalIgnoreCase) ? string.Join(' ', line.Split(' ').Take(2)) : line;
+            if (options.Value.GmAudit) GmCommands.AppendAudit(options.Value, "-", "-", "host", "access " + audited);
             return Results.Text(reply + "\n");
         });
         // In-game bug reports (loopback only, docs/guide/feedback.md): GET /ro3emu/reports?since=<id or ISO time>&limit=&format=text

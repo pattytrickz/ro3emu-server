@@ -183,7 +183,7 @@ public sealed class CharacterTests : IAsyncLifetime
         var points = await Next(alice, CharacterService.BaseAttrSync, BaseAttrInfoIncrement.Parser, m => !m.SyncAllMark);
         Assert.Equal(48 + 8 * 2 + 4, points.AllPlanBaseProperty[0].Inc.AttrPoints); // BaseLvConfig: lv2-9 +2, lv10 +4
 
-        // STR 1 -> 5 costs 4 x 2 (BasePointConfig); a value lower than now is refused.
+        // STR 1 -> 5 costs 4 x 2 (BasePointConfig).
         var req = new AllocateAttrPointReq { PlanIndex = 0 };
         foreach (var (stat, value) in new[] { (1, 5), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1) }) req.Points[stat] = value;
         await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
@@ -195,9 +195,34 @@ public sealed class CharacterTests : IAsyncLifetime
         var str = await Next(alice, CharacterService.OnePropertyChange, OnePropertyChange.Parser, m => m.Property.Propertys.Any(p => p.PropertyId == 1 && p.Data == 5));
         Assert.Contains(str.Property.Propertys, p => p.PropertyId == 103);
 
+        // Lowering a stat in the panel redistributes the points (the client's "-" goes down to 1; the reset is free).
         req.Points[1] = 2;
+        req.Points[2] = 3;
+        await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
+        var moved = await Next(alice, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser);
+        Assert.Equal(0, moved.Result);
+        Assert.Equal(2, moved.PlanBaseProperty.BaseProperty[1]);
+        Assert.Equal(3, moved.PlanBaseProperty.BaseProperty[2]);
+        Assert.Equal(2 + 4, moved.PlanBaseProperty.UsedAttrPoints);
+        Assert.Equal(68 - 6, moved.PlanBaseProperty.AttrPoints);
+
+        // Below 1 or past the plan's points is still refused.
+        req.Points[1] = 0;
         await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
         Assert.NotEqual(0, (await Next(alice, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser)).Result);
+        req.Points[1] = 60;
+        await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
+        Assert.NotEqual(0, (await Next(alice, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser)).Result);
+    }
+
+    [ClientDataFact]
+    public async Task TheHeartbeatEchoesThePingTagSoTheClientCanShowItsPing()
+    {
+        // RO3.PingTiming tags Ping.strDebugTag and only measures a Pong carrying the same tag (else the HUD shows 0 ms).
+        await using var alice = await InWorld("Alice");
+        var pong = await alice.PingAsync("ro3pt:000000000000002a");
+        Assert.Equal("ro3pt:000000000000002a", pong.StrDebugTag);
+        Assert.True(pong.ServerTimeMs > 0);
     }
 
     [ClientDataFact]

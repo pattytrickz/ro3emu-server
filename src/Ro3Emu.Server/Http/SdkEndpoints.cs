@@ -36,6 +36,9 @@ public static class SdkEndpoints
             {
                 return Results.Json(new { code = 401 });
             }
+            // Names are unique ignoring case: a login names the existing account in any case (the password still has to
+            // match), so "ragepingu" can never become a second account beside "Ragepingu" or use up its approval.
+            if (await accounts.FindNameAsync(identity) is { } stored) identity = stored;
             // ServerOptions.Access: blocked names, approval-only registration and admin password resets.
             var (decision, why) = access.Decide(identity, await accounts.ExistsAsync(identity));
             if (decision == AccessList.Decision.Refuse)
