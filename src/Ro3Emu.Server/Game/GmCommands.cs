@@ -244,6 +244,29 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
     public static Task ReplyAsync(GameSession session, string text) =>
         session.SendGameAsync(BroadcastNotify, new BroadCastNotify { Content = text });
 
+    /// <summary>Longest announcement: the marquee scrolls one line, and a long one takes too long to read.</summary>
+    public const int AnnouncementMaxLength = 200;
+
+    /// <summary>
+    /// A message on every in-game player's marquee (BROADCAST_NOTIFY, as the original's maintenance notices): the GM
+    /// "!announce" and the host's loopback POST /ro3emu/announce (the admin panel's announcements and restart
+    /// countdowns). Returns how many players it reached; a session that has gone is skipped.
+    /// </summary>
+    public async Task<int> AnnounceAsync(string text)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return 0;
+        if (text.Length > AnnouncementMaxLength) text = text[..AnnouncementMaxLength];
+        int reached = 0;
+        foreach (var other in sessions.All().Where(s => s.Role != null))
+        {
+            try { await ReplyAsync(other, text); reached++; }
+            catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException) { }
+        }
+        log.LogInformation("Announcement to {Count} player(s): {Text}", reached, text);
+        return reached;
+    }
+
     private Dictionary<string, (string Usage, Command Run)> Commands() => _commands ??= new()
     {
         ["help"] = ("", (s, _) => ReplyAsync(s, "Commands: " + string.Join("  ", Commands().Select(c => $"!{c.Key} {c.Value.Usage}".Trim())))),
@@ -285,6 +308,11 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             else throw new ArgumentException("shape <players> <team> (players a multiple of team, more than one team) | shape reset | skip");
         }),
         ["online"] = ("", Online),
+        ["announce"] = ("<message> (every online player's marquee)", async (s, a) =>
+        {
+            int reached = await AnnounceAsync(string.Join(' ', a));
+            if (reached == 0) await ReplyAsync(s, "Usage: !announce <message>");
+        }),
         ["warp"] = ("<sceneEntry> [x z]", Warp),
         ["jump"] = ("<x> <z>", Jump),
         ["finditem"] = ("<name>", FindItem),
