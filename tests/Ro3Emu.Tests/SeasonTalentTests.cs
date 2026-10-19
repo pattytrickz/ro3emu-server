@@ -28,6 +28,8 @@ public sealed class SeasonTalentTests
         public GameSession Session => app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role != null);
         public CharacterService Character => app.Services.GetRequiredService<CharacterService>();
         public AccountStore Accounts => app.Services.GetRequiredService<AccountStore>();
+        public Ro3Emu.Server.Data.GameData Data => app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>();
+        public GameLoop Loop => app.Services.GetRequiredService<GameLoop>();
         public MapPoint TaskPoint(long scene, long point) => app.Services.GetRequiredService<WorldData>().Map(scene)!.Points[point];
         public string DatabaseFile => Path.Combine(dir, "state", "ro3emu.db");
         public string StateDir => Path.Combine(dir, "state");
@@ -452,6 +454,56 @@ public sealed class SeasonTalentTests
         Assert.Equal(1, fixture.Session.SeasonTalent!.Plan[0].TalentNodes[Root].CurrentLevel);
         Assert.Equal(40, fixture.Character.CountOf(fixture.Session, Remnant));
         Assert.Equal(400, fixture.Character.CountOf(fixture.Session, MintedCoin));
+    }
+
+    [ClientDataFact]
+    public async Task SecondJobTalentChoiceOpensItsGateAppliesItsSkillPassiveAndCanBeChanged()
+    {
+        const int Gate = 10102003, SonicOption = 10102105, SonicChoice = 10102107, OtherOption = 10102109, OtherChoice = 10102111;
+        const int After = 10102004, SonicOptionBuff = 1522501, SonicChoiceBuff = 1522701, OtherChoiceBuff = 1523001;
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        await using var player = await fixture.InWorld("Assassin");
+        await fixture.Gm("assassin", "!job 5200"); // Assassin, job rank 3: with Base 30, tree 10102's condition
+        await fixture.Gm("assassin", "!lvl 30");
+        await fixture.Gm("assassin", "!quest done 10101170");
+        await fixture.Gm("assassin", "!quest done 10103160");
+        var session = fixture.Session;
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            // 40 purchased levels open tree 10102; its first two nodes maxed open the gate (the live players' state).
+            var plan = session.SeasonTalent!.Plan[0];
+            foreach (int node in new[] { 10101001, 10101002, 10101003, 10101004, 10102001, 10102002 })
+                plan.TalentNodes[node].CurrentLevel = 10;
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(ErrorCodes.TalentLocked, await Upgrade(player, After)); // the gate blocks the rest of the tree
+        Assert.Equal(ErrorCodes.Parameter, await Upgrade(player, SonicOption)); // an option with choices is not a pick
+        Assert.Equal(0, await Upgrade(player, SonicChoice));
+        var picked = fixture.Session.SeasonTalent!.Plan[0].TalentNodes;
+        Assert.Equal([1, 1, 1], new[] { Gate, SonicOption, SonicChoice }.Select(n => picked[n].CurrentLevel));
+        Assert.True(fixture.Session.SeasonTalent.UnlockedNode[After]);
+        Assert.Equal(ErrorCodes.SkillMaxLevel, await Upgrade(player, SonicChoice));
+        Assert.Equal([SonicOptionBuff, SonicChoiceBuff],
+            session.Buffs.Where(b => b.IsTalentOwned).Select(b => b.ConfigId).Order());
+        // The passives reach casts: Sonic Blow's (15102) damage parameters carry the option's and the choice's modifiers.
+        Assert.Contains(SkillParameterRules.Active(session, fixture.Data), m => m.Group == 15102 && m.Type == 29);
+
+        Assert.Equal(0, await Upgrade(player, OtherChoice)); // a new pick under the same gate replaces the old one
+        picked = fixture.Session.SeasonTalent!.Plan[0].TalentNodes;
+        Assert.Equal([0, 0, 1, 1, 1],
+            new[] { SonicOption, SonicChoice, OtherOption, OtherChoice, Gate }.Select(n => picked[n].CurrentLevel));
+        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned && b.ConfigId is SonicChoiceBuff or SonicOptionBuff);
+        Assert.NotEqual(ErrorCodes.TalentLocked, await Upgrade(player, After)); // open: an ordinary paid node now
+
+        await player.DisposeAsync();
+        await using var again = await fixture.InWorld("Assassin", create: false);
+        var saved = await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
+        Assert.Equal(1, saved.Plan[0].All.TalentNodes[OtherChoice].CurrentLevel);
+        Assert.Equal(0, saved.Plan[0].All.TalentNodes[SonicChoice].CurrentLevel);
+        Assert.Contains(fixture.Session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
     }
 
     private static string RepoRoot()

@@ -12,6 +12,8 @@ namespace Ro3Emu.Server.Game;
 /// SeasonTalentEffectConfig level, 83552 selects a plan, 83553 renames one. The original server's path and
 /// plan policies are not captured: active-plan max-parent activation, five zero-based plans, and active-plan
 /// total levels for tree thresholds are inferred from the client graph and PublicParamConfig.SchemeNum=5.
+/// Job talents (second-job trees): a SkillPoint gate opens three options of three choices each; picking a choice is
+/// a free 83550 (SelectLockedAsync) whose passive buffs modify the job's skills.
 /// </summary>
 public sealed class SeasonTalentService
 {
@@ -19,22 +21,25 @@ public sealed class SeasonTalentService
     private const long TalentFunction = 1003, ParentFunction = 10, TalentTask = 10103160, ParentTask = 10101170;
     // (inferred) server-side limits: five zero-based plans, eight Unicode scalars, three-second switch cooldown.
     private const int PlanCount = 5, NameMaxRunes = 8, SwitchCooldownSeconds = 3;
-    private const int PvpNodeType = 4;
+    // enum_SeasonTalentType: PVP 4, SkillPoint 5 (a job-talent gate), Profession_L 6 (option), Profession_M 7 (choice).
+    private const int PvpNodeType = 4, GateType = 5, OptionType = 6, ChoiceType = 7;
     private readonly GameData data;
     private readonly CharacterService character;
     private readonly FunctionService functions;
     private readonly SeasonService seasons;
     private readonly RoleStore roles;
+    private readonly BuffService buffs;
     private readonly ILogger<SeasonTalentService> log;
 
     public SeasonTalentService(GameData data, CharacterService character, FunctionService functions,
-        SeasonService seasons, RoleStore roles, ILogger<SeasonTalentService> log)
+        SeasonService seasons, RoleStore roles, BuffService buffs, ILogger<SeasonTalentService> log)
     {
         this.data = data;
         this.character = character;
         this.functions = functions;
         this.seasons = seasons;
         this.roles = roles;
+        this.buffs = buffs;
         this.log = log;
         character.TalentAttributes = Attributes;
     }
@@ -61,6 +66,7 @@ public sealed class SeasonTalentService
         session.TalentEffectsEnabled = Available(session);
         BuildUnlocks(session);
         await CharacterService.SyncAsync(session, TalentSync, session.SeasonTalent, session.SeasonTalent.Clone);
+        await RefreshPassivesAsync(session);
         // Seeding false map keys at login cannot alter stats; avoid an extra pre-world 31008.
         if (before != session.TalentEffectsEnabled || (session.TalentEffectsEnabled
             && (!Same(oldTrees, session.SeasonTalent.UnlockedTrees)
@@ -88,7 +94,13 @@ public sealed class SeasonTalentService
         return 0;
     }
 
-    internal Task SyncGenrePlanAsync(GameSession session) => CharacterService.SyncAsync(session, TalentSync, session.SeasonTalent!, session.SeasonTalent!.Clone);
+    internal async Task SyncGenrePlanAsync(GameSession session)
+    {
+        await CharacterService.SyncAsync(session, TalentSync, session.SeasonTalent!, session.SeasonTalent!.Clone);
+        await RefreshPassivesAsync(session);
+    }
+
+    private Task RefreshPassivesAsync(GameSession s) => buffs.SetTalentPassivesAsync(s, JobTalentBuffs(s), notify: !s.SceneLoading);
 
     private bool HasTalentGraph() => Trees().Any(tree => tree.Id > 0) && Nodes().Count > 0;
 
@@ -115,8 +127,7 @@ public sealed class SeasonTalentService
         s.TalentEffectsEnabled = Available(s);
         Seed(state);
         var active = state.Plan[state.CurPlanId];
-        // (inferred) tree/node thresholds count the selected plan's purchased ordinary levels.
-        long total = active.TalentNodes.Where(kv => kv.Key != 10100000).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
+        long total = Total(active);
         state.UnlockedTrees.Clear();
         long? oathMax = null;
         foreach (var tree in Trees())
@@ -134,13 +145,25 @@ public sealed class SeasonTalentService
         // table no longer has are dropped as the old clear did.
         var nodes = Nodes();
         var plans = state.Plan.Values.ToArray(); // once, not two map views and enumerators per node
-        foreach (var node in nodes)
+        // A job-talent option opens with its gate and a choice with its option, so parents are published first.
+        // (inferred) They stay open after a choice: UI_Sys_Skill_SeasonTalent_SelectPanel reopens on a chosen gate.
+        foreach (var node in nodes) if (node.Type is not (OptionType or ChoiceType)) Publish(node);
+        foreach (var node in nodes) if (node.Type == OptionType) Publish(node);
+        foreach (var node in nodes) if (node.Type == ChoiceType) Publish(node);
+        if (state.UnlockedNode.Count != _nodeIds!.Count)
+            foreach (long stale in state.UnlockedNode.Keys.Where(k => !_nodeIds.Contains(k)).ToArray()) state.UnlockedNode.Remove(stale);
+        if (state.TalentNodes.Count != _nodeIds.Count)
+            foreach (long stale in state.TalentNodes.Keys.Where(k => !_nodeIds.Contains(k)).ToArray()) state.TalentNodes.Remove(stale);
+
+        void Publish(TalentNode node)
         {
             long id = node.Id, tree = node.Tree;
             bool pvp = node.Type == PvpNodeType;
             bool activated = state.UnlockedTrees.GetValueOrDefault(tree) && (pvp
                 ? state.BattleOathMaxLevel > 0 : total >= node.NeedLevel
-                    && (node.Start || ParentMaxed(active, id, tree)));
+                    && (node.Type is OptionType or ChoiceType
+                        ? Parents(id, tree).Any(p => state.UnlockedNode.GetValueOrDefault(p))
+                        : node.Start || ParentMaxed(active, id, tree)));
             state.UnlockedNode[id] = activated;
             // (inferred) the global node view exposes highest paid level across plans; selected-plan levels remain separate.
             long level = 0;
@@ -155,13 +178,19 @@ public sealed class SeasonTalentService
                 if (pvp) plan.TalentNodes[id].CurrentLevel = state.BattleOathLevel;
             }
         }
-        if (state.UnlockedNode.Count != _nodeIds!.Count)
-            foreach (long stale in state.UnlockedNode.Keys.Where(k => !_nodeIds.Contains(k)).ToArray()) state.UnlockedNode.Remove(stale);
-        if (state.TalentNodes.Count != _nodeIds.Count)
-            foreach (long stale in state.TalentNodes.Keys.Where(k => !_nodeIds.Contains(k)).ToArray()) state.TalentNodes.Remove(stale);
     }
 
-    private sealed record TalentNode(long Id, long Tree, long Type, long NeedLevel, bool Start);
+    /// <summary>(inferred) Tree/node thresholds count the plan's purchased ordinary levels; job-talent picks are free
+    /// selections, not purchased levels.</summary>
+    private long Total(SeasonTalentPlan plan)
+    {
+        Nodes();
+        return plan.TalentNodes.Where(kv => kv.Key != 10100000 && !IsJobTalentNode(kv.Key)).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
+    }
+
+    private bool IsJobTalentNode(long id) => _types!.GetValueOrDefault(id) is GateType or OptionType or ChoiceType;
+
+    private sealed record TalentNode(long Id, long Tree, long Type, long NeedLevel, bool Start, long Group);
     private sealed record TalentTree(long Id, double?[] Books, long Condition, long NeedLevel, long PvpLimit);
 
     /// <summary>SeasonTalentTreeConfig's rows (table order), read once: a login rebuilt the unlocks several times,
@@ -194,14 +223,25 @@ public sealed class SeasonTalentService
         }
         _parents = parents.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
         var nodes = rows.Select(r => new TalentNode(GameData.Int(r, "_iId"), GameData.Int(r, "_iTalentTreeID"), GameData.Int(r, "_iType"),
-            GameData.Int(r, "_iNeedLevel"), GameData.Int(r, "_iIsStartPoint") == 1)).Where(n => n.Id > 0).ToArray();
+            GameData.Int(r, "_iNeedLevel"), GameData.Int(r, "_iIsStartPoint") == 1, GameData.Int(r, "_iLevelGroupId")))
+            .Where(n => n.Id > 0).ToArray();
         _nodeIds = nodes.Select(n => n.Id).ToHashSet();
+        _types = nodes.ToDictionary(n => n.Id, n => n.Type);
+        _byId = nodes.ToDictionary(n => n.Id);
         return _nodes = nodes;
     }
 
     private TalentNode[]? _nodes;
     private HashSet<long>? _nodeIds;
+    private Dictionary<long, long>? _types;
+    private Dictionary<long, TalentNode>? _byId;
     private Dictionary<(long Node, long Tree), (long Parent, long Max)[]>? _parents;
+
+    private IEnumerable<long> Parents(long nodeId, long tree)
+    {
+        Nodes();
+        return _parents!.TryGetValue((nodeId, tree), out var parents) ? parents.Select(p => p.Parent) : [];
+    }
 
     private bool ParentMaxed(SeasonTalentPlan active, long nodeId, long tree)
     {
@@ -251,8 +291,12 @@ public sealed class SeasonTalentService
         int result;
         using (await CharacterService.Lock(s))
         {
-            result = UpgradeLocked(s, req.TalentId, out var cost, out var node, out var isOath);
-            if (result == 0)
+            bool select = Nodes().Count > 0 && _types!.GetValueOrDefault(req.TalentId) is OptionType or ChoiceType;
+            List<(int Entry, long Count)>? cost = null;
+            long node = req.TalentId;
+            bool isOath = false;
+            result = select ? await SelectLockedAsync(s, req.TalentId) : UpgradeLocked(s, req.TalentId, out cost, out node, out isOath);
+            if (result == 0 && !select)
             {
                 var next = s.SeasonTalent!.Clone();
                 if (isOath) next.BattleOathLevel++;
@@ -307,6 +351,102 @@ public sealed class SeasonTalentService
             ? character.ShortageOf(s, cost) : 0;
     }
 
+    /// <summary>
+    /// 83550 on a job talent. UI_Sys_Skill_SeasonTalent_SelectPanel opens on a SkillPoint gate, lists its options and
+    /// sends the choice picked under one of them; LC_SeasonTalentHelper.FindSelectedChild then shows the maxed option of
+    /// the gate and the maxed choice of that option. So the choice, its option and the gate each take their one level,
+    /// which also opens the gate's ordinary child. Their effect rows have no costs.
+    /// (inferred) A later choice under the same gate replaces the earlier one, free like the first.
+    /// </summary>
+    private async Task<int> SelectLockedAsync(GameSession s, long id)
+    {
+        if (s.SeasonTalent == null || s.Progress == null || !Available(s)) return ErrorCodes.FeatureUnavailable;
+        BuildUnlocks(s);
+        var state = s.SeasonTalent;
+        if (!state.UnlockedNode.GetValueOrDefault(id)) return ErrorCodes.TalentLocked;
+        // Walk up: choice -> option -> gate (an option without choices is picked directly).
+        var chain = new List<TalentNode> { _byId![id] };
+        while (chain[^1].Type != GateType)
+        {
+            var up = Parents(chain[^1].Id, chain[^1].Tree).Select(p => _byId.GetValueOrDefault(p))
+                .FirstOrDefault(p => p != null && p.Type == (chain[^1].Type == ChoiceType ? OptionType : GateType));
+            if (up == null) return ErrorCodes.TalentInvalid;
+            chain.Add(up);
+        }
+        if (chain[0].Type == OptionType && Children(chain[0]).Any(c => c.Type == ChoiceType)) return ErrorCodes.Parameter;
+        var plan = state.Plan[state.CurPlanId];
+        if (chain.All(n => plan.TalentNodes[n.Id].CurrentLevel >= 1)) return ErrorCodes.SkillMaxLevel;
+        // The picked rows must exist for this job (each family has its own row) and stay free.
+        foreach (var n in chain.Where(n => n.Type != GateType))
+            if (Effect(n.Group, 1, s.Progress.Career) is not { } effect || HasEntries(effect, "_kCosts")
+                || GameData.Int(effect, "_kSkillPointCosts") != 0) return ErrorCodes.FeatureUnavailable;
+
+        var next = state.Clone();
+        var picked = next.Plan[next.CurPlanId];
+        var gate = chain[^1];
+        foreach (var option in Children(gate).Where(c => c.Type == OptionType))
+        {
+            picked.TalentNodes[option.Id].CurrentLevel = 0;
+            foreach (var choice in Children(option).Where(c => c.Type == ChoiceType)) picked.TalentNodes[choice.Id].CurrentLevel = 0;
+        }
+        foreach (var n in chain) picked.TalentNodes[n.Id].CurrentLevel = 1;
+        BuildUnlocks(s, next);
+        try
+        {
+            var transaction = roles.NewTransaction();
+            transaction.RoleBlob(s.Role!.Id, "season_talent", next.ToByteArray());
+            await roles.CommitAsync(transaction, "season-talent/select", _ => s.SeasonTalent = next);
+        }
+        catch (Exception e) when (e is SqliteException or InvalidOperationException)
+        {
+            log.LogError(e, "Job talent choice {Node} for role {Role} failed", id, s.Role!.Id);
+            return ErrorCodes.Unknown;
+        }
+        await CharacterService.SyncAsync(s, TalentSync, next.Clone());
+        await RefreshPassivesAsync(s);
+        await character.RefreshStatsAsync(s);
+        return 0;
+    }
+
+    private IEnumerable<TalentNode> Children(TalentNode node)
+    {
+        Nodes();
+        return _nodes!.Where(n => n.Tree == node.Tree && Parents(n.Id, n.Tree).Contains(node.Id));
+    }
+
+    /// <summary>
+    /// Passive buffs (SpecialEffectConfig op 2) of the active plan's picked job talents. Their BuffConfig rows carry the
+    /// skill parameter modifiers SkillParameterRules applies to casts. Other special-effect operations (procs and
+    /// conditional bonuses: 12, 16, 19-22) are not interpreted.
+    /// </summary>
+    private HashSet<int> JobTalentBuffs(GameSession s)
+    {
+        var ids = new HashSet<int>();
+        if (!s.TalentEffectsEnabled || s.SeasonTalent is not { } state || s.Progress == null
+            || !state.Plan.TryGetValue(state.CurPlanId, out var plan)) return ids;
+        foreach (var node in Nodes())
+        {
+            if (node.Type is not (OptionType or ChoiceType) || !state.UnlockedNode.GetValueOrDefault(node.Id)
+                || !plan.TalentNodes.TryGetValue(node.Id, out var saved) || saved.CurrentLevel <= 0) continue;
+            foreach (var op in SpecialOps(node, saved.CurrentLevel, s.Progress.Career))
+                if (op.Length == 2 && op[0] == 2 && op[1] is > 0 and <= int.MaxValue && data.Row("BuffConfig", op[1]) != null)
+                    ids.Add((int)op[1]);
+        }
+        return ids;
+    }
+
+    private IEnumerable<long[]> SpecialOps(TalentNode node, long level, int career)
+    {
+        if (Effect(node.Group, level, career) is not { } effect || !effect.TryGetProperty("_kSpecialEffectList", out var list)
+            || list.ValueKind != JsonValueKind.Array) yield break;
+        foreach (var id in list.EnumerateArray())
+            if (data.Row("SpecialEffectConfig", (long)(GameData.Number(id) ?? 0)) is { } special
+                && special.TryGetProperty("_kSpecialEffect", out var ops) && ops.ValueKind == JsonValueKind.Array)
+                foreach (var op in ops.EnumerateArray())
+                    if (op.ValueKind == JsonValueKind.Array)
+                        yield return op.EnumerateArray().Select(v => (long)(GameData.Number(v) ?? 0)).ToArray();
+    }
+
     /// <summary>83552: all plans have complete node maps so the client's overlay clears old levels; (inferred) 3s cooldown.</summary>
     public async Task SetPlanAsync(GameSession s, SeasonTalentSetCurPlanReq req)
     {
@@ -331,6 +471,7 @@ public sealed class SeasonTalentService
                         s.TalentPlanSwitchUtc = DateTime.UtcNow;
                     });
                     await CharacterService.SyncAsync(s, TalentSync, next.Clone());
+                    await RefreshPassivesAsync(s);
                     await character.RefreshStatsAsync(s);
                 }
                 catch (Exception e) when (e is SqliteException or InvalidOperationException)
@@ -379,7 +520,7 @@ public sealed class SeasonTalentService
     {
         if (!Available(s) || s.SeasonTalent is not { } state || s.Progress == null
             || !state.Plan.TryGetValue(state.CurPlanId, out var plan)) yield break;
-        long total = plan.TalentNodes.Where(kv => kv.Key != 10100000).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
+        long total = Total(plan);
         foreach (var (id, saved) in plan.TalentNodes)
         {
             if (id == 10100000 || saved.CurrentLevel <= 0 || data.Row("SeasonTalentConfig", id) is not { } node) continue;
@@ -387,6 +528,13 @@ public sealed class SeasonTalentService
                 || total < GameData.Int(node, "_iNeedLevel")
                 || (GameData.Int(node, "_iIsStartPoint") != 1
                     && !ParentMaxed(plan, id, GameData.Int(node, "_iTalentTreeID")))) continue;
+            if (_byId!.TryGetValue(id, out var job) && job.Type is OptionType or ChoiceType)
+            {
+                // A job talent's plain attribute operation [1, attribute, value]; its passives are buffs.
+                foreach (var op in SpecialOps(job, saved.CurrentLevel, s.Progress.Career))
+                    if (op.Length == 3 && op[0] == 1) yield return (op[1], op[2]);
+                continue;
+            }
             var effect = Effect(GameData.Int(node, "_iLevelGroupId"), saved.CurrentLevel, s.Progress.Career);
             if (effect is { } row && Supported(row)) foreach (var pair in GameData.Pairs(row, "_kAttrs")) yield return pair;
         }
