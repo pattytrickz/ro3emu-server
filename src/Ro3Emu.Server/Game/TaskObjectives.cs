@@ -51,6 +51,14 @@ public sealed partial class TaskService
     // TaskTargetConfig row is not exported; counting a successful rescue, not an entry, is (inferred).
     private const int TDraculaWedding = 210010;
 
+    // The rootless side guides' remaining targets (Logic/ConditionSystem/LC_ConditionDefine.lua): 104007 CheckJoinGuild
+    // [104007, 1] "Join a guild" (10200080), 103019 CheckFriend [103019, n] "Make Lots of Friends" (10200090), and
+    // 106602 CheckTenBOSSWin [106602, n, npc...] "Clear a Five-Player Dungeon" (10200010, its three dungeon bosses) and
+    // the Phantom Realm / Conquer the World guides (306070/306080, the realm bosses; TenGameplayBossConfig lists them).
+    // R is 1 for the guild and the count otherwise (inferred, as the sibling Check* state and kill targets). Guild and
+    // friends are read as the state held now; a boss win is a kill of a listed boss the role took part in.
+    private const int TJoinGuild = 104007, TFriends = 103019, TTenBossWin = 106602;
+
     private readonly ConditionalWeakTable<MonsterUnit, HashSet<long>> _participants = new();
     private readonly HashSet<GameSession> _refreshQueued = new();
 
@@ -68,7 +76,9 @@ public sealed partial class TaskService
     private long Required(GameSession? session, long[] t) => t switch
     {
         [TDialog, _, _, _] or [TArea, _, _] or [TJobChange, _] or [TTaskDone, _] or [TJobRank, _] or [TAreaAction, _, _, _]
-            or [TGuide, _] or [TPydDownload, 1] or [TRentCareerSpecial, _] or [TValhallaLayer, _] => 1,
+            or [TGuide, _] or [TPydDownload, 1] or [TRentCareerSpecial, _] or [TValhallaLayer, _] or [TJoinGuild, 1] => 1,
+        [TFriends, var n] => n,
+        [TTenBossWin, var n, _, ..] => n,
         [TPlot or TBaseLevel or TSkillPoints or TStatPoints or TResonance or TTotalRefine or TRefineSlots
             or TRefineCount or TMvp or TMvpOnce or TCargo or TAfkSeconds or TTimedBattle or TCaravan
             or TTalentLevels or TPetsDeployed or TTowerFloor or TGuildHunt or TDraculaWedding, var n] => n,
@@ -107,6 +117,7 @@ public sealed partial class TaskService
             TDungeonPass => data.Row("DungeonConfig", t[1]) != null,
             TAreaAction => data.Row("MapConfig", t[1]) != null && t[2] > 0 && data.Row("PerformanceConfig", t[3]) != null,
             TKill or TKillInvolved => t[1..^1].All(npc => data.Row("NPCConfig", npc) != null),
+            TTenBossWin => t[2..].All(npc => data.Row("NPCConfig", npc) != null),
             TJobRank => t[1] > 0,
             TJobChange => data.Row("JobConfig", t[1]) != null,
             TTaskDone => Defs().ContainsKey(t[1]),
@@ -135,6 +146,8 @@ public sealed partial class TaskService
         return t[0] switch
         {
             TBaseLevel => p.Level,
+            TJoinGuild => s.Guild is { GuildId: not 0 } ? 1 : 0,
+            TFriends => friends.Friends(s.Role!.Id).Count,
             // 500130 [106901,3600] displays whole consumed minutes. Reading the committed
             // daily counter also repairs a disconnect between 5035 persistence and the quest sync (inferred).
             TAfkSeconds => s.WildAfk is { } afk && s.Daily?.DailyEpoch == afk.DailyEpoch ? afk.ConsumedTodaySeconds : 0,
@@ -327,6 +340,7 @@ public sealed partial class TaskService
             {
                 TKill when s == killer && t.Length >= 3 && t[1..^1].Contains(monster.Template.NpcId) => 1,
                 TKillInvolved when t.Length >= 3 && t[1..^1].Contains(monster.Template.NpcId) => 1,
+                TTenBossWin when t.Length >= 3 && t[2..].Contains(monster.Template.NpcId) => 1,
                 TMapKill when t.Length == 3 && t[1] == monster.SceneEntry => 1,
                 TKillOnMap when s == killer && t.Length == 3 && t[2] == monster.SceneEntry => 1,
                 _ => 0,
