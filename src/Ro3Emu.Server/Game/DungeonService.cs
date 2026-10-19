@@ -497,8 +497,13 @@ public sealed partial class DungeonService
             // (inferred) fallback, not proof that its 100m view/leash means automatic entry aggro.
             // No five-player preparation duration/start-button contract was recovered; GVE/Whale's
             // DungeonStart preparation UI belongs to other gameplay types. Story-wave engagement is unchanged.
+            // Story waves ("Defeat three waves of attacking monsters") spawn 22-27 m from the entry while their AI
+            // leash (_iUnFightParam) is 18-20 m: the engagement was dropped on the next tick and the wave stood still.
             if (a.Plan.Multi == null && Present(a).FirstOrDefault(s => !s.Dead && !s.SceneLoading) is { } target)
+            {
+                monster.IgnoresLeash = true;
                 monsters.Engage(monster, target);
+            }
         }
         a.Spawning = false;
         await AdvanceAsync(a);
