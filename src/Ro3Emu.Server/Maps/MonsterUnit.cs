@@ -55,6 +55,8 @@ public sealed class MonsterUnit : WorldUnit
     public long NextSwingMs { get; set; }
     public long NextChaseMs { get; set; }
     public bool Returning { get; set; }
+    /// <summary>A story wave sent at the players: it keeps chasing beyond its AI leash (DungeonService).</summary>
+    public bool IgnoresLeash { get; set; }
     public long LastCombatMs { get; set; }
     /// <summary>Live boss skill cooldowns for 31125/31127, keyed by actual cast row.</summary>
     public Dictionary<int, long> BossSkillCds { get; } = new();

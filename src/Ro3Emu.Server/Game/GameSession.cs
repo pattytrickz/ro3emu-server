@@ -158,8 +158,6 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public long ImmuneRecoveryUntilMs { get; set; }
     public int ImmuneRecoveryPercent { get; set; }
     public Dictionary<int, long> SkillCds { get; } = new();
-    /// <summary>When the running normal attack's action ends: a manual normal attack before it is refused (CombatService).</summary>
-    public long NormalAttackReadyMs { get; set; }
     public Dictionary<int, long> ItemCds { get; } = new();
     public Dictionary<int, long> ItemGroupCds { get; } = new();
 

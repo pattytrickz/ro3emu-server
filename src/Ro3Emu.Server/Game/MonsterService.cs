@@ -501,7 +501,7 @@ public sealed class MonsterService : MonsterBrain, IGameTicker
     {
         var target = m.Target!;
         bool lost = target.Role == null || target.Dead || target.SceneLoading || target.WorldScene != m.WorldScene
-                    || Distance(m.Home.X, m.Home.Z, target.Position.X, target.Position.Z) > m.Template.LeashDistance;
+                    || !m.IgnoresLeash && Distance(m.Home.X, m.Home.Z, target.Position.X, target.Position.Z) > m.Template.LeashDistance;
         if (lost)
         {
             Disengage(m, map);

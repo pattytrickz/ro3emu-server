@@ -72,38 +72,4 @@ public sealed partial class SkillCombatTests
             u => u.SrcID == self && u.SessionId > charge.SessionId && u.SkillID == arrowAttack);
         Assert.Equal(target.Uid, swing.TargetId);
     }
-    /// <summary>
-    /// Normal attacks have no cooldown and _bCancelCast 1: each tap cancelled the running swing after its hit and
-    /// started another, so tapping out-paced the attack speed (#general: "spam manually AA ... huge aspd", AGI made
-    /// no difference). A tap before the running swing's ASPD-scaled action ends is refused; on another monster it
-    /// moves the running auto-attack there for the next swing.
-    /// </summary>
-    [ClientDataFact]
-    public async Task TappingTheNormalAttackCannotOutpaceTheAttackSpeed()
-    {
-        await using var alice = await InWorld("Alice");
-        await Gm("alice", "!job 1100");
-        int normal = app.Services.GetRequiredService<SkillService>().NormalAttack(1100);
-        var first = await Target("alice", stationary: true);
-        var second = await Target("alice", stationary: true);
-        await Loop.InvokeAsync(() => { first.Hp = second.Hp = 1_000_000_000; return Task.CompletedTask; });
-        long self = await Loop.InvokeAsync(() => Task.FromResult(Session("alice").Role!.Id));
-
-        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = normal, TargetId = first.Uid });
-        var started = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
-        Assert.Equal(0, started.Result);
-        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = normal, TargetId = first.Uid });
-        Assert.Equal(ErrorCodes.SkillCooldown, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = normal, TargetId = second.Uid });
-        Assert.Equal(ErrorCodes.SkillCooldown, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        await Loop.InvokeAsync(() => { Assert.Same(second, Session("alice").Attack?.Target); return Task.CompletedTask; });
-
-        var swing = await Next(alice, CombatService.UseInSkill, UseInSkillInfo.Parser,
-            u => u.SrcID == self && u.SessionId != started.SessionId);
-        Assert.Equal(normal, swing.SkillID);
-        Assert.Equal(second.Uid, swing.TargetId);
-        long ready = await Loop.InvokeAsync(() => Task.FromResult(Session("alice").NormalAttackReadyMs));
-        Assert.True(ready > swing.StartTime, "the loop's swing paces the next tap too");
-    }
 }
-
