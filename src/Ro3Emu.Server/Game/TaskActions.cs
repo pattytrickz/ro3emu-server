@@ -64,6 +64,12 @@ public sealed partial class TaskService
                     if ((questMount ?? session.MountState.QuestMount) == recycle) questMount = 0;
                     break;
                 case 621 when action.Length == 1: cutScene = true; break;
+                // 115 MarkGuildActivityJoin [activity id] ends every guild activity quest (Guild Caravan 3000 ...
+                // the auction eligibility rows 109-111, 125, 3103-3106). Its mark feeds the original's guild activity
+                // statistics, which nothing here reads (auction eligibility is passed by each activity's owner), so a
+                // guild member's delivery records nothing; it was refused instead, and Guild Caravan's alone was
+                // retried 1,578 times on the live server (inferred: a member of a guild may deliver).
+                case 115 when action.Length == 2 && session.Guild?.GuildId is > 0: break;
                 default:
                     log.LogWarning("Task {Task} held at server action {Action}: resource semantics not implemented", def.Id, string.Join(',', action));
                     return false;

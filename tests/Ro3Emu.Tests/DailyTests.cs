@@ -836,6 +836,38 @@ public sealed class DailyTests : IAsyncLifetime
         Assert.Equal(0, await State(s => s.DailyRows!.ActivityData[3302].TaskCompleteTimes));
     }
 
+    /// <summary>
+    /// Every guild activity quest ends in server action 115 MarkGuildActivityJoin; it was not implemented, so none could
+    /// be delivered (Guild Caravan 1601000 alone was retried 1,578 times on the live server). A guild member delivers.
+    /// </summary>
+    [ClientDataFact]
+    public async Task AGuildMemberDeliversAGuildActivityQuest()
+    {
+        const int Caravan = 1601000;
+        await using var bot = await InWorld("Alice");
+        await app.Services.GetRequiredService<GameLoop>().InvokeAsync(() =>
+        {
+            var s = app.Services.GetRequiredService<SessionRegistry>().All().Single(x => x.Role != null);
+            s.Tasks!.Infos[Caravan] = new TaskInfo { TaskId = Caravan, Status = TaskState.Finish, CompleteNum = { 1 } };
+            return Task.CompletedTask;
+        });
+        async Task<int> Deliver()
+        {
+            await bot.SendGameAsync(TaskService.TaskDelivery, new TaskDeliveryReq { Req = { new TaskDeliverySingleReq { Id = Caravan } } });
+            var reply = await Next(bot, TaskService.TaskDelivery, TaskDeliveryResp.Parser);
+            return reply.Data.Count > 0 ? (int)reply.Data[0].Result : (int)(await Next(bot, TaskService.ApiError, APIErrorMsg.Parser)).ErrorCode;
+        }
+        Assert.NotEqual(0, await Deliver()); // not in a guild
+        await app.Services.GetRequiredService<GameLoop>().InvokeAsync(() =>
+        {
+            app.Services.GetRequiredService<SessionRegistry>().All().Single(x => x.Role != null).Guild = new DBRoleGuildInfo { GuildId = 1 };
+            return Task.CompletedTask;
+        });
+        await bot.SendGameAsync(TaskService.TaskDelivery, new TaskDeliveryReq { Req = { new TaskDeliverySingleReq { Id = Caravan } } });
+        for (int i = 0; i < 50 && await State(s => s.Tasks!.CompleteTaskNum.GetValueOrDefault(Caravan)) == 0; i++) await Task.Delay(100);
+        Assert.Equal(1, await State(s => s.Tasks!.CompleteTaskNum.GetValueOrDefault(Caravan))); // delivered
+    }
+
     private static string RepoRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

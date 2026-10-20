@@ -170,13 +170,12 @@ public sealed partial class DungeonTests
         await ActorsIn(alice, 0); // nothing is shown now
         await PlotEnd(alice, 140020);
 
+        // Nothing shows where the instrument is: the story's end moves the player onto its mark point, and the step
+        // that completes there completes at once (the first player to get here searched and gave up).
         await Stage(alice, 4, quest: 2);
-        var instrument = Service<WorldData>().Map(scene)!.Points[37];
-        await WalkTo(alice, instrument.X + 6, instrument.Y, instrument.Z); // not yet within its 4 m
-        await Task.Delay(200);
-        Assert.False(Session(alice).DungeonAttempt!.Settled);
-        await WalkTo(alice, instrument.X + 1, instrument.Y, instrument.Z);
         var result = await Next(alice, DungeonService.Result, DungeonResNotify.Parser);
+        var instrument = Service<WorldData>().Map(scene)!.Points[37];
+        Assert.True(MonsterService.Distance(Session(alice).Position.X, Session(alice).Position.Z, instrument.X, instrument.Z) < 1);
         Assert.Equal((DungeonRes)1, result.Res);
         await StoryMovesOn(alice, 10106270, 10106280);
         Assert.DoesNotContain(alice.Inbox.Snapshot().Where(e => e.IsGame(DungeonService.BaseInfo))

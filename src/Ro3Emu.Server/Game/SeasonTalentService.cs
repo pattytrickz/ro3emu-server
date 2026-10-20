@@ -521,20 +521,24 @@ public sealed class SeasonTalentService
         if (!Available(s) || s.SeasonTalent is not { } state || s.Progress == null
             || !state.Plan.TryGetValue(state.CurPlanId, out var plan)) yield break;
         long total = Total(plan);
+        Nodes();
         foreach (var (id, saved) in plan.TalentNodes)
         {
             if (id == 10100000 || saved.CurrentLevel <= 0 || data.Row("SeasonTalentConfig", id) is not { } node) continue;
+            if (_byId!.TryGetValue(id, out var job) && job.Type is OptionType or ChoiceType)
+            {
+                // A picked job talent counts as its passives do (JobTalentBuffs): unlocked and picked. The season tree's
+                // purchase rules (need level, parent maxed) never held for these free picks, so Cold-Blooded's
+                // "Physical ATK +15" never reached the sheet.
+                if (!s.TalentEffectsEnabled || !state.UnlockedNode.GetValueOrDefault(id)) continue;
+                foreach (var op in SpecialOps(job, saved.CurrentLevel, s.Progress.Career))
+                    if (JobTalentAttribute(s, op) is { } attribute) yield return attribute;
+                continue;
+            }
             if (!TreeEligible(s, GameData.Int(node, "_iTalentTreeID"), total)
                 || total < GameData.Int(node, "_iNeedLevel")
                 || (GameData.Int(node, "_iIsStartPoint") != 1
                     && !ParentMaxed(plan, id, GameData.Int(node, "_iTalentTreeID")))) continue;
-            if (_byId!.TryGetValue(id, out var job) && job.Type is OptionType or ChoiceType)
-            {
-                // A job talent's plain attribute operation [1, attribute, value]; its passives are buffs.
-                foreach (var op in SpecialOps(job, saved.CurrentLevel, s.Progress.Career))
-                    if (op.Length == 3 && op[0] == 1) yield return (op[1], op[2]);
-                continue;
-            }
             var effect = Effect(GameData.Int(node, "_iLevelGroupId"), saved.CurrentLevel, s.Progress.Career);
             if (effect is { } row && Supported(row)) foreach (var pair in GameData.Pairs(row, "_kAttrs")) yield return pair;
         }
@@ -545,6 +549,26 @@ public sealed class SeasonTalentService
             if (effect is { } row && Supported(row)) foreach (var pair in GameData.Pairs(row, "_kAttrs")) yield return pair;
         }
     }
+
+    /// <summary>
+    /// A job talent's attribute operation: [1, attribute, value] always (Cold-Blooded: Physical ATK +15);
+    /// [16, main-hand ItemConfig._iSubType, attribute, value] while that weapon type is held (Weapon Mastery: dagger 1
+    /// or katar 12, Physical ATK +20), as a passive skill's op 16; [19, skill group, level, attribute, value] while that
+    /// skill is learned to the level (Quick Hands: Katar Mastery 15107 and Dual-Wield Mastery 15101, AGI (2) +8 each,
+    /// one op per mastery). Attributes 1-6 are the base stats.
+    /// </summary>
+    private (long Id, double Value)? JobTalentAttribute(GameSession s, long[] op) => op switch
+    {
+        [1, var attribute, var value] => (attribute, value),
+        [16, var weapon, var attribute, var value] when weapon != 0 && MainHandType(s) == weapon => (attribute, value),
+        [19, var group, var level, var attribute, var value] when s.Progress!.Skills.GetValueOrDefault((int)group) >= Math.Max(1, level)
+            => (attribute, value),
+        _ => null,
+    };
+
+    private int MainHandType(GameSession s) =>
+        s.Items.FirstOrDefault(i => i.Pack == 2 && i.Grid == 1) is { } item && data.Row("ItemConfig", item.Entry) is { } row
+            ? (int)GameData.Int(row, "_iSubType") : 0;
 
     private bool TreeEligible(GameSession s, long treeId, long total) =>
         data.Row("SeasonTalentTreeConfig", treeId) is { } tree && Applies(tree)

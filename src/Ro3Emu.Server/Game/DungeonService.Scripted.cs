@@ -82,6 +82,14 @@ public sealed partial class DungeonService
                 DungeonEntry = a.Plan.SceneEntry, EventType = (DungeonEventType)4, // DungeonEventDungeonVarChange
                 StageNum = a.Wave + 1, LevelNum = 1, Vars = { new DungeonVar { VarId = StoryVar, Vi64 = { step.Story } } },
             });
+        // A step that completes where a player already stands (moved there by the last step's teleport, which sends no
+        // walk report) completes without waiting for a step of theirs: Louie's game ended at an unmarked point.
+        if (step.Complete.Any(t => t.Kind is Kind.Region or Kind.Point))
+            loop.PostLegacy(async () =>
+            {
+                foreach (var member in Present(a).Where(m => a.Loaded.Contains(m) && !m.SceneLoading).ToList())
+                    await PlayerMovedAsync(member);
+            }, "dungeon scripted step position");
     }
 
     /// <summary>
