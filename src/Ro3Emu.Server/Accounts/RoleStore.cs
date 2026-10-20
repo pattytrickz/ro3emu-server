@@ -35,6 +35,12 @@ public sealed class RoleProgress
 
     /// <summary>Skill bar: slot (1..6) -> skill group id.</summary>
     public Dictionary<int, int> SkillBar { get; } = new();
+
+    /// <summary>
+    /// Active skills a socketed card grants (group -> level), recomputed from the cards and never saved
+    /// (CharacterService.UpdateCardSkills).
+    /// </summary>
+    public Dictionary<int, int> CardSkills { get; } = new();
 }
 
 /// <summary>Characters in the same SQLite file as the accounts.</summary>

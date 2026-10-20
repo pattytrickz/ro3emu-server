@@ -373,6 +373,54 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(0, (await again.CreateRoleAsync("Carol2")).Result); // the name is free again
     }
 
+    /// <summary>
+    /// #bug-reports "Vitata card not giving special skill": Card: Vitata's CardConfig._kSkillAttribute is
+    /// SpecialEffectConfig 11000000, op [3, 2004401] "Allows use of Divine Light Lv. 1". While it is socketed the skill
+    /// is in 5025 (the Skills window's card skill list), goes on the bar and casts; taken out, it is gone again.
+    /// </summary>
+    [ClientDataFact]
+    public async Task ASocketedVitataCardGrantsDivineLightUntilItLeaves()
+    {
+        const int Vitata = 1430600, DivineLight = 20044, DivineLightLv1 = 2004401; // card part 6: accessory grids 6/7
+        await using var alice = await InWorld("Vita");
+        await Gm("vita", "!lvl 40");
+        await Gm("vita", $"!item {Vitata} 1");
+        var got = await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser, m => m.PackInfo.ContainsKey(3));
+        var cardInfo = got.PackInfo[3].All?.Items.Values.Single(i => i.ItemEntry == Vitata) ?? got.PackInfo[3].Inc.Items.Values.Single(i => i.All?.ItemEntry == Vitata).All;
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Vita");
+        var skills = _app.Services.GetRequiredService<SkillService>();
+        Assert.Empty(session.Progress!.CardSkills);
+
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role!.Id });
+        Assert.Equal(ErrorCodes.SkillNotLearned, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+
+        await alice.SendGameAsync(CardService.SlotInsert, new EquipmentCardInsertReq { EquipPos = (EquipGridType)6, CardGuid = cardInfo.ItemGuid, SlotIndex = 1 });
+        Assert.Equal(0, (await Next(alice, CardService.SlotInsert, EquipmentCardInsertResp.Parser)).Result);
+        Assert.Equal(1, session.Progress.CardSkills[DivineLight]);
+        var plans = skills.Build(session);
+        Assert.Contains(DivineLight, plans.SkillList);
+        Assert.Equal(1, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns[DivineLight].SkillLevel);
+
+        // On the bar like a learned skill: the saved plan keeps it, but it never becomes a learned (paid) level.
+        await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = SkillLoadOperation.SkillLoadOpLoad,
+            IsManual = true, SocketNum = 5, Info = new SkillData { SkillId = DivineLight, SkillLevel = 1 } }); // an empty slot
+        Assert.Equal(0, (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
+        Assert.DoesNotContain(DivineLight, session.Progress.Skills.Keys);
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role.Id });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+
+        await alice.SendGameAsync(CardService.SlotRemove, new EquipmentCardRemoveReq { EquipPos = (EquipGridType)6, SlotIndex = 1 });
+        Assert.Equal(0, (await Next(alice, CardService.SlotRemove, EquipmentCardRemoveResp.Parser)).Result);
+        Assert.Empty(session.Progress.CardSkills);
+        plans = skills.Build(session);
+        Assert.DoesNotContain(DivineLight, plans.SkillList);
+        Assert.DoesNotContain(DivineLight, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns.Keys);
+        Assert.DoesNotContain(DivineLightLv1, plans.SkillWheel.WhellSkills.Values.Select(w => w.SkillConfigId));
+        await Task.Delay(1500); // past Divine Light's cooldown, so the refusal is the missing card
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role.Id });
+        Assert.Equal(ErrorCodes.SkillNotLearned, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser, m => m.Result != 0)).Result);
+    }
+
     [ClientDataFact]
     public async Task ACardGoesIntoTheWeaponSocketAndBackAndCountsInStats()
     {

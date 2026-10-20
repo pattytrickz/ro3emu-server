@@ -41,6 +41,7 @@ public sealed class SkillService
         this.log = log;
         character.ProgressHandlers.Add(SyncAsync);
         character.EquipmentHandlers.Add(s => s.SkillPlans == null ? Task.CompletedTask : SyncAsync(s));
+        character.CardSkillsChanged.Add(s => s.SkillPlans == null ? Task.CompletedTask : SyncAsync(s));
     }
 
     /// <summary>SkillConfig row id of a group at a level (mode 0), or 0.</summary>
@@ -209,11 +210,16 @@ public sealed class SkillService
         int saved = p.Skills.GetValueOrDefault(group);
         foreach (var (old, replacement) in Replacements(p.Career))
             if (replacement == group) saved = Math.Max(saved, p.Skills.GetValueOrDefault(old));
-        return Math.Max(saved, initial);
+        return Math.Max(Math.Max(saved, initial), p.CardSkills.GetValueOrDefault(group));
     }
+
+    /// <summary>A card skill group (SkillConfig._iSystemType 3, enum_SkillSystemType.CardSkill): granted by a socketed card, never learned.</summary>
+    private bool IsCardSkill(int group) =>
+        RealId(group, 1) is var id and > 0 && data.Row("SkillConfig", id) is { } row && GameData.Int(row, "_iSystemType") == 3;
 
     private DBSkillData BuildFresh(GameSession session)
     {
+        character.UpdateCardSkills(session);
         var p = session.Progress!;
         int atk = NormalAttack(session);
         int atkGroup = data.Row("SkillConfig", atk) is { } a ? (int)GameData.Int(a, "_iSkillID") : 0;
@@ -221,6 +227,7 @@ public sealed class SkillService
         var skillData = new DBSkillData { MaxPlanCount = PlanCount, CurrentPlanIndex = 0, CurrentAtkSkillId = atk };
         if (atkGroup > 0) skillData.SkillList.Add(atkGroup);
         skillData.SkillList.Add(tree.Select(t => t.Group).Where(g => g != atkGroup).Distinct());
+        skillData.SkillList.Add(p.CardSkills.Keys.Where(g => !skillData.SkillList.Contains(g)).Order());
 
         var plan = new SkillPlan { IsUnlock = true };
         foreach (int group in skillData.SkillList)
@@ -441,6 +448,8 @@ public sealed class SkillService
                 foreach (var load in plan.ManualLoadSkill.Concat(plan.AutoLoadSkill).Concat(plan.SkillQueue.Values))
                     if (load.SkillId == old) load.SkillId = replacement;
             }
+            foreach (int group in plan.SkillAssigns.Keys.Where(g => IsCardSkill(g) && !generated.SkillList.Contains(g)).ToArray())
+                plan.SkillAssigns.Remove(group); // its card left the socket
             foreach (int group in generated.SkillList)
                 if (!plan.SkillAssigns.ContainsKey(group))
                     plan.SkillAssigns[group] = new SkillData { SkillId = group, SkillLevel = Initial(session.Progress!, group) };
@@ -464,6 +473,7 @@ public sealed class SkillService
             state.SkillWheel.WhellSkills.Clear();
             for (int slot = 1; slot <= Math.Min(BarSlots, selected.ManualLoadSkill.Count); slot++)
                 if (selected.ManualLoadSkill[slot - 1] is { SkillId: > 0 } skill
+                    && (!IsCardSkill(skill.SkillId) || Level(session.Progress!, skill.SkillId) > 0)
                     && RealId(skill.SkillId, skill.SkillLevel) is var id and > 0)
                     state.SkillWheel.WhellSkills[slot] = new SkillWheelSlot { SkillConfigId = id, Enable = true };
         }
@@ -528,6 +538,7 @@ public sealed class SkillService
         foreach (var (group, assignment) in source.SkillAssigns)
         {
             if (assignment.SkillLevel <= 1 && normalAttacks.Contains(group)) continue; // the held weapon's attack, or one shown 0
+            if (IsCardSkill(group)) continue; // shown while a card grants it (Level), never a learned plan entry
             if (assignment.SkillLevel < 0 || assignment.SkillLevel > MaxLevel(group)
                 || (!tree.ContainsKey(group) && assignment.SkillLevel > 0)) return ErrorCodes.SkillNotInTree;
             if (assignment.SkillId != 0 && assignment.SkillId != group) return ErrorCodes.Parameter;

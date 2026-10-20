@@ -403,6 +403,7 @@ public sealed partial class CharacterService
         foreach (var (key, value) in source.Currency) result.Currency[key] = value;
         foreach (var (key, value) in source.Skills) result.Skills[key] = value;
         foreach (var (key, value) in source.SkillBar) result.SkillBar[key] = value;
+        foreach (var (key, value) in source.CardSkills) result.CardSkills[key] = value;
         return result;
     }
 
@@ -416,6 +417,7 @@ public sealed partial class CharacterService
         target.Currency.Clear(); foreach (var (key, value) in source.Currency) target.Currency[key] = value;
         target.Skills.Clear(); foreach (var (key, value) in source.Skills) target.Skills[key] = value;
         target.SkillBar.Clear(); foreach (var (key, value) in source.SkillBar) target.SkillBar[key] = value;
+        target.CardSkills.Clear(); foreach (var (key, value) in source.CardSkills) target.CardSkills[key] = value;
     }
 
     private static void CopyItem(InvItem target, InvItem source)
