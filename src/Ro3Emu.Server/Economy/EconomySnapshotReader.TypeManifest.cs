@@ -36,7 +36,9 @@ public static partial class EconomySnapshotReader
     // Monster Hunt: role.area_concur is DBAreaConcurInfo (kill counters per monster and map, claimed stage markers,
     // the area's claimed-stage count). No balance: kill counters ride the monster-kill receipt, and a claim's goods are
     // granted by its own cd13e/monsterhunt-award receipt whose claimed marker is only that receipt's once-only source.
-    public const string ExpectedFormatManifestHash = "6F3AD57ECA3574DA6EA6ED8ABC95F87229A7C06938F446D0E6DD9ACEE9A86307";
+    // Growth classroom: TaskRuntimeState.GrowthRanksClaimed lists the claimed BecomeStrongerRankConfig ranks. No balance:
+    // a rank's goods are granted by its own award receipt, which saves the claimed rank as its once-only marker.
+    public const string ExpectedFormatManifestHash = "2F4FCB0AB017CD7CE96C265ED0F25A02E4495A1E96FE772D5B90B13D7AF7EDC8";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State
