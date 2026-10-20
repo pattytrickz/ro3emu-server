@@ -19,6 +19,21 @@ public sealed class Unit
     public bool Dead;
 }
 
+/// <summary>
+/// A party member as the party sync reports it (42048 roster, 42050 member cards every 2 s, 42051 position and HP):
+/// where the member is even when the bot cannot see them.
+/// </summary>
+public sealed class PartyMember
+{
+    public long Guid { get; init; }
+    public long MapId;
+    public int Line;
+    public float X, Y, Z;
+    public long Hp = 1, MaxHp = 1;
+    public bool Dead, Offline;
+    public DateTime Updated;
+}
+
 /// <summary>Something for the bot's brain to react to, raised from the network thread.</summary>
 public abstract record ViewEvent;
 public sealed record ChatHeard(long SenderId, string ReceiveId, string Content) : ViewEvent;
@@ -37,6 +52,10 @@ public sealed class SceneView
     private readonly object _lock = new();
     private readonly Dictionary<ulong, Unit> _units = new();
     private readonly Dictionary<long, int> _bag = new();
+    private readonly Dictionary<long, PartyMember> _party = new();
+    /// <summary>Recent hits between units: who each unit last hit, and who hit each unit (source, when).</summary>
+    private readonly Dictionary<ulong, (ulong Target, DateTime At)> _lastHit = new();
+    private readonly Dictionary<ulong, Dictionary<ulong, DateTime>> _hitBy = new();
     private readonly Channel<ViewEvent> _events = Channel.CreateBounded<ViewEvent>(
         new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.DropOldest });
 
@@ -44,6 +63,8 @@ public sealed class SceneView
     public ulong SelfUid { get; set; }
     public long SceneEntry { get; private set; }
     public long SceneId { get; private set; }
+    /// <summary>The map line (channel) the bot is on: two players on different lines of a map do not see each other.</summary>
+    public int Line { get; private set; }
     /// <summary>Counts scene switches (70010), so the brain loads each one exactly once.</summary>
     public int SceneGeneration { get; private set; }
     public bool Disconnected { get; private set; }
@@ -77,7 +98,11 @@ public sealed class SceneView
                 var sw = SwitchSceneLineResp.Parser.ParseFrom(body);
                 if (sw.Result != 0) return;
                 int generation;
-                lock (_lock) { _units.Clear(); SceneEntry = sw.SceneEntry; SceneId = sw.SceneID; generation = ++SceneGeneration; }
+                lock (_lock)
+                {
+                    _units.Clear(); _lastHit.Clear(); _hitBy.Clear();
+                    SceneEntry = sw.SceneEntry; SceneId = sw.SceneID; Line = sw.Linenum; generation = ++SceneGeneration;
+                }
                 _events.Writer.TryWrite(new SceneSwitched(sw.SceneEntry, sw.SceneID, generation));
                 break;
             case MsgId.EntitySelf:
@@ -143,6 +168,14 @@ public sealed class SceneView
                 lock (_lock)
                     foreach (var d in hit.Dsts)
                     {
+                        if (d.DamageType != DamageType.Heal && hit.SrcID != d.DstID)
+                        {
+                            var now = DateTime.UtcNow;
+                            _lastHit[(ulong)hit.SrcID] = ((ulong)d.DstID, now);
+                            if (!_hitBy.TryGetValue((ulong)d.DstID, out var sources)) _hitBy[(ulong)d.DstID] = sources = new();
+                            sources[(ulong)hit.SrcID] = now;
+                            if (_hitBy.Count > 512) PruneHits(now - TimeSpan.FromSeconds(30));
+                        }
                         if ((ulong)d.DstID == SelfUid)
                         {
                             if (d.IsDead) Dead = true;
@@ -183,7 +216,84 @@ public sealed class SceneView
             case TeamService.TeamBroadcastLeave:
                 _events.Writer.TryWrite(new PartyChanged(Left: BroadCastMemberLeave.Parser.ParseFrom(body).Guid, NewLeader: 0));
                 break;
+            case TeamService.TeamAll:
+                var all = TeamTotalDetailInfo.Parser.ParseFrom(body);
+                lock (_lock) { _party.Clear(); foreach (var card in all.MemberList.Values) Card(card); }
+                break;
+            case TeamService.TeamMemberUpdate:
+                var cards = TeamMemberChangeResp.Parser.ParseFrom(body);
+                lock (_lock) foreach (var card in cards.MemberList.Values) Card(card);
+                break;
+            case TeamService.TeamMemberBattleUpdate:
+                var battle = TeamMemberBattleInfoChangeRes.Parser.ParseFrom(body);
+                lock (_lock) if (_party.TryGetValue(battle.Guid, out var member) && battle.BattleInfo is { } info) Battle(member, info);
+                break;
         }
+    }
+
+    /// <summary>A member card (42048/42050): map, line, online state, and the battle info when it carries one.</summary>
+    private void Card(TeamMemberDetailInfo card)
+    {
+        if (!_party.TryGetValue(card.Guid, out var member)) _party[card.Guid] = member = new PartyMember { Guid = card.Guid };
+        member.MapId = card.MapId;
+        member.Line = card.LineId;
+        member.Offline = card.OnlineState == TeamMemberOnlineState.Offline;
+        member.Updated = DateTime.UtcNow;
+        if (card.BattleInfo is { } info) Battle(member, info);
+    }
+
+    /// <summary>42051 battle info: hpPercent / maxHpValue carry the absolute HP (TeamService.Detail), pos the position.</summary>
+    private static void Battle(PartyMember member, TeamMemberBattleInfo info)
+    {
+        if (info.Pos is { } p && (p.X != 0 || p.Z != 0)) (member.X, member.Y, member.Z) = (p.X, p.Y, p.Z);
+        member.MaxHp = Math.Max(1, info.MaxHpValue);
+        member.Hp = info.HpPercent;
+        member.Dead = info.PlayerLifeStatus == EPlayerLifeStatus.Dead;
+        member.Updated = DateTime.UtcNow;
+    }
+
+    /// <summary>A copy of a party member's last reported state, or null.</summary>
+    public PartyMember? Member(long guid)
+    {
+        lock (_lock)
+            return _party.TryGetValue(guid, out var m)
+                ? new PartyMember { Guid = m.Guid, MapId = m.MapId, Line = m.Line, X = m.X, Y = m.Y, Z = m.Z, Hp = m.Hp,
+                    MaxHp = m.MaxHp, Dead = m.Dead, Offline = m.Offline, Updated = m.Updated }
+                : null;
+    }
+
+    public void ForgetParty() { lock (_lock) _party.Clear(); }
+
+    private void PruneHits(DateTime before)
+    {
+        foreach (var (uid, hit) in _lastHit.ToArray()) if (hit.At < before) _lastHit.Remove(uid);
+        foreach (var (uid, sources) in _hitBy.ToArray())
+        {
+            foreach (var (source, at) in sources.ToArray()) if (at < before) sources.Remove(source);
+            if (sources.Count == 0) _hitBy.Remove(uid);
+        }
+    }
+
+    /// <summary>What <paramref name="uid"/> hit last, if within <paramref name="within"/>.</summary>
+    public ulong LastTargetOf(ulong uid, TimeSpan within)
+    {
+        lock (_lock)
+            return _lastHit.TryGetValue(uid, out var hit) && DateTime.UtcNow - hit.At <= within ? hit.Target : 0;
+    }
+
+    /// <summary>Units that hit <paramref name="uid"/> within <paramref name="within"/>.</summary>
+    public ulong[] AttackersOf(ulong uid, TimeSpan within)
+    {
+        var since = DateTime.UtcNow - within;
+        lock (_lock)
+            return _hitBy.TryGetValue(uid, out var sources) ? sources.Where(p => p.Value >= since).Select(p => p.Key).ToArray() : [];
+    }
+
+    /// <summary>Whether <paramref name="source"/> has hit <paramref name="uid"/> within <paramref name="within"/>.</summary>
+    public bool HasHit(ulong source, ulong uid, TimeSpan within)
+    {
+        lock (_lock)
+            return _hitBy.TryGetValue(uid, out var sources) && sources.TryGetValue(source, out var at) && DateTime.UtcNow - at <= within;
     }
 
     private void ApplySelf(long idx, long value)
