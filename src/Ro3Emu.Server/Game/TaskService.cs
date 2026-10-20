@@ -111,13 +111,15 @@ public sealed partial class TaskService
     public List<Func<GameSession, IEnumerable<TaskInfo>>> ExtraTasks { get; } = new();
 
     /// <summary>5027: the role's quests plus <see cref="ExtraTasks"/>, as the change since the last send.</summary>
-    public Task SyncTasksAsync(GameSession session)
+    public async Task SyncTasksAsync(GameSession session)
     {
-        if (session.Tasks == null) return Task.CompletedTask;
+        if (session.Tasks == null) return;
         var view = session.Tasks.Clone();
         foreach (var extra in ExtraTasks)
             foreach (var info in extra(session)) view.Infos[info.TaskId] = info;
-        return CharacterService.SyncAsync(session, TaskInfoSync, view);
+        await CharacterService.SyncAsync(session, TaskInfoSync, view);
+        // The growth classroom counts the quests just sent (5045 goes out only when it changed).
+        await SyncGrowthClassAsync(session);
     }
 
     public static bool IsDelivered(GameSession session, long taskId) =>
@@ -643,7 +645,7 @@ public sealed partial class TaskService
             Accept(session, id);
             accepted++;
         }
-        return accepted + AcceptGrowthTitle(session);
+        return accepted + AcceptGrowthTitle(session) + AcceptGrowthClass(session);
     }
 
     private const int TaskTypeSide = 2, TaskTypeGuide = 3; // enum_TaskType

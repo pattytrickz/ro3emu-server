@@ -236,6 +236,10 @@ public sealed class CoreMessages(RoleSessionService roleSessions, ChatService ch
         {
             await tasks.DeliverAsync(session, TaskDeliveryReq.Parser.ParseFrom(body.Span));
         });
+        routes.Map(TaskService.GrowthClassRankReward, "tasks", async (session, msgId, body) =>
+        {
+            await tasks.ClaimGrowthRankAsync(session, GrowthClassGetRankRewardReq.Parser.ParseFrom(body.Span));
+        });
         routes.Map(TaskService.TaskGiveUp, "tasks", async (session, msgId, body) =>
         {
             await tasks.GiveUpAsync(session, TaskGiveUpReq.Parser.ParseFrom(body.Span));

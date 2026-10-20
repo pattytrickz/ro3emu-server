@@ -121,7 +121,9 @@ public abstract class GateListener(IPAddress address, int port, ILogger log, Dia
         {
             await channel.RunAsync(OnFrameAsync, ct);
         }
-        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException)
+        // ObjectDisposedException: the server closed the socket itself while it was receiving (a kick, such as the
+        // launcher gate's disconnect), an ordinary end of the connection.
+        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ObjectDisposedException)
         {
         }
         catch (Exception e)

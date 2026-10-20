@@ -171,6 +171,40 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.DoesNotContain(dagger, bagAgain.PackInfo[2].All.Items.Keys);
     }
 
+    /// <summary>
+    /// #bug-reports "Growth curriculum implemented?": the Become Stronger classroom's tasks (TaskConfig type 20) are
+    /// offered once their module opens, the ordinary objectives count them ("Allocate 5 stat points", 1700010), 5045
+    /// reports the completed count, and a reached rank pays its reward once.
+    /// </summary>
+    [ClientDataFact]
+    public async Task GrowthClassroomOffersItsTasksCountsThemAndPaysARankOnce()
+    {
+        await using var alice = await InWorld("Grower");
+        await Gm("grower", "!lvl 20");
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Grower");
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (session.Tasks?.Infos.ContainsKey(1700010) != true && DateTime.UtcNow < deadline) await Task.Delay(100);
+        Assert.True(session.Tasks!.Infos.ContainsKey(1700010), "the classroom's first task was not offered");
+
+        var req = new AllocateAttrPointReq { PlanIndex = 0 };
+        foreach (var (stat, value) in new[] { (1, 5), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1) }) req.Points[stat] = value;
+        await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
+        Assert.Equal(0, (await Next(alice, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser)).Result);
+        var growth = await Next(alice, TaskService.GrowthClassSync, DBGrowthClassInfoIncrement.Parser, m => m.RankProgress >= 1);
+        Assert.True(growth.RankProgress >= 1);
+        Assert.True(TaskService.IsDelivered(session, 1700010));
+
+        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        Assert.Equal(0, (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser)).Result);
+        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        Assert.Equal(ErrorCodes.RewardClaimed,
+            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.Result != 0)).Result);
+        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 2 });
+        Assert.Equal(ErrorCodes.TaskRequirements,
+            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 2)).Result);
+        Assert.Contains(1L, session.TaskRuntime.GrowthRanksClaimed);
+    }
+
     [ClientDataFact]
     public async Task GmLevelGrantsStatPointsAndPointsCanBeSpent()
     {
