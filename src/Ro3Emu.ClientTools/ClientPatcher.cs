@@ -36,6 +36,9 @@ public static class ClientPatcher
     private const string HooksFile = "Ro3Emu.ClientHooks.dll";
     private const string LocFile = "Ro3Emu.Loc.dll";
 
+    /// <summary>Raised whenever the patch writes something different, so launchers patch their folders again.</summary>
+    public const int Revision = 2; // 2: release 140069's sealed login callbacks
+
     /// <summary>
     /// The patched DLLs' SHA-256 as last written, one "file\thash" per line in the backup folder. A Managed DLL that
     /// matches neither this nor its backup was replaced by someone else: a game update (the publisher's launcher or
@@ -83,6 +86,7 @@ public static class ClientPatcher
             Func<ModuleDefinition, string>? extra = file switch
             {
                 "Assembly-CSharp.dll" => m => RedirectChat(m, hooksDll) + "; " + TextSink.PatchLanguageGet(m, locDll),
+                "Happyengine.Network.dll" => OpenSealedFallbackCallbacks,
                 "Happyengine.Base.Runtime.dll" when VerboseLogs => ForceShowLog,
                 "Unity.TextMeshPro.dll" => m => TextSink.PatchTmp(m, locDll, hooksDll),
                 "HUD.dll" => m => TextSink.PatchHud(m, locDll),
@@ -333,6 +337,26 @@ public static class ClientPatcher
         vil.Append(vil.Create(OpCodes.Ldc_I4_1));
         vil.Append(vil.Create(OpCodes.Ret));
         return "chat -> ServerImAdapter";
+    }
+
+    /// <summary>
+    /// Release 140069 ("sealed-origins") wraps the SDK login coroutine: HttpNetworkManager.RecoveryOfficialSdkLoginStart
+    /// makes a delegate of SealedFallback_SelectionFailed, a private method of the nested coroutine class. Mono refuses
+    /// that (MethodAccessException) and the login is never sent, so Start Game does nothing. Such private methods of
+    /// HttpNetworkManager's nested types become assembly-internal, which the outer class may use. Older clients have none.
+    /// </summary>
+    private static string OpenSealedFallbackCallbacks(ModuleDefinition module)
+    {
+        var manager = module.GetType("HttpNetworkManager");
+        if (manager == null) return "HttpNetworkManager not found (sealed login unchanged)";
+        int opened = 0;
+        foreach (var nested in manager.NestedTypes)
+            foreach (var method in nested.Methods.Where(m => m.Name.StartsWith("SealedFallback_", StringComparison.Ordinal) && m.IsPrivate))
+            {
+                method.IsAssembly = true;
+                opened++;
+            }
+        return opened == 0 ? "no sealed login callbacks" : $"sealed login callbacks opened: {opened}";
     }
 
     /// <summary>The hooks DLL ships inside this tool (EmbeddedResource); a repo build is the fallback for development.</summary>
