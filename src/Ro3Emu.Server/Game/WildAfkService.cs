@@ -101,6 +101,13 @@ public sealed class WildAfkService : IGameTicker
     private bool Unlocked(GameSession s) => s.Progress != null && functions.IsOpen(s, 18);
     private bool Field(GameSession s) => s.InstanceId == 0 && data.Row("MapConfig", s.SceneEntry) is { } map
         && GameData.Int(map, "_iSceneType") == 1; // enum scene type: field; private/dungeon maps never qualify.
+    /// <summary>
+    /// enum_SceneType Cave (6): the shared hunting dungeons beside the fields (Undersea Tunnel, Abandoned Mine, Hidden
+    /// Forest; MapConfig _iCaveBelongsTo names their field), home of the level 34-45 monsters. Bonus Time cannot be
+    /// enabled there (AfkDungeon), so without ServerOptions.BonusExpAlways their kills pay the reduced table (a tenth).
+    /// </summary>
+    private bool Cave(GameSession s) => s.InstanceId == 0 && data.Row("MapConfig", s.SceneEntry) is { } map
+        && GameData.Int(map, "_iSceneType") == 6;
     private bool Ordinary(MonsterUnit monster) => data.Row("NPCConfig", monster.Template.NpcId) is { } npc
         && GameData.Int(npc, "_iWildMonsters") == 1 && GameData.Int(npc, "_iNPCSubType") is 1 or 2;
     private bool MvpAggro(GameSession s) => world.AllUnits().OfType<MonsterUnit>().Any(m => !m.Dead && !m.Returning
@@ -525,8 +532,10 @@ public sealed class WildAfkService : IGameTicker
     /// configured Bonus Time environment (localization 10960000077; environment mapping inferred).</summary>
     private async Task<bool> BeforeKillAsync(GameSession s, MonsterUnit monster)
     {
-        if (!Field(s) || !Ordinary(monster)) return false;
-        // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field kill, locked panel or not.
+        if (!Ordinary(monster)) return false;
+        // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field kill, locked panel or not. The
+        // house rule also covers the caves, where the panel itself stays refused ("Cannot Enable Bonus in a Dungeon").
+        if (!Field(s)) return options.Value.BonusExpAlways && Cave(s);
         bool always = options.Value.BonusExpAlways;
         if (!Unlocked(s) || s.WildAfk is not { } state) return always;
         if (BeforeKillGateForTest is { } beforeGate) await beforeGate();

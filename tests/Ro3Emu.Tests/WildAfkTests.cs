@@ -343,6 +343,44 @@ public sealed class WildAfkTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// #bug-reports "Exp bug?": the caves (enum_SceneType Cave 6: Undersea Tunnel, Abandoned Mine, Hidden Forest) are
+    /// hunting maps like the fields. A Base 42 player's kill of a level-40 Undersea Tunnel monster (5000089: env 0
+    /// item 100 x31, env 1 x314) pays the Bonus Time table there too.
+    /// </summary>
+    [ClientDataFact]
+    public async Task BonusExpAlwaysPaysTheBonusTableInTheCaves()
+    {
+        await using var bot = await InWorld();
+        await Gm(bot, "!lvl 42");
+        await Warp(bot, 10141);
+        var options = Service<IOptions<ServerOptions>>().Value;
+        options.BonusExpAlways = true;
+        try
+        {
+            long uid = 0;
+            Vec3 position = null!;
+            await OnLoop(() =>
+            {
+                var monster = Service<World>().Map(Session(bot).WorldScene).Units.OfType<MonsterUnit>()
+                    .First(m => !m.Dead && m.Template.NpcId == 5000089);
+                monster.Hp = 1; monster.Moving = false; monster.NextRoamMs = long.MaxValue;
+                uid = monster.Uid; position = monster.Pos;
+                return Task.CompletedTask;
+            });
+            await bot.SendGameAsync(MsgId.Walk, new WalkReq { Pos = position, BStop = true, SpeedRate = 1 });
+            await bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = uid });
+            Assert.Equal(0, (await Next(bot, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+            var reward = await Next(bot, CharacterService.GetRewardNotify, GetRewardNotify.Parser,
+                x => x.RewardType.Contains(1) && x.Rewards.Any(i => i.ItemEntry == 100 && i.Stack < 1000));
+            Assert.Equal(314, reward.Rewards.Single(i => i.ItemEntry == 100).Stack);
+        }
+        finally
+        {
+            options.BonusExpAlways = false;
+        }
+    }
+
     [ClientDataFact]
     public async Task MonitorCapsIdleChargeAndAutoOffPauseAndSceneExitStopConsumption()
     {
