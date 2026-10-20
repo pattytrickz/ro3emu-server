@@ -431,4 +431,8 @@ public sealed class TaskRuntimeState
     public bool InCutScene { get; set; }
     /// <summary>BecomeStrongerRankConfig ranks whose growth classroom reward was claimed (TaskService.GrowthClass).</summary>
     public HashSet<long> GrowthRanksClaimed { get; set; } = new();
+
+    /// <summary>A deep copy carrying every field: a prospective state built from it never drops one.</summary>
+    public TaskRuntimeState Clone() =>
+        System.Text.Json.JsonSerializer.Deserialize<TaskRuntimeState>(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(this))!;
 }

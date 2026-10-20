@@ -203,6 +203,18 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(ErrorCodes.TaskRequirements,
             (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 2)).Result);
         Assert.Contains(1L, session.TaskRuntime.GrowthRanksClaimed);
+
+        // #bug-reports "Growth Rewards reset": delivering any quest rebuilt the task runtime without the claimed ranks,
+        // so the same rank paid again (88 times for one player).
+        await Gm("grower", "!quest done 10101010");
+        Assert.True(TaskService.IsDelivered(session, 10101010));
+        Assert.Contains(1L, session.TaskRuntime.GrowthRanksClaimed);
+        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        Assert.Equal(ErrorCodes.RewardClaimed,
+            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 1 && m.Result != 0)).Result);
+        var saved = System.Text.Json.JsonSerializer.Deserialize<TaskRuntimeState>(
+            _app.Services.GetRequiredService<RoleStore>().LoadTaskRuntime(session.Role!.Id)!)!;
+        Assert.Contains(1L, saved.GrowthRanksClaimed);
     }
 
     [ClientDataFact]

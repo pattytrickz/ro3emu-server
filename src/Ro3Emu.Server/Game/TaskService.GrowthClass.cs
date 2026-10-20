@@ -102,8 +102,7 @@ public sealed partial class TaskService
         else if (GrowthCompleted(session) < rank.Needed) result = ErrorCodes.TaskRequirements;
         else
         {
-            var next = System.Text.Json.JsonSerializer.Deserialize<TaskRuntimeState>(
-                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(session.TaskRuntime))!;
+            var next = session.TaskRuntime.Clone();
             next.GrowthRanksClaimed.Add(rank.Rank);
             try
             {
