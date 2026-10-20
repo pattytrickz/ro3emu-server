@@ -119,6 +119,41 @@ public sealed partial class CharacterService
 
     private Dictionary<(long, long), JsonElement>? _cardRows;
 
+    /// <summary>Card active skills changed (a card went in or out of a socket): SkillService resends 5025.</summary>
+    public List<Func<GameSession, Task>> CardSkillsChanged { get; } = new();
+
+    /// <summary>
+    /// Card skills: CardConfig._kSkillAttribute names SpecialEffectConfig rows; op [3, SkillConfig id]
+    /// (enum_SpecialEffectType.Skill, "Allows use of Divine Light Lv. 1") grants that active skill while the card is
+    /// socketed, like the card stats (five cards, Vitata's Divine Light among them). The client lists them from 5025
+    /// (UI_Sys_SkillPanelModel.GetCardSkillList: skill groups with _iSystemType 3). Op 2 (Buff: on-hit chance effects)
+    /// stays unimplemented. Returns whether the set changed.
+    /// </summary>
+    internal bool UpdateCardSkills(GameSession session)
+    {
+        if (session.Progress is not { } progress) return false;
+        var granted = new Dictionary<int, int>();
+        foreach (var card in session.Items.Where(i => i.Grid < 0))
+        {
+            int tier = (int)(card.Attrs?.GetValueOrDefault(AttrCardStar) ?? 0);
+            if (CardRow(card.Entry, tier) is not { } cardRow || !cardRow.TryGetProperty("_kSkillAttribute", out var effects)
+                || effects.ValueKind != JsonValueKind.Array) continue;
+            foreach (var effectId in effects.EnumerateArray())
+            {
+                if (GameData.Number(effectId) is not { } id || data.Row("SpecialEffectConfig", (long)id) is not { } effect) continue;
+                foreach (var op in EquipmentAffixes.Rows(effect, "_kSpecialEffect"))
+                    if (op.Length == 2 && op[0] == 3 && data.Row("SkillConfig", op[1]) is { } skill
+                        && GameData.Int(skill, "_iSkillID") is var group and > 0)
+                        granted[(int)group] = Math.Max(granted.GetValueOrDefault((int)group), (int)GameData.Int(skill, "_iLevel"));
+            }
+        }
+        if (granted.Count == progress.CardSkills.Count && granted.All(g => progress.CardSkills.GetValueOrDefault(g.Key) == g.Value))
+            return false;
+        progress.CardSkills.Clear();
+        foreach (var (group, level) in granted) progress.CardSkills[group] = level;
+        return true;
+    }
+
     private bool IsEquipment(int entry) => data.Row("ItemConfig", entry) is { } row && GameData.Int(row, "_iType") == ItemTypeEquip;
 
     /// <summary>LC_ItemProtoParse.ParseEquipInfo: only itemInfos[3] == 1 is appraised.</summary>
