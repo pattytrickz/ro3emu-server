@@ -198,7 +198,8 @@ public sealed class LauncherController : IDisposable
             else
             {
                 long size = _official.Full.Sizes.Download > 0 ? _official.Full.Sizes.Download : _official.Full.Sizes.Expanded;
-                PostState("install", (size > 0 ? $"About {size / (double)(1L << 30):0} GB" : "The game") + $" from the official servers into {dir}. You can change the folder in Settings.");
+                PostState("install", (size > 0 ? $"About {size / (double)(1L << 30):0} GB" : "The game") + $" from the official servers into {dir}. You can change the folder in Settings."
+                    + (Unsupported(_official.Full.Release.Sequence) ? $" The current release isn't supported by {_config.ServerName} yet: logging in will work after a launcher update." : ""));
             }
             return;
         }
@@ -208,10 +209,21 @@ public sealed class LauncherController : IDisposable
             return;
         }
         long remote = _official.Full.Release.Sequence;
+        if (Unsupported(remote))
+        {
+            // Keep the folder as it is: this release's client doesn't reach our server.
+            if (installed is { } held && Unsupported(held))
+                PostState("ready", $"This game folder has release {held}, which {_config.ServerName} doesn't support yet. Watch Discord for a launcher update.");
+            else PostState("ready", $"Release {remote} isn't supported by {_config.ServerName} yet, so the game stays on {(installed is { } kept ? $"release {kept}" : "the installed release")}.");
+            return;
+        }
         if (installed is null) PostState("update", "Check this game folder against the official release before the first launch.");
         else if (installed < remote) PostState("update", $"A game update is available (release {remote}).");
         else PostState("ready");
     }
+
+    /// <summary>A publisher release newer than launcher.json "maxGameRelease".</summary>
+    bool Unsupported(long release) => _config.MaxGameRelease > 0 && release > _config.MaxGameRelease;
 
     async Task UpdateAsync(bool verifyAll)
     {
@@ -229,6 +241,12 @@ public sealed class LauncherController : IDisposable
         {
             await CheckAsync();
             if (_official is null) return;
+        }
+        // A repair would install the unsupported release over the game folder. A new install has nothing to keep.
+        if (_publisher is not null && PublisherGame.IsClient(_layout.GameDirectory) && Unsupported(_official!.Full.Release.Sequence))
+        {
+            PostState("ready", $"Release {_official.Full.Release.Sequence} isn't supported by {_config.ServerName} yet, so the game files are left as they are.");
+            return;
         }
         Directory.CreateDirectory(_layout.GameDirectory);
         _work = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
