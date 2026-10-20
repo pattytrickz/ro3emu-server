@@ -184,6 +184,9 @@ public sealed class ReconnectService
         }
     }
 
+    /// <summary>Closes the client with a DisconnectClient reason and no reconnect grace (ServerHost.LauncherGate).</summary>
+    internal void Disconnect(GameSession session, int reason) => Kick(session, reason);
+
     private void Kick(GameSession session, int reason)
     {
         Revoke(session);

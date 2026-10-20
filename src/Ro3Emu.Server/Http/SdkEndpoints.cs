@@ -27,7 +27,8 @@ public static class SdkEndpoints
     {
         app.MapGet(GateKeyPath, (Net.GateCrypto crypto) => Results.Text(crypto.PublicKeyPem, "application/x-pem-file"));
 
-        app.MapPost(LoginPath, async (HttpRequest request, AccountStore accounts, AccessList access, ILogger<AccountStore> log) =>
+        app.MapPost(LoginPath, async (HttpRequest request, AccountStore accounts, AccessList access, LauncherVersions launchers,
+            ILogger<AccountStore> log) =>
         {
             var form = await request.ReadFormAsync();
             string identity = form["identity"].ToString().Trim();
@@ -53,17 +54,22 @@ public static class SdkEndpoints
             }
             var result = await accounts.LoginAsync(identity, credential);
             if (result == AccountStore.LoginResult.Registered) access.Used(identity);
-            log.LogInformation("SDK login {Identity}: {Result}", identity, result);
+            var launcher = launchers.Of(request.HttpContext);
+            log.LogInformation("SDK login {Identity}: {Result} (launcher {Launcher})", identity, result,
+                launcher == LauncherVersions.Exempt ? "local" : launcher?.ToString() ?? "none");
             if (result == AccountStore.LoginResult.BadPassword)
             {
                 return Results.Json(new { code = 401 });
             }
+            launchers.Record(identity, launcher);
             return Results.Json(new { code = 0, data = new { token = await accounts.IssueSdkTokenAsync(identity) } });
         });
 
-        app.MapGet(ServerListPath, (IOptions<ServerOptions> options) =>
+        app.MapGet(ServerListPath, (HttpContext context, IOptions<ServerOptions> options, LauncherVersions launchers) =>
         {
             var o = options.Value;
+            // An outdated launcher's client reads the reason in the server list (the role is turned away in game).
+            bool outdated = launchers.Outdated(launchers.Of(context));
             string microGate = $"{o.PublicHost}:{o.MicroGatePort}";
             string gameGate = $"{o.PublicHost}:{o.GameGatePort}";
             // `ext` is a JSON string that Lua decodes and uses as the cluster entry (LC_LoginManager._GetAreaListCallback).
@@ -75,7 +81,7 @@ public static class SdkEndpoints
                 season = 1,
                 is_cross_area = false,
                 need_in_white = false,
-                areas = new[] { new { area = AreaId, name = o.AreaName, big_area = BigArea } },
+                areas = new[] { new { area = AreaId, name = outdated ? "Update your launcher" : o.AreaName, big_area = BigArea } },
             });
             var body = new
             {
@@ -87,7 +93,7 @@ public static class SdkEndpoints
                     ms_gate = new[] { microGate },
                     clusters = new[]
                     {
-                        new { cluster_id = o.ClusterId, name = o.ClusterName, state = 1, game_gate = new[] { gameGate }, ext },
+                        new { cluster_id = o.ClusterId, name = outdated ? "Update your launcher" : o.ClusterName, state = 1, game_gate = new[] { gameGate }, ext },
                     },
                 },
             };

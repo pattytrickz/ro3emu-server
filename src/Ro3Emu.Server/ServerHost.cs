@@ -45,6 +45,7 @@ public static class ServerHost
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GameLoop>());
         builder.Services.AddSingleton<AccountStore>();
         builder.Services.AddSingleton<AccessList>();
+        builder.Services.AddSingleton<Http.LauncherVersions>();
         builder.Services.AddSingleton<RoleStore>();
         builder.Services.AddSingleton<Game.Ownership.OwnerRegistry>();
         builder.Services.AddSingleton<Game.Ownership.RoleHandover>();
@@ -189,6 +190,18 @@ public static class ServerHost
             .Configure(session => app.Services.GetRequiredService<RoleSessionService>().CleanupRoleAsync(session),
                 session => app.Services.GetRequiredService<RoleSessionService>().CleanupReservation(session));
         app.Services.GetRequiredService<Diagnostics.ServerMetrics>().Owners = app.Services.GetRequiredService<Game.Ownership.OwnerRegistry>();
+        // Sol RO3 Launcher 1.2.2+ patches client URLs under /launcher/{version}: strip it before routing (hence the
+        // explicit UseRouting) and keep the version for the SDK login and the server list (Http.LauncherVersions).
+        app.Use((context, next) =>
+        {
+            if (Http.LauncherVersions.TryStrip(context.Request.Path, out var launcher, out var rest))
+            {
+                context.Items[Http.LauncherVersions.ItemKey] = launcher;
+                context.Request.Path = rest;
+            }
+            return next();
+        });
+        app.UseRouting();
         app.Use(async (context, next) =>
         {
             if (HttpMethods.IsPost(context.Request.Method) && app.Services.GetRequiredService<GameLoop>().Phase != GameLoopPhase.Accepting)
@@ -200,6 +213,7 @@ public static class ServerHost
             await next();
         });
         SdkEndpoints.Map(app);
+        LauncherGate(app);
         Diagnostics.MetricsEndpoints.Map(app);
         // Run a GM command as an online player (loopback only): POST /ro3emu/gm?account=tester body "!warp 10111 150 190".
         app.MapPost("/ro3emu/gm", async (HttpContext context, SessionRegistry sessions, GmCommands gm, GameLoop loop) =>
@@ -426,6 +440,29 @@ public static class ServerHost
             if (File.Exists(Path.Combine(dir.FullName, "Ro3Emu.slnx"))) return dir.FullName;
         }
         return AppContext.BaseDirectory;
+    }
+
+    /// <summary>
+    /// ServerOptions.MinLauncherVersion: a role whose account last logged in from an outdated launcher's client reads
+    /// why on its marquee when it enters the world, and is disconnected a few seconds later.
+    /// </summary>
+    private static void LauncherGate(WebApplication app)
+    {
+        var launchers = app.Services.GetRequiredService<Http.LauncherVersions>();
+        var options = app.Services.GetRequiredService<IOptions<ServerOptions>>();
+        var reconnect = app.Services.GetRequiredService<ReconnectService>();
+        app.Services.GetRequiredService<SceneService>().Loaded.Add(async session =>
+        {
+            if (session.LauncherTurnedAway || !launchers.Outdated(session.Account)) return;
+            session.LauncherTurnedAway = true;
+            app.Logger.LogInformation("{Account}: outdated launcher, disconnecting", session.Account);
+            await GmCommands.ReplyAsync(session, options.Value.LauncherUpdateMessage);
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(8));
+                reconnect.Disconnect(session, ReconnectService.ReasonLogicError);
+            });
+        });
     }
 }
 
