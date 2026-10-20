@@ -64,12 +64,13 @@ public sealed class AwardService(GameData data)
         if (rows.GetArrayLength() != 1)
             throw Fail($"AwardConfig {awardId} has multiple open-day rows; authoritative selector unresolved");
         var row = rows[0];
-        if (HasValues(row, "_kEXP") || HasValues(row, "_kCondition"))
-            throw Fail($"AwardConfig {awardId} has unresolved EXP or condition policy");
+        long baseExp = BaseExp(row, awardId);
+        CheckCondition(row, progress, awardId);
         if (data.Table("AwardRestricConfig").Values.Any(r => GameData.Int(r, "_iRewardID") == awardId))
             throw Fail($"AwardConfig {awardId} has unresolved restriction/replacement policy");
 
         var grants = new List<AwardGrant>();
+        if (baseExp > 0) grants.Add(new AwardGrant(BaseExpItem, checked((int)baseExp)));
         if (row.TryGetProperty("_kAward", out var fixedItems))
         {
             if (fixedItems.ValueKind == JsonValueKind.Object && !fixedItems.EnumerateObject().Any()) { /* empty export */ }
@@ -185,6 +186,41 @@ public sealed class AwardService(GameData data)
         if (GameData.Int(item, "_iType") == 1 && (expiry != 0 || bind == 2
             || bind == 1 && (!item.TryGetProperty("_iTrade", out var trade) || GameData.Number(trade) != 0)))
             throw Fail($"currency {entry} has unsupported binding, expiry, or trade policy");
+    }
+
+    private const int BaseExpItem = 100;
+
+    /// <summary>
+    /// _kEXP [1, n]: n base EXP, read the way TaskConfig's _kEXP is (TaskService). Any other EXP kind stays unresolved.
+    /// </summary>
+    private static long BaseExp(JsonElement row, long awardId)
+    {
+        if (!HasValues(row, "_kEXP")) return 0;
+        var exp = row.GetProperty("_kEXP");
+        if (exp.ValueKind == JsonValueKind.Array && exp.GetArrayLength() == 2 && GameData.Number(exp[0]) == 1
+            && ExactLong(exp[1], "EXP") is var amount and > 0 and <= int.MaxValue)
+            return amount;
+        throw Fail($"AwardConfig {awardId} has unresolved EXP policy");
+    }
+
+    /// <summary>
+    /// _kCondition [[2, min, max]]: the recipient's base level is within min..max (inferred: the only conditioned award,
+    /// 1001002, is the growth classroom's rank 2 with [2, 11, 99], and the client never reads the field). Any other
+    /// condition stays unresolved.
+    /// </summary>
+    private static void CheckCondition(JsonElement row, RoleProgress? progress, long awardId)
+    {
+        if (!HasValues(row, "_kCondition")) return;
+        var conditions = row.GetProperty("_kCondition");
+        if (conditions.ValueKind != JsonValueKind.Array) throw Fail($"AwardConfig {awardId} has unresolved condition policy");
+        foreach (var condition in conditions.EnumerateArray())
+        {
+            if (condition.ValueKind != JsonValueKind.Array || condition.GetArrayLength() != 3 || GameData.Number(condition[0]) != 2)
+                throw Fail($"AwardConfig {awardId} has unresolved condition policy");
+            long min = ExactLong(condition[1], "level"), max = ExactLong(condition[2], "level");
+            if (progress == null) throw Fail($"AwardConfig {awardId} requires a recipient");
+            if (progress.Level < min || progress.Level > max) throw Fail($"AwardConfig {awardId} needs base level {min}-{max}");
+        }
     }
 
     private static bool HasValues(JsonElement row, string key) => row.TryGetProperty(key, out var value) && (value.ValueKind switch
