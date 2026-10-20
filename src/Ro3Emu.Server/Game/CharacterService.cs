@@ -16,7 +16,7 @@ namespace Ro3Emu.Server.Game;
 /// BaseLvConfig, JobLvConfig, BasePointConfig, EquipConfig).
 /// </summary>
 public sealed partial class CharacterService(RoleStore roles, ItemStore itemStore, GameData data, World world, ILogger<CharacterService> log,
-    Microsoft.Extensions.Options.IOptions<ServerOptions> options)
+    Microsoft.Extensions.Options.IOptions<ServerOptions> options, AwardService awards)
 {
     public const uint RoleBaseInfoSync = 5066;
     public const uint BaseAttrSync = 5067;
