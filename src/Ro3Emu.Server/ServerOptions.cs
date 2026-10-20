@@ -74,6 +74,18 @@ public sealed class ServerOptions
     public bool BonusExpAlways { get; set; }
 
     /// <summary>
+    /// Oldest Sol RO3 Launcher whose clients may play (Http.LauncherVersions), e.g. "1.2.2"; empty = any client. A
+    /// launcher from 1.2.2 on prefixes every client URL with /launcher/{version}; an older or no launcher sends none.
+    /// Such a client sees "Update your launcher" in the server list and is shown the reason and disconnected when its
+    /// role enters the world. Loopback logins (the AI bots) are exempt.
+    /// </summary>
+    public string MinLauncherVersion { get; set; } = "";
+
+    /// <summary>Where an outdated client is sent: the line its player reads in game.</summary>
+    public string LauncherUpdateMessage { get; set; } =
+        "Your Sol RO3 Launcher is out of date. Close the game and open the launcher to update it, or download it again from patch.solro3.com";
+
+    /// <summary>
     /// Normal-attack pacing at startup (CombatService.NormalAttackMinGap): an impact sooner than this fraction of the
     /// swing time after the previous one deals nothing. 0 only measures; the loopback POST /ro3emu/pacing reads the
     /// measured gaps and changes it live.

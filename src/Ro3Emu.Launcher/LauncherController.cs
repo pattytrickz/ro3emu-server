@@ -161,20 +161,36 @@ public sealed class LauncherController : IDisposable
     /// </summary>
     async Task<bool> SelfUpdateAsync(ChannelInfo? channel = null)
     {
+        LauncherRelease? newer = null;
         try
         {
             channel ??= await _repo.GetChannelAsync(_config.Channel, _life.Token);
             if (channel.Launcher is not { } release || !SelfUpdate.IsNewer(release.Version, _version)) return false;
+            newer = release;
             PostState("checking", $"Updating the launcher to {release.Version}…");
-            if (!await SelfUpdate.ApplyAsync(_repo, release, _version, _exePath, _life.Token)) return false;
+            if (!await SelfUpdate.ApplyAsync(_repo, release, _version, _exePath, _life.Token)) return MustUpdate(release);
             SelfUpdate.Restart(_exePath);
             System.Windows.Application.Current.Dispatcher.Invoke(() => System.Windows.Application.Current.Shutdown());
             return true;
         }
         catch (Exception e) when (_publisher is not null && e is PatcherException or HttpRequestException or TaskCanceledException or IOException or JsonException or UnauthorizedAccessException)
         {
-            return false;
+            // An unreachable repository plays on (the server turns away clients of a launcher it no longer accepts);
+            // a newer launcher that is there but could not be installed stops here.
+            return newer is { } release && MustUpdate(release);
         }
+    }
+
+    /// <summary>
+    /// "publisher" mode: the channel has a newer launcher and this one could not replace itself. The game does not
+    /// start from an outdated launcher: the player gets the download (the primary button retries the update).
+    /// </summary>
+    bool MustUpdate(LauncherRelease release)
+    {
+        if (_publisher is null) return false;
+        PostState("error", $"{_config.ServerName} needs launcher {release.Version}, and this launcher couldn't update itself. "
+            + $"Download it from {_config.Repository.TrimEnd('/')}/{release.Url.TrimStart('/')} and run that one, or try again.");
+        return true;
     }
 
     async Task CheckPublisherAsync()
@@ -348,14 +364,17 @@ public sealed class LauncherController : IDisposable
             return false;
         }
         string key = PublisherGame.Key(dir);
-        string stamp = PublisherGame.PatchStamp(_config.Server, pem);
+        // The client's URLs carry this launcher's version (/launcher/{version}/...), so the server can turn away
+        // clients patched by a launcher it no longer accepts (Ro3Emu.Server Http.LauncherVersions).
+        string clientServer = _config.Server.TrimEnd('/') + "/launcher/" + _version;
+        string stamp = PublisherGame.PatchStamp(clientServer, pem);
         bool current = _settings.PatchStamp.TryGetValue(key, out var done) && done == stamp && await Task.Run(() => PublisherGame.PatchIntact(dir));
         if (current) return true;
 
         PostState("launching", $"Preparing the game for {_config.ServerName}…");
         try
         {
-            await Task.Run(() => PublisherGame.Patch(dir, _config.Server, pem));
+            await Task.Run(() => PublisherGame.Patch(dir, clientServer, pem));
         }
         catch (UnauthorizedAccessException)
         {

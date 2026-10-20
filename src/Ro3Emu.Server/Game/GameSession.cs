@@ -38,6 +38,8 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public long HandshakeToken { get; set; }
 
     public string? Account { get; set; }
+    /// <summary>ServerHost.LauncherGate already told this outdated client to update and is disconnecting it.</summary>
+    public bool LauncherTurnedAway { get; set; }
     internal long AccountGeneration { get; set; }
     internal Task PredecessorFence { get; set; } = Task.CompletedTask;
 
