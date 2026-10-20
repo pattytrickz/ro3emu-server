@@ -165,6 +165,21 @@ public sealed class CareerSpecialTests : IAsyncLifetime
         Assert.Equal(51001, again.Self!.PendantInfo[51001].PendantId);
     }
 
+    /// <summary>Reported: a Knight rented the Heavily-armored Peco Peco (1500202) and "couldnt ride the peco".</summary>
+    [ClientDataFact]
+    public async Task KnightRentsTheArmoredPecoAndRidesIt()
+    {
+        const int ArmoredPeco = 1500202;
+        await using var a = await InWorld("Alice");
+        await Become("alice", 1200, 33, 11107); // Knight, Riding 1 (the reporter's state)
+        Assert.Equal(0, await LeaseAsync(a, ArmoredPeco));
+        await Next(a, MountService.Sync, DBMountsInfoIncrement.Parser, p => p.MountIds.ContainsKey(2));
+        Assert.Equal(ArmoredPeco, Session("alice").Mounts!.MountIds[2].MountId);
+        await a.SendGameAsync(MountService.Ride, new PlayerRiderMountReq { Tp = (eRiderType)3 });
+        Assert.Equal(0, (await Next(a, MountService.Ride, PlayerRiderMountResp.Parser)).Result);
+        Assert.Equal(ArmoredPeco, MountService.Rider(Session("alice")));
+    }
+
     [ClientDataFact]
     public async Task CrusaderPecoLeaseSelectsTheBattleSlotRidesAndCancelDismounts()
     {

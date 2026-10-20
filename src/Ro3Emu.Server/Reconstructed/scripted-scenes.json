@@ -273,7 +273,8 @@
           "story": 140020,
           "complete": [
             { "plot": 140020, "why": "the client reports the story's end with 84011 {plotId 140020}" }
-          ]
+          ],
+          "after": { "teleport": 37, "why": "the instrument's mark point: nothing in the scene shows where it is (no actor, and the client's guide point 38 is not driven), and the first player to get here searched and gave up" }
         },
         {
           "quest": 2,

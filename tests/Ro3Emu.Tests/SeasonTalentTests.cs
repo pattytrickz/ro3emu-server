@@ -506,6 +506,62 @@ public sealed class SeasonTalentTests
         Assert.Contains(fixture.Session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
     }
 
+    /// <summary>
+    /// Reported: "Cold-Blooded/Quick Hands and Weapon Mastery ... not working". Cold-Blooded [1, 103, 15] never reached
+    /// the sheet (the season tree's purchase rules gated free picks), and ops 16 (while a weapon type is held) and 19
+    /// (while a skill is learned) were not read: Weapon Mastery [16, 1|12, 103, 20], Quick Hands [19, 15107|15101, 1, 2, 8].
+    /// </summary>
+    [ClientDataFact]
+    public async Task JobTalentAttributesReachTheSheetWithTheirWeaponAndSkillConditions()
+    {
+        const int QuickHands = 10102119, WeaponMasteryChoice = 10102126, Dagger = 2010120, Patk = 103, Agi = 2;
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        await using var player = await fixture.InWorld("Assassin");
+        await fixture.Gm("assassin", "!job 5200");
+        await fixture.Gm("assassin", "!lvl 30");
+        await fixture.Gm("assassin", "!quest done 10101170");
+        await fixture.Gm("assassin", "!quest done 10103160");
+        await fixture.Gm("assassin", $"!item {Dagger} 1");
+        var session = fixture.Session;
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            var plan = session.SeasonTalent!.Plan[0];
+            foreach (var row in fixture.Data.Table("SeasonTalentConfig").Values
+                .SelectMany(v => v.ValueKind == System.Text.Json.JsonValueKind.Array ? v.EnumerateArray().ToArray() : [v]))
+                if (Ro3Emu.Server.Data.GameData.Int(row, "_iTalentTreeID") is 10101 or 10102 && Ro3Emu.Server.Data.GameData.Int(row, "_iType") == 1)
+                    plan.TalentNodes[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
+            session.Progress!.Skills[15107] = 1; // Katar Mastery
+            session.Progress.Skills[15101] = 1; // Dual-Wield Mastery
+            return Task.CompletedTask;
+        });
+        Task<(long Patk, long Agi)> Sheet() => fixture.Loop.InvokeAsync(() =>
+        {
+            var stats = fixture.Character.Stats(session);
+            return Task.FromResult(((long)stats[Patk], (long)stats[Agi]));
+        });
+        var before = await Sheet();
+
+        Assert.Equal(0, await Upgrade(player, QuickHands)); // its option Cold-Blooded comes with it
+        var picked = await Sheet();
+        Assert.Equal(16, picked.Agi - before.Agi); // +8 per learned mastery
+        Assert.True(picked.Patk - before.Patk >= 15, $"Cold-Blooded: {before.Patk} -> {picked.Patk}");
+
+        Assert.Equal(0, await Upgrade(player, WeaponMasteryChoice)); // its option Weapon Mastery comes with it
+        var bare = await Sheet();
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            var dagger = session.Items.Single(i => i.Entry == Dagger);
+            dagger.Pack = 2;
+            dagger.Grid = 1;
+            return Task.CompletedTask;
+        });
+        var held = await Sheet();
+        Assert.True(held.Patk - bare.Patk >= 20, $"Weapon Mastery: {bare.Patk} -> {held.Patk}"); // plus the dagger's own PATK
+        await fixture.Loop.InvokeAsync(() => { session.Progress!.Skills.Remove(15107); return Task.CompletedTask; });
+        Assert.True(held.Agi - (await Sheet()).Agi >= 8); // Quick Hands' 8, plus whatever the mastery gives itself
+    }
+
     private static string RepoRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

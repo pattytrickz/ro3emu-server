@@ -130,6 +130,8 @@ public sealed partial class DungeonService
         public bool Spawning { get; set; }
         /// <summary>The current scripted step got one of its completing client events (DungeonService.Scripted).</summary>
         public bool StepDone { get; set; }
+        /// <summary>The last step moved the participants (TeleportAfter): the next step checks where they stand.</summary>
+        public bool MovedByStep { get; set; }
         /// <summary>The scripted scene actors shown now (also tracked by the room for cleanup).</summary>
         internal List<SceneActorUnit> SceneActors { get; } = new();
         internal GuildChallengeService.Run? GuildChallenge { get; set; }
