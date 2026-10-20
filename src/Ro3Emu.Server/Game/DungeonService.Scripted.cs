@@ -82,9 +82,12 @@ public sealed partial class DungeonService
                 DungeonEntry = a.Plan.SceneEntry, EventType = (DungeonEventType)4, // DungeonEventDungeonVarChange
                 StageNum = a.Wave + 1, LevelNum = 1, Vars = { new DungeonVar { VarId = StoryVar, Vi64 = { step.Story } } },
             });
-        // A step that completes where a player already stands (moved there by the last step's teleport, which sends no
-        // walk report) completes without waiting for a step of theirs: Louie's game ended at an unmarked point.
-        if (step.Complete.Any(t => t.Kind is Kind.Region or Kind.Point))
+        // A step that completes where the last step's teleport put a player (a teleport sends no walk report) completes
+        // without waiting for a step of theirs: Louie's game ended at an unmarked point. Only after such a teleport: a
+        // walk step that starts where the player already stands still waits for their walk (chapter one relies on it).
+        bool moved = a.MovedByStep;
+        a.MovedByStep = false;
+        if (moved && step.Complete.Any(t => t.Kind is Kind.Region or Kind.Point))
             loop.PostLegacy(async () =>
             {
                 foreach (var member in Present(a).Where(m => a.Loaded.Contains(m) && !m.SceneLoading).ToList())
@@ -286,8 +289,11 @@ public sealed partial class DungeonService
         log.LogInformation("Scripted scene {Scene} step {Step} '{Stage}' completed by {Role} ({Events})",
             a.Plan.SceneEntry, a.Wave + 1, step.Stage, s.Role?.Id, string.Join(", ", events));
         if (step.TeleportAfter != 0 && catalog.ScenePoint(a.Plan.SceneEntry, step.TeleportAfter) is { } to)
+        {
             foreach (var member in Present(a).Where(m => a.Loaded.Contains(m) && !m.SceneLoading))
                 await scenes.TeleportInMapAsync(member, to);
+            a.MovedByStep = true;
+        }
         // The next step or the settlement runs in its own owner scope, like the room's timers: the message that
         // completed the step (a walk, an interaction, a plot end) reserves only what its own route needs.
         loop.PostLegacy(() => AdvanceAsync(a), "dungeon scripted step");
