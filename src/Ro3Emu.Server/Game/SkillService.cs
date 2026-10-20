@@ -108,22 +108,23 @@ public sealed class SkillService
     /// The normal attack the client is told to use for the weapons held: DBSkillData.currentAtkSkillId and
     /// skillWheel.atkSkillId (LC_DAL_SkillDevelop: CurrentNormalAttackSkillId, which a click on a monster casts), and
     /// the only normal-attack group the 5025 plan shows learned (LC_Actor_AutoAttack.GetNormalSkill swings the first
-    /// learned _iIsNormalAtk group of ServerSkillToLevelMap). A JobAttackConfig row naming the weapons wins over
-    /// _kSkillNormalID; the weapon-less default row only replaces a _kSkillNormalID that has no SkillConfig row.
-    /// A Thief with a dagger was told 1500001 "Normal Attack" (ThiefAttack, PATK 50%) rather than 1005001 "Basic
-    /// Attack" (PATK 50% + 45), the attack Double Attack's description and the skill window name (shown 0/1).
+    /// learned _iIsNormalAtk group of ServerSkillToLevelMap). It is the JobAttackConfig row the client's skill window
+    /// shows as Basic Attack (Lua_CFG_JobAttackConfig.GetNormalSkillID: job, weapon subtype * 10 + dual wield), so
+    /// the window, the bar and the attack agree; _kSkillNormalID only when no row fits.
+    /// A Thief with a dagger was told 1500001 "Normal Attack" rather than 1005001 "Basic Attack", and a Swordsman's
+    /// window showed Basic Attack 10010 at 0 while 11000 was the learned one, so neither could go on the bar.
     /// </summary>
-    public int NormalAttack(GameSession s)
-    {
-        int career = s.Progress!.Career, matched = NormalAttack(career, WeaponType(s, 1), WeaponType(s, 2)), fallback = NormalAttack(career);
-        bool named = JobAttacks(career).FirstOrDefault(a => a.Weapons.Length == 0).Skill != matched;
-        return named || data.Row("SkillConfig", fallback) == null ? matched : fallback;
-    }
+    public int NormalAttack(GameSession s) => NormalAttack(s.Progress!.Career, WeaponType(s, 1), WeaponType(s, 2));
 
     /// <summary>ItemConfig._iSubType of the item worn in an equipment grid (1 main hand, 2 off hand), 0 when empty.</summary>
     private int WeaponType(GameSession s, int grid) =>
         s.Items.FirstOrDefault(i => i.Pack == 2 && i.Grid == grid) is { } item && data.Row("ItemConfig", item.Entry) is { } row
             ? (int)GameData.Int(row, "_iSubType") : 0;
+
+    /// <summary>The group of _kSkillNormalID or of one of the career's JobAttackConfig attacks (each learned at 1).</summary>
+    private bool IsJobAttackGroup(int career, int group) =>
+        JobAttacks(career).Select(a => a.Skill).Append(NormalAttack(career))
+            .Any(id => data.Row("SkillConfig", id) is { } row && GameData.Int(row, "_iSkillID") == group);
 
     private bool IsNormalAttackGroup(int group) =>
         data.Row("SkillConfig", RealId(group, 1)) is { } row && GameData.Int(row, "_iIsNormalAtk") == 1;
@@ -204,8 +205,7 @@ public sealed class SkillService
     public int Level(RoleProgress p, int group)
     {
         int initial = InTree(p.Career, group) ? Initial(p, group) : 0;
-        if (data.Row("SkillConfig", NormalAttack(p.Career)) is { } atk && GameData.Int(atk, "_iSkillID") == group)
-            initial = Math.Max(1, initial);
+        if (IsJobAttackGroup(p.Career, group)) initial = Math.Max(1, initial); // any weapon's, so it stays on a bar
         int saved = p.Skills.GetValueOrDefault(group);
         foreach (var (old, replacement) in Replacements(p.Career))
             if (replacement == group) saved = Math.Max(saved, p.Skills.GetValueOrDefault(old));
@@ -750,8 +750,8 @@ public sealed class SkillService
         else if (code == 0)
         {
             int learned = Level(p, group);
+            // Players start fights from the bar: the held weapon's Basic Attack goes on it like any skill.
             if (group <= 0 || learned <= 0 || !IsActive(group)
-                || (IsNormalGroup(p, group) && p.Career != 1000)
                 || req.Info!.SkillLevel < 1 || req.Info.SkillLevel > learned
                 || op == 1 && target < loadList.Count && loadList[target].SkillId > 0
                     && loadList[target].SkillId != group

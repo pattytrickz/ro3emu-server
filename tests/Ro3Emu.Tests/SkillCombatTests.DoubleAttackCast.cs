@@ -46,6 +46,16 @@ public sealed partial class SkillCombatTests
         Assert.Equal(0, Learned(held, NoviceAttackGroup)); // GetNormalSkill finds only one
         Assert.Equal(0, Learned(held, 15000));
 
+        // Players start fights from the bar, so the window's Basic Attack goes on it (it was refused, "not learned").
+        async Task<int> Bind(int group, int slot)
+        {
+            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = SkillLoadOperation.SkillLoadOpLoad,
+                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 } });
+            return (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result;
+        }
+        Assert.Equal(0, await Bind(10050, 4));
+        Assert.Equal(BasicAttack, (await Built()).SkillWheel.WhellSkills[5].SkillConfigId);
+
         // Saved plans still switch: a stored 10050 is a normal attack, not a skill outside the tree.
         Assert.Equal(0, await Switch(1));
         Assert.Equal(0, await Switch(0));
@@ -55,7 +65,8 @@ public sealed partial class SkillCombatTests
         await Next(alice, CharacterService.EquipItemOpr, EquipItemOprResp.Parser);
         await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser, m => m.HasCurrentAtkSkillId && m.CurrentAtkSkillId == NormalAttack);
 
-        await Gm("alice", "!job 1200"); // a Knight: JobAttackConfig names no weapon, so _kSkillNormalID stays
-        Assert.Equal(1100001, (await Built()).CurrentAtkSkillId);
+        await Gm("alice", "!job 1200"); // a Knight: JobAttackConfig's one attack, which the skill window shows
+        Assert.Equal(1001101, (await Built()).CurrentAtkSkillId);
+        Assert.Equal(0, await Bind(10011, 3));
     }
 }

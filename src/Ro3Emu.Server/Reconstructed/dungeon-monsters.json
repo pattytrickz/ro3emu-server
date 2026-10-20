@@ -406,6 +406,11 @@
               "point": 27,
               "npc": 5000007,
               "why": "portal 3"
+            },
+            {
+              "point": 26,
+              "npc": 5001049,
+              "why": "the story Poring (Lv 15): its only drop pool 241949 is DropGroupConfig 144, Card: Poring limited to this dungeon's quest 10102100, and the next dialogue says 'Look, you picked up a Card: Poring!' before the card-insert guide"
             }
           ]
         }

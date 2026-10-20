@@ -572,7 +572,7 @@ public sealed class CharacterTests : IAsyncLifetime
 
         await Gm("alice", "!job 1100");
         var swordman = await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser, m => !m.SyncAllMark && m.HasCurrentAtkSkillId);
-        Assert.Equal(1100001, swordman.CurrentAtkSkillId); // JobConfig._kSkillNormalID
+        Assert.Equal(1001001, swordman.CurrentAtkSkillId); // JobAttackConfig: the skill window's Basic Attack
 
         // Job 15 of rank 2 = 15 points (JobLvConfig 201..215); learn Bash level 3.
         var req = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
