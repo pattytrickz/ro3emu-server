@@ -74,6 +74,12 @@ public sealed class ServerOptions
     public bool BonusExpAlways { get; set; }
 
     /// <summary>
+    /// Hours a settled monster-kill receipt keeps its full payload before <see cref="Accounts.ReceiptCompaction"/>
+    /// empties it (0 keeps everything). Only a retry of the same operation, seconds after the kill, reads it.
+    /// </summary>
+    public int ReceiptRetentionHours { get; set; } = 24;
+
+    /// <summary>
     /// Oldest Sol RO3 Launcher whose clients may play (Http.LauncherVersions), e.g. "1.2.2"; empty = any client. A
     /// launcher from 1.2.2 on prefixes every client URL with /launcher/{version}; an older or no launcher sends none.
     /// Such a client sees "Update your launcher" in the server list and is shown the reason and disconnected when its

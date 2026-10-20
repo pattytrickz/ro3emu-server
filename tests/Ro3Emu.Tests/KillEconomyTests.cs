@@ -176,6 +176,47 @@ public sealed class KillEconomyTests : IAsyncLifetime
         Assert.NotEqual(monster.RewardSource, newSpawn.RewardSource); Assert.Equal(2, ReceiptCount());
     }
 
+    /// <summary>
+    /// The live realm database grew about 1.5 GB a day, mostly kill receipts and their owner acknowledgements (20 Oct:
+    /// 354,000 kills, 2.4 GB), until the server stalled under its memory limit. A receipt past the retention window keeps
+    /// its row, source claim and ledger legs; its payload is emptied and its acknowledgement deleted.
+    /// </summary>
+    [ClientDataFact]
+    public async Task OldKillReceiptsAreCompactedAndTheirSourceStaysClaimed()
+    {
+        await using var bot = await Enter(); var player = Session; var monster = Monster();
+        await OnLoop(() => Reward(player, monster));
+        Assert.Equal(1, ReceiptCount());
+        var compaction = Service<ReceiptCompaction>();
+        Assert.Equal(0, await compaction.PassAsync(TimeSpan.FromHours(1))); // still inside the window
+        await Task.Delay(10);
+        Assert.Equal(1, await compaction.PassAsync(TimeSpan.Zero));
+        using (var db = Service<AccountStore>().Open())
+        using (var c = db.CreateCommand())
+        {
+            c.CommandText = """
+                SELECT length(r.intent_payload)+length(r.outcome)+length(r.child_receipts)+length(r.before_revisions),
+                       (SELECT count(*) FROM owner_operation_receipt o WHERE o.operation_id=r.operation_id),
+                       (SELECT count(*) FROM operation_source s WHERE s.operation_id=r.operation_id),
+                       (SELECT count(*) FROM economy_entry e WHERE e.operation_id=r.operation_id), r.leg_count
+                FROM operation_receipt r WHERE r.command_kind='monster-kill'
+                """;
+            using var row = c.ExecuteReader();
+            Assert.True(row.Read());
+            Assert.Equal(0, row.GetInt64(0));
+            Assert.Equal(0, row.GetInt64(1));
+            Assert.Equal(1, row.GetInt64(2));
+            Assert.Equal(row.GetInt64(4), row.GetInt64(3));
+        }
+        Assert.True(await Service<CharacterService>().RewardSourceCommittedAsync(monster.RewardSource!.Key));
+        Assert.Equal(0, await compaction.PassAsync(TimeSpan.Zero)); // the saved position skips it
+
+        long currency = player.Progress!.Currency[1];
+        var next = Monster(); await OnLoop(() => Reward(player, next));
+        Assert.Equal(2, ReceiptCount());
+        Assert.Equal(currency + 18, player.Progress.Currency[1]);
+    }
+
     [ClientDataFact]
     public async Task HeldCommitThenDetachPaysOriginalRoleOnceWithoutEarlyPresentation()
     {
