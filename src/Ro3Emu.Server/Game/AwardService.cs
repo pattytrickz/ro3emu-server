@@ -106,17 +106,24 @@ public sealed class AwardService(GameData data)
             var candidates = EligibleRows(groupId, progress);
             long weight = candidates.Sum(r => GameData.Int(r, "_iWeights"));
             if (weight <= 0) continue;
-            // (inferred) RewardService's current [group,chance-per-million,rolls,picks] interpretation.
+            // [group, chance per million, rolls, picks]. A roll picks up to "picks" different rows (inferred): the class
+            // weapon sets (group 121121, 8 rows, 10 picks) give each class one of each of its weapons, so a pick never
+            // repeats a row. Drawing with replacement gave a Novice 10 x 2 daggers for "The First Request".
             for (int r = 0; r < rolls; r++)
             {
                 if (Random.Shared.NextInt64(1_000_000) >= chance) continue;
-                for (int p = 0; p < picks; p++)
+                var left = candidates.ToList();
+                long leftWeight = weight;
+                for (int p = 0; p < picks && leftWeight > 0; p++)
                 {
-                    long choice = Random.Shared.NextInt64(weight);
-                    foreach (var candidate in candidates)
+                    long choice = Random.Shared.NextInt64(leftWeight);
+                    for (int i = 0; i < left.Count; i++)
                     {
+                        var candidate = left[i];
                         choice -= GameData.Int(candidate, "_iWeights");
                         if (choice >= 0) continue;
+                        left.RemoveAt(i);
+                        leftWeight -= GameData.Int(candidate, "_iWeights");
                         int min = checked((int)GameData.Int(candidate, "_iMinNumber"));
                         int max = checked((int)GameData.Int(candidate, "_iMaxNumber"));
                         if (min < 1 || max < min) throw Fail($"DropGroupConfig {groupId} has invalid quantity range");

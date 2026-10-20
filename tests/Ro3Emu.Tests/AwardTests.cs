@@ -134,6 +134,25 @@ public sealed class AwardTests : IAsyncLifetime
         Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 25001)); // restriction replacement
     }
 
+    /// <summary>
+    /// #bug-reports "Novice weapon box quest reward from Rhine gave me 20": The First Request (group 31121) rolls pool
+    /// slot [121121, 100%, 1 roll, 10 picks]. Picks are different rows, so each class gets one of each of its weapons
+    /// once, not ten draws of the same row.
+    /// </summary>
+    [ClientDataFact]
+    public void PoolPicksAreDifferentRows()
+    {
+        var awards = new AwardService(_app.Services.GetRequiredService<GameData>());
+        for (int i = 0; i < 20; i++)
+        {
+            Assert.Equal(new[] { new AwardGrant(2010120, 2) },
+                awards.ResolveForProgress(new RoleProgress { Level = 10, Career = 1000 }, 31121).Grants.ToArray());
+            Assert.Equal(new[] { 2020120, 2030120, 2050120, 2500120 },
+                awards.ResolveForProgress(new RoleProgress { Level = 10, Career = 1100 }, 31121).Grants
+                    .Select(g => { Assert.Equal(1, g.Count); return g.Entry; }).Order().ToArray());
+        }
+    }
+
     [ClientDataFact]
     public async Task BoundMintedCoinUsesCurrencyBalanceAndBoundNotification()
     {
