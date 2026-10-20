@@ -147,6 +147,8 @@ public static class ServerHost
         builder.Services.AddSingleton<GateAuthRegistry>();
         builder.Services.AddSingleton<ReconnectService>();
         builder.Services.AddHostedService<DatabaseBackup>();
+        builder.Services.AddSingleton<ReceiptCompaction>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<ReceiptCompaction>());
         builder.Services.AddSingleton<Game.Persistence.PositionPersistence>();
         builder.Services.AddSingleton<Game.Persistence.SettingsPersistence>();
         builder.Services.AddSingleton<RoleSystems>();
