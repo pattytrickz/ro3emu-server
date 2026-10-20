@@ -110,6 +110,11 @@ public sealed partial class TaskService
                 result = await character.ApplyAwardAsync(session, plan,
                     taskRuntimeState: System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(next)) ? 0 : ErrorCodes.Unknown;
             }
+            catch (AwardResolutionException e) when (e.LevelTooLow)
+            {
+                // Rank 2 (AwardConfig 1001002) pays from base 11: the rank stays unclaimed until then.
+                result = ErrorCodes.PlayerLevelLow;
+            }
             catch (AwardResolutionException e)
             {
                 log.LogWarning("Growth rank {Rank} reward held: {Reason}", rank.Rank, e.Message);

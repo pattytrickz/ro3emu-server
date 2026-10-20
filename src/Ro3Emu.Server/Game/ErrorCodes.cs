@@ -230,6 +230,7 @@ public static class ErrorCodes
 
     // Stage rewards / daily attempts (ErrorCodeConfig; mapping to these requests is inferred).
     public const int RewardMissing = 2061;     // "Reward not found"
+    public const int PlayerLevelLow = 156;     // "Player level too low"
     public const int RewardClaimed = 2062;     // "Reward claimed"
     public const int AttemptsExhausted = 2065; // "Insufficient attempts"
 
