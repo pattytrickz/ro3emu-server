@@ -65,4 +65,61 @@ public sealed partial class SkillCombatTests
             await Loop.InvokeAsync(() => { combat.DealtAsync.Remove(count); combat.NormalAttackMinGap = 0; return Task.CompletedTask; });
         }
     }
+
+    /// <summary>
+    /// Sonic Blow has no cooldown (_iCD 0) and cancels itself (_bCancelCast 1): recast after each impact it hit far more
+    /// often than its 1200 ms action allows ("spammable"). It is paced per skill like the normal attack.
+    /// </summary>
+    [ClientDataFact]
+    public async Task SonicBlowRecastBeforeItsActionEndsIsPacedLikeTheNormalAttack()
+    {
+        const int Katar = 2120120, SonicBlow = 1510205, Presses = 6;
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 5200");
+        await Gm("alice", $"!item {Katar} 1");
+        var combat = app.Services.GetRequiredService<CombatService>();
+        var target = await Target("alice", stationary: true);
+        int hits = 0;
+        Func<GameSession, MonsterUnit, System.Text.Json.JsonElement, long, Task> count = (s, m, row, amount) =>
+        {
+            if (m == target && amount > 0 && (int)Ro3Emu.Server.Data.GameData.Int(row, "_iSkillID") == 15102) hits++;
+            return Task.CompletedTask;
+        };
+        await Loop.InvokeAsync(() =>
+        {
+            var s = Session("alice");
+            var katar = s.Items.Single(i => i.Entry == Katar);
+            katar.Pack = 2;
+            katar.Grid = 1;
+            s.Progress!.Skills[15101] = 5;
+            s.Progress.Skills[15102] = 5;
+            target.Hp = 1_000_000;
+            combat.DealtAsync.Add(count);
+            return Task.CompletedTask;
+        });
+        async Task<int> Spam(double minGap)
+        {
+            await Loop.InvokeAsync(() => { combat.NormalAttackMinGap = minGap; hits = 0; return Task.CompletedTask; });
+            for (int i = 0; i < Presses; i++) // every 600 ms, half its action time
+            {
+                await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = SonicBlow, TargetId = target.Uid });
+                Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+                await Task.Delay(600);
+            }
+            await Loop.InvokeAsync(() => { Session("alice").Attack = null; return Task.CompletedTask; });
+            return await Loop.InvokeAsync(() => Task.FromResult(hits));
+        }
+        try
+        {
+            int measured = await Spam(0);
+            Assert.True(measured >= Presses - 1, $"measure only: {measured} hits");
+            await Task.Delay(1500);
+            int paced = await Spam(0.7);
+            Assert.InRange(paced, 1, measured / 2 + 1);
+        }
+        finally
+        {
+            await Loop.InvokeAsync(() => { combat.DealtAsync.Remove(count); combat.NormalAttackMinGap = 0; return Task.CompletedTask; });
+        }
+    }
 }

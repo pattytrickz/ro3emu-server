@@ -13,28 +13,36 @@ namespace Ro3Emu.Server.Game;
 /// request is still accepted and only the impact is judged: one sooner than NormalAttackMinGap swing times after the
 /// previous normal-attack impact lands no damage. 0 only measures; the gap ratios are counted by who swung (player,
 /// AI bot, the server's own attack loop) and read from the loopback POST /ro3emu/pacing.
+/// A damaging skill with no cooldown (_iCD 0) that also cancels itself is paced the same way per skill group, against
+/// its own action time: Sonic Blow (1200 ms, no cooldown) was recast right after each impact ("spammable").
 /// </summary>
 public sealed partial class CombatService
 {
     private static readonly double[] GapEdges = [0.25, 0.5, 0.7, 0.85, 1.0, 1.5];
-    private static readonly string[] GapKinds = ["player", "aibot", "loop"];
+    private static readonly string[] GapKinds = ["player", "aibot", "loop", "skill"];
 
     /// <summary>Fraction of the swing time below which a normal-attack impact deals nothing; 0 = measure only.</summary>
     public double NormalAttackMinGap { get; set; }
 
-    private readonly ConditionalWeakTable<GameSession, StrongBox<long>> lastNormalImpact = new();
-    private readonly long[,] gapCounts = new long[3, 7];
-    private readonly long[] gapSuppressed = new long[3];
+    private readonly ConditionalWeakTable<GameSession, Dictionary<int, long>> lastImpact = new(); // group, 0 = normal attacks
+    private readonly long[,] gapCounts = new long[4, 7];
+    private readonly long[] gapSuppressed = new long[4];
     private long gapSinceMs;
 
-    /// <summary>At a normal attack's impact: false when it comes too soon after the previous one (no damage).</summary>
-    private bool PaceNormalAttack(GameSession s, ActiveSkillCast action)
+    /// <summary>At a normal attack's or uncooled skill's impact: false when it comes too soon after the previous one.</summary>
+    private bool PaceImpact(GameSession s, ActiveSkillCast action)
     {
-        if (action.Operator != null || GameData.Int(action.Row, "_iIsNormalAtk") != 1) return true;
+        if (action.Operator != null) return true;
+        var row = action.Row;
+        bool normal = GameData.Int(row, "_iIsNormalAtk") == 1;
+        if (!normal && (GameData.Int(row, "_iCD") > 0 || GameData.Int(row, "_bCancelCast") == 0
+            || !Numbers(row, "_kDamageParam1").Any(v => v > 0))) return true;
         if (gapSinceMs == 0) gapSinceMs = Now;
-        int kind = action.Automatic ? 2 : s.Account?.StartsWith("aibot", StringComparison.OrdinalIgnoreCase) == true ? 1 : 0;
-        var last = lastNormalImpact.GetOrCreateValue(s);
-        double ratio = last.Value == 0 ? double.PositiveInfinity : (Now - last.Value) / (double)Math.Max(1, action.ActionMs);
+        int kind = !normal ? 3 : action.Automatic ? 2 : s.Account?.StartsWith("aibot", StringComparison.OrdinalIgnoreCase) == true ? 1 : 0;
+        int key = normal ? 0 : (int)GameData.Int(row, "_iSkillID");
+        var impacts = lastImpact.GetOrCreateValue(s);
+        long previous = impacts.GetValueOrDefault(key);
+        double ratio = previous == 0 ? double.PositiveInfinity : (Now - previous) / (double)Math.Max(1, action.ActionMs);
         int bucket = 0;
         while (bucket < GapEdges.Length && ratio >= GapEdges[bucket]) bucket++;
         gapCounts[kind, bucket]++;
@@ -43,7 +51,7 @@ public sealed partial class CombatService
             gapSuppressed[kind]++;
             return false;
         }
-        last.Value = Now;
+        impacts[key] = Now;
         return true;
     }
 

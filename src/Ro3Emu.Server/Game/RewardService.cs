@@ -217,9 +217,18 @@ public sealed class RewardService
     }
 
     private void RollPool(long poolId, GameSession player, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null)
-        => RollPool(poolId, player.Progress!, drops, bound);
+        => RollPool(poolId, player.Progress!, drops, bound, quest => QuestActive(player, quest));
 
-    private void RollPool(long poolId, RoleProgress progress, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null)
+    /// <summary>
+    /// DropGroupConfig._iQuestLimit: the row drops only while that task is running (or done, not yet delivered).
+    /// Story drops use it: group 144 is the Card: Poring that "The Fate of an Egg Thief" (10102100) finds in its
+    /// instance ("Look, you picked up a Card: Poring!"), whose next step is the card-insert guide; it never dropped.
+    /// </summary>
+    private static bool QuestActive(GameSession player, long quest) =>
+        player.Tasks?.Infos.TryGetValue(quest, out var info) == true && info.Status is TaskState.Running or TaskState.Finish;
+
+    private void RollPool(long poolId, RoleProgress progress, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null,
+        Func<long, bool>? questActive = null)
     {
         if (data.Row("DropPoolConfig", poolId) is not { } pool) return;
         for (int slot = 1; slot <= 16; slot++)
@@ -232,7 +241,7 @@ public sealed class RewardService
             for (int r = 0; r < rolls; r++)
             {
                 if (_random.NextDouble() * 1_000_000 >= chance) continue;
-                for (int i = 0; i < picks; i++) PickFromGroup(group, progress, drops, bound);
+                for (int i = 0; i < picks; i++) PickFromGroup(group, progress, drops, bound, questActive);
             }
         }
     }
@@ -301,13 +310,15 @@ public sealed class RewardService
     private void PickFromGroup(long group, GameSession player, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null)
         => PickFromGroup(group, player.Progress!, drops, bound);
 
-    private void PickFromGroup(long group, RoleProgress progress, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null)
+    private void PickFromGroup(long group, RoleProgress progress, List<(int, int)> drops, List<(int Entry, int Count, int Bind)>? bound = null,
+        Func<long, bool>? questActive = null)
     {
         if (data.Row("DropGroupConfig", group) is not { ValueKind: JsonValueKind.Array } rows) return;
         var p = progress;
         var candidates = rows.EnumerateArray().Where(r =>
         {
-            if (GameData.Int(r, "_iWeights") <= 0 || GameData.Int(r, "_iQuestLimit") != 0 || GameData.Int(r, "_iActivityid") != 0) return false;
+            if (GameData.Int(r, "_iWeights") <= 0 || GameData.Int(r, "_iActivityid") != 0) return false;
+            if (GameData.Int(r, "_iQuestLimit") is var quest and not 0 && questActive?.Invoke(quest) != true) return false;
             long min = GameData.Int(r, "_iMinLevelLimit"), max = GameData.Int(r, "_iMaxLevelLimit");
             if (p.Level < min || max > 0 && p.Level > max) return false;
             return !r.TryGetProperty("_iJobLimit", out var jobs) || jobs.ValueKind != JsonValueKind.Array || jobs.GetArrayLength() == 0

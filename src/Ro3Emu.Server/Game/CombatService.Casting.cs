@@ -429,7 +429,7 @@ public sealed partial class CombatService
         {
             if (!Live(s, action)) return;
             action.Resolved = true;
-            if (!PaceNormalAttack(s, action)) return;
+            if (!PaceImpact(s, action)) return;
             await ResolveCastAsync(s, action);
         });
         ScheduleRuntime(action.WorldScene, TimeSpan.FromMilliseconds(Math.Max(at, action.ChantMs + action.ActionMs) + 1), () =>
