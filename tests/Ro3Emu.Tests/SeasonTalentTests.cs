@@ -512,6 +512,39 @@ public sealed class SeasonTalentTests
     /// (while a skill is learned) were not read: Weapon Mastery [16, 1|12, 103, 20], Quick Hands [19, 15107|15101, 1, 2, 8].
     /// </summary>
     [ClientDataFact]
+    public async Task JobTalentPicksCountTowardTheNextTreesTotal()
+    {
+        // #bug-reports "Job II-1 Talent Tree unable to allocate points": trees I and II hold 40 + 80 ordinary levels,
+        // II+-1 (10103) needs 126 and a rank-4 job. Two picked job talents (gate, option, choice: 3 levels each)
+        // complete it, as the client counts them.
+        const int TreeTwoPlus = 10103, Start = 10103001;
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        await using var player = await fixture.InWorld("Cross");
+        await fixture.Gm("cross", "!job 5300");
+        await fixture.Gm("cross", "!lvl 40");
+        await fixture.Gm("cross", "!quest done 10101170");
+        await fixture.Gm("cross", "!quest done 10103160");
+        var session = fixture.Session;
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            var plan = session.SeasonTalent!.Plan[0];
+            foreach (var row in fixture.Data.Table("SeasonTalentConfig").Values
+                .SelectMany(v => v.ValueKind == System.Text.Json.JsonValueKind.Array ? v.EnumerateArray().ToArray() : [v]))
+                if (Ro3Emu.Server.Data.GameData.Int(row, "_iTalentTreeID") is 10101 or 10102 && Ro3Emu.Server.Data.GameData.Int(row, "_iType") == 1)
+                    plan.TalentNodes[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(0, await Upgrade(player, 10102107)); // gate 10102003: 3 levels, 123
+        Assert.False(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
+        Assert.False(session.SeasonTalent.UnlockedNode[Start]);
+        Assert.Equal(0, await Upgrade(player, 10102119)); // gate 10102006: 126
+        Assert.True(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
+        Assert.True(session.SeasonTalent.UnlockedNode[Start]);
+    }
+
+    [ClientDataFact]
     public async Task JobTalentAttributesReachTheSheetWithTheirWeaponAndSkillConditions()
     {
         const int QuickHands = 10102119, WeaponMasteryChoice = 10102126, Dagger = 2010120, Patk = 103, Agi = 2;

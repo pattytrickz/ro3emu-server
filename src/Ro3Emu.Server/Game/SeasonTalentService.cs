@@ -180,15 +180,14 @@ public sealed class SeasonTalentService
         }
     }
 
-    /// <summary>(inferred) Tree/node thresholds count the plan's purchased ordinary levels; job-talent picks are free
-    /// selections, not purchased levels.</summary>
-    private long Total(SeasonTalentPlan plan)
-    {
-        Nodes();
-        return plan.TalentNodes.Where(kv => kv.Key != 10100000 && !IsJobTalentNode(kv.Key)).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
-    }
-
-    private bool IsJobTalentNode(long id) => _types!.GetValueOrDefault(id) is GateType or OptionType or ChoiceType;
+    /// <summary>
+    /// Tree/node thresholds count every level of the plan, job-talent picks included (each picked gate, option and
+    /// choice is level 1); only the shared oath node is apart. Trees I and II hold 40 + 80 ordinary levels, and II+-1
+    /// (10103) needs 126: without the picks nobody could open it (#bug-reports "Job II-1 Talent Tree unable to
+    /// allocate points", whose client showed 126 while the server counted 120 and left the start node inactive).
+    /// </summary>
+    private static long Total(SeasonTalentPlan plan) =>
+        plan.TalentNodes.Where(kv => kv.Key != 10100000).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
 
     private sealed record TalentNode(long Id, long Tree, long Type, long NeedLevel, bool Start, long Group);
     private sealed record TalentTree(long Id, double?[] Books, long Condition, long NeedLevel, long PvpLimit);

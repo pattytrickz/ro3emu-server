@@ -48,6 +48,7 @@ public sealed partial class LifeJobService
         this.data = data; this.character = character; this.functions = functions; this.seasons = seasons;
         this.awards = awards; this.roles = roles; this.loop = loop; this.clock = clock; this.log = log;
         character.LifeItemUse = UseLifeItemAsync;
+        character.StageVigorAward = StageVigorAward;
         character.ExtraAttributes.Add(FoodAttributes);
         character.ProgressHandlers.Add(OnLevelChangedAsync);
         scene.Leaving.Add(CancelAsync);
@@ -133,6 +134,31 @@ public sealed partial class LifeJobService
             foreach (var job in life.LifeJobInfoMap.Values.Where(j => j.JobLevel > 0)) job.TitleInfo = new LifeJobTitleInfo { JobLevel = 1 };
         }
         runtime.FoodBook = seasons.PlayBook;
+    }
+
+    /// <summary>
+    /// Reward Vigor (ItemConfig 407) raises the 1004 balance, clamped like a Vivify Potion to VitalityExtraLimit
+    /// (a reward is never refused for overflow; the excess is dropped). Persisted and published with the award.
+    /// </summary>
+    private CharacterService.FirstCardSightPlan? StageVigorAward(GameSession s, long amount)
+    {
+        if (s.Role == null || s.Restrictions == null || s.LifeJob == null
+            || !s.Restrictions.RestrictCount.TryGetValue(VigorId, out var current)) return null;
+        var restrict = s.Restrictions.Clone();
+        var energy = restrict.RestrictCount[VigorId];
+        long cap = Math.Max(energy.Count, Param("VitalityExtraLimit", 5000));
+        energy.Count = Math.Min(cap, energy.Count + amount);
+        if (energy.Count == current.Count) return null;
+        long role = s.Role.Id;
+        var attachment = s.Attachment;
+        return new(builder => builder.RoleBlob(role, "life_restrict", restrict.ToByteArray()),
+            () =>
+            {
+                s.Restrictions = restrict;
+                if (attachment?.Cancelled != true && ReferenceEquals(s.Attachment, attachment))
+                    loop.TrackLegacyDetached("reward vigor sync", () =>
+                        attachment?.Cancelled == true || !ReferenceEquals(s.Attachment, attachment) ? Task.CompletedTask : SyncAsync(s));
+            });
     }
 
     private async Task SyncAsync(GameSession s)

@@ -213,7 +213,8 @@ internal sealed class EconomyTransactionPlan(RoleItemPlan child, EconomyMutation
             "cd13e/journey-victory" => ["new_activities", "dungeons"],
             _ => throw new InvalidOperationException("Unrecognized owned economic command.")
         };
-        string[] columns = [..sourceColumns, "daily", "library", "task_followup", "mounts", "activity_runtime"];
+        // life_restrict: reward Vigor (ItemConfig 407) lands in the 1004 balance (LifeJobService.StageVigorAward).
+        string[] columns = [..sourceColumns, "daily", "library", "task_followup", "mounts", "activity_runtime", "life_restrict"];
         bool award = mutation.CommandKind is "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/daily-stage" or
             "cd13e/journey-victory" or "cd13e/grant" or "cd13e/gm-grant";
         if (child.Parts.Count < 2 || child.Parts[0] is not ItemDeltaWritePlan ||

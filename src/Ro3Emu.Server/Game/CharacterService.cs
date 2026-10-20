@@ -81,6 +81,14 @@ public sealed partial class CharacterService(RoleStore roles, ItemStore itemStor
     /// <summary>CardService enlists first sight in owned award/exchange commits.</summary>
     internal Func<GameSession, IReadOnlyList<int>, FirstCardSightPlan?>? StageFirstCardSight { get; set; }
 
+    /// <summary>ItemConfig 407 "Vigor": the currency the award tables grant (8 AwardConfig rows).</summary>
+    public const int VigorRewardItem = 407;
+    /// <summary>
+    /// LifeJobService turns reward Vigor into the RestrictConfig 1004 balance the client shows and gathering spends
+    /// (LC_LifeJobHelper.GetVitalityValue reads the restriction, never currency 407), in the award's own commit.
+    /// </summary>
+    internal Func<GameSession, long, FirstCardSightPlan?>? StageVigorAward { get; set; }
+
     /// <summary>After a successful 31323 consume and its effects; quest engine queues objective evaluation.</summary>
     public List<Action<GameSession, int, int>> ItemUsed { get; } = new();
 
