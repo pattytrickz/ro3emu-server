@@ -315,6 +315,30 @@ public sealed class AwardTests : IAsyncLifetime
         Assert.Equal(1, store.Load(session.Role.Id).Single(i => i.Guid == unsupported).Stack);
     }
 
+    [ClientDataFact]
+    public async Task UsingAGiftBoxOpensItsAward()
+    {
+        // #bug-reports "Old card Album": 1300077 (RandRewards 302, _iAward 40058) answered "feature unavailable".
+        await using var bot = await InWorld("BoxAlice");
+        await Next(bot, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        var character = _app.Services.GetRequiredService<CharacterService>();
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "BoxAlice");
+        var store = _app.Services.GetRequiredService<ItemStore>();
+        Assert.True(await loop.InvokeAsync(() => character.ApplyAwardAsync(session,
+            new AwardPlan(0, 0, [new AwardGrant(1300077, 2)]), suppressRewardNotice: true)));
+        long album = store.Load(session.Role!.Id).Single(i => i.Entry == 1300077).Guid;
+
+        await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = album, ItemCount = 1 });
+        var notify = await Next(bot, CharacterService.GetRewardNotify, GetRewardNotify.Parser, m => m.Rewards.Count > 0);
+        Assert.Equal(0, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        Assert.DoesNotContain(notify.Rewards, r => r.ItemEntry == 1300077);
+        await loop.InvokeAsync(() => Task.CompletedTask);
+        var items = store.Load(session.Role.Id);
+        Assert.Equal(1, items.Single(i => i.Entry == 1300077).Stack);
+        Assert.All(notify.Rewards, r => Assert.Contains(items, i => i.Entry == r.ItemEntry));
+    }
+
     private async Task<BotClient> InWorld(string name)
     {
         var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));

@@ -70,7 +70,7 @@ public sealed partial class CharacterService
             : item.Stack < count ? ErrorCodes.ItemsShort : row == null ? ErrorCodes.ItemNoConfig
             : count > 1 && GameData.Int(row.Value, "_iGroupUse") == 0
                 && !(LifeItemUse != null && HandlesLifeItem(row.Value)) ? ErrorCodes.Parameter
-            : req.ItemParam.Count > 0 && WingDestination(row.Value, req) == null ? ErrorCodes.FeatureUnavailable
+            : req.ItemParam.Count > 0 && WingDestination(row.Value, req) == null && GiftBox(row.Value) == 0 ? ErrorCodes.FeatureUnavailable
             : item.BindExpire > 0 && item.BindExpire <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() ? ErrorCodes.ItemMissing
             : session.Dead ? ErrorCodes.UseWhileDead
             : IsItemUseForbidden?.Invoke(session) == true ? ErrorCodes.ItemUseForbidden
@@ -124,6 +124,8 @@ public sealed partial class CharacterService
         if (specialized == null && IsTreasureMapUse(row.Value))
             specialized = StartTreasureMap == null ? ErrorCodes.FeatureUnavailable
                 : await StartTreasureMap(session, req, PersistCooldown, PublishCooldown);
+        if (specialized == null && GiftBox(row.Value) is var box and > 0)
+            specialized = await OpenGiftBoxAsync(session, entry, box, count, PersistCooldown, PublishCooldown);
         result = specialized ?? (CanApplyUseEffects(row.Value) ? WingError(session, row.Value, req) : ErrorCodes.FeatureUnavailable);
         if (result != 0)
         {
@@ -178,6 +180,36 @@ public sealed partial class CharacterService
         var effect = effects[0];
         long Arg(int n) => effect.GetArrayLength() > n ? (long)(GameData.Number(effect[n]) ?? 0) : 0;
         return Arg(0) == 607 || Arg(0) == 315 && Arg(1) == LifeJobService.VigorId;
+    }
+
+    /// <summary>
+    /// A gift box's MultiverseGroupConfig award (ItemConfig _iAward), or 0. The client sends a plain 31323 for these
+    /// (LC_ItemHelper._useItemForBox: the "isFirstHeartBox" param when _kAwardperformance is set). SmallGift 301 and
+    /// RandRewards 302 open on the server; SelfChooseGift 303 and SelfChoosePet 912 go through UI_Com_RewardSelectPanel
+    /// and its choice, which is not handled here.
+    /// </summary>
+    private static long GiftBox(JsonElement row) =>
+        GameData.Int(row, "_iType") == 3 && GameData.Int(row, "_iIsUse") == 1 && GameData.Int(row, "_iSubType") is not (303 or 912)
+            && GameData.Int(row, "_iAward") is var award and > 0 ? award : 0;
+
+    /// <summary>Opens <paramref name="count"/> boxes: one award roll each, the boxes and the grants in one commit.</summary>
+    private async Task<int> OpenGiftBoxAsync(GameSession session, int entry, long award, int count,
+        Action<RoleItemPlanBuilder> persist, Action publish)
+    {
+        var grants = new List<AwardGrant>();
+        try
+        {
+            for (int i = 0; i < count; i++) grants.AddRange(awards.Resolve(session, award).Grants);
+        }
+        catch (AwardResolutionException e)
+        {
+            log.LogWarning("Gift box {Entry} award {Award} not opened: {Reason}", entry, award, e.Message);
+            return ErrorCodes.FeatureUnavailable;
+        }
+        if (grants.Count == 0) return ErrorCodes.RewardMissing;
+        bool done = await ApplyAwardAsync(session, new AwardPlan(award, 0, grants), costs: [(entry, count)],
+            persist: persist, stateLockHeld: true, committed: publish);
+        return done ? 0 : ErrorCodes.ItemsShort;
     }
 
     private bool CanApplyUseEffects(JsonElement row)
