@@ -203,6 +203,7 @@ public sealed class PublisherGame : IDisposable
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         hash.AppendData(Encoding.UTF8.GetBytes(serverUrl + "\n" + pem.Replace("\r\n", "\n").Trim() + "\n"));
+        hash.AppendData(Encoding.UTF8.GetBytes($"patch revision {ClientPatcher.Revision}\n"));
         foreach (var name in Self.GetManifestResourceNames().Where(n => n.StartsWith("translations/", StringComparison.Ordinal) || n.StartsWith("Ro3Emu.", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
         {
             using var stream = Self.GetManifestResourceStream(name)!;
