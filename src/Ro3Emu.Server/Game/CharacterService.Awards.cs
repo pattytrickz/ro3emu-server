@@ -159,6 +159,7 @@ public sealed partial class CharacterService
         var notification = new Romsg.GetRewardNotify { TargetUid = session.Role!.Id };
         var gained = new List<(int Entry, int Count)>();
         var received = new HashSet<InvItem>();
+        long vigor = 0;
         foreach (var grant in plan.Grants)
         {
             if (grant.Entry <= 0 || grant.Count <= 0 || data.Row("ItemConfig", grant.Entry) == null
@@ -169,6 +170,12 @@ public sealed partial class CharacterService
                 throw new InvalidOperationException("bound or expiring virtual EXP award");
             if (grant.Entry == BaseExpItem) { baseExp = checked(baseExp + grant.Count); continue; }
             if (grant.Entry == JobExpItem) { jobExp = checked(jobExp + grant.Count); continue; }
+            if (grant.Entry == VigorRewardItem && StageVigorAward != null && grant.BindType != 2 && grant.ExpireTimeStamp == 0)
+            {
+                vigor = checked(vigor + grant.Count);
+                notification.Rewards.Add(ItemInfo(new InvItem { Entry = grant.Entry, Stack = grant.Count }));
+                continue;
+            }
             if (IsCurrency(grant.Entry))
             {
                 var currencyRow = data.Row("ItemConfig", grant.Entry)!.Value;
@@ -229,6 +236,7 @@ public sealed partial class CharacterService
         // use the persisted blob as the SQLite CAS baseline for this single award transaction.
         byte[]? persistedTasks = expectedTasks == null ? null : roles.LoadTasks(session.Role.Id);
         var cardSight = StageFirstCardSight?.Invoke(session, gained.Select(g => g.Entry).ToList());
+        var vigorPlan = vigor > 0 ? StageVigorAward?.Invoke(session, vigor) : null;
         void PublishAward()
         {
             session.Progress = staged;
@@ -241,6 +249,7 @@ public sealed partial class CharacterService
                 session.DailyRows = DBDailyActivityInfo.Parser.ParseFrom(nextDailyState.Rows);
             }
             cardSight?.Apply();
+            vigorPlan?.Apply();
             committed?.Invoke();
         }
         if (ownedAward != null)
@@ -254,6 +263,7 @@ public sealed partial class CharacterService
                 expectedDaily, nextDaily, persistedTasks, expectedTasks != null));
             persist?.Invoke(builder);
             cardSight?.Persist(builder);
+            vigorPlan?.Persist(builder);
             builder.WithEconomy(economy);
             try
             {
@@ -277,6 +287,7 @@ public sealed partial class CharacterService
             builder.Progress(session.Role.Id, staged);
             persist?.Invoke(builder);
             cardSight?.Persist(builder);
+            vigorPlan?.Persist(builder);
             builder.WithEconomy(familyEconomy);
             await roles.CommitAsync(builder, "cd13b/pet-lottery", receipts =>
             {
@@ -294,6 +305,7 @@ public sealed partial class CharacterService
                     {
                         persist?.Invoke(builder);
                         cardSight?.Persist(builder);
+            vigorPlan?.Persist(builder);
                         escrowAward = builder.HasEscrowEconomy;
                     }, expectedDaily, nextDaily, persistedTasks, expectedTasks != null)) return false;
             }
