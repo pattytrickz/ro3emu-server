@@ -17,6 +17,12 @@ public sealed class LauncherConfig
     /// launcher updates and news.
     /// </summary>
     [JsonPropertyName("game")] public string Game { get; set; } = "repository";
+    /// <summary>
+    /// "publisher" mode: the newest publisher release this launcher's patch is known to work with (0 = no limit). A newer
+    /// release is not installed over a game folder: its client may not reach <see cref="Server"/>. Release 140069
+    /// (20 Oct 2026) replaced the two DLLs the patch rewrites, and its login never reaches the server.
+    /// </summary>
+    [JsonPropertyName("maxGameRelease")] public long MaxGameRelease { get; set; }
     /// <summary>Buttons on the page (website, Discord, ...): label, url and an optional icon name the page knows.</summary>
     [JsonPropertyName("links")] public List<LauncherLink> Links { get; set; } = new();
 
