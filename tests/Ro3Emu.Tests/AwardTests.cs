@@ -127,8 +127,10 @@ public sealed class AwardTests : IAsyncLifetime
             awards.Resolve(null!, 1005).Grants.ToArray()); // AwardConfig _kEXP [1, 10000] is base EXP
         Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1007)); // _kEXP [2, 100]: unresolved kind
         // _kCondition [[2, 11, 99]]: base level 11-99, so it needs a recipient
-        Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1002));
-        Assert.Throws<AwardResolutionException>(() => awards.ResolveForProgress(new RoleProgress { Level = 10 }, 1002));
+        Assert.False(Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1002)).LevelTooLow);
+        // Growth rank 2 below base 11 answers "Player level too low" instead of "Reward not found".
+        Assert.True(Assert.Throws<AwardResolutionException>(
+            () => awards.ResolveForProgress(new RoleProgress { Level = 10 }, 1002)).LevelTooLow);
         Assert.Equal(new[] { new AwardGrant(1200000, 1), new AwardGrant(1420100, 1) },
             awards.ResolveForProgress(new RoleProgress { Level = 11 }, 1002).Grants.ToArray());
         Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 25001)); // restriction replacement

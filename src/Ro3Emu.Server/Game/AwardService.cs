@@ -23,7 +23,11 @@ public sealed class AwardPlan
     }
 }
 
-public sealed class AwardResolutionException(string message) : InvalidOperationException(message);
+/// <summary>An award that cannot be resolved. <see cref="LevelTooLow"/>: the recipient is outside a _kCondition level range.</summary>
+public sealed class AwardResolutionException(string message, bool levelTooLow = false) : InvalidOperationException(message)
+{
+    public bool LevelTooLow { get; } = levelTooLow;
+}
 
 /// <summary>
 /// Resolves MultiverseGroupConfig type 0 to AwardConfig, including fixed tuples and actual DropPool terminals.
@@ -226,7 +230,8 @@ public sealed class AwardService(GameData data)
                 throw Fail($"AwardConfig {awardId} has unresolved condition policy");
             long min = ExactLong(condition[1], "level"), max = ExactLong(condition[2], "level");
             if (progress == null) throw Fail($"AwardConfig {awardId} requires a recipient");
-            if (progress.Level < min || progress.Level > max) throw Fail($"AwardConfig {awardId} needs base level {min}-{max}");
+            if (progress.Level < min || progress.Level > max)
+                throw new AwardResolutionException($"AwardConfig {awardId} needs base level {min}-{max}", levelTooLow: true);
         }
     }
 
