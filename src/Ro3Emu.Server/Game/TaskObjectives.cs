@@ -429,4 +429,6 @@ public sealed class TaskRuntimeState
 {
     public HashSet<long> CompletedGuides { get; set; } = new();
     public bool InCutScene { get; set; }
+    /// <summary>BecomeStrongerRankConfig ranks whose growth classroom reward was claimed (TaskService.GrowthClass).</summary>
+    public HashSet<long> GrowthRanksClaimed { get; set; } = new();
 }
