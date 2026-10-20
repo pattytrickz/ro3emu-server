@@ -49,7 +49,13 @@ public sealed class AiBot
     private bool _resting;
     private readonly Dictionary<ulong, DateTime> _avoid = new();
     private long _leader;
-    private DateTime _leaderSeen;
+    private DateTime _leaderSeen, _followTravelAt, _nextHeal, _nextHealLearn;
+    /// <summary>A map the leader is on that the bot cannot travel to (an instance, a dungeon): it waits instead.</summary>
+    private long _cantFollowMap;
+    /// <summary>The learned heal's SkillConfig row id (group * 100 + level), or 0.</summary>
+    private int _healSkill;
+    /// <summary>Heal groups by job tree: Acolyte line (SkillTreeConfig job 4100) and job 1210.</summary>
+    private static readonly int[] HealGroups = [14007, 11405];
     private string _activity = "just arrived";
 
     public AiBot(RosterEntry entry, AiBotsOptions options, Atlas atlas, Progression progression, GmTool gm, ChatHub hub, Crowd crowd,
@@ -174,6 +180,9 @@ public sealed class AiBot
         _resting = false;
         _deadSince = null;
         _leader = 0;
+        _cantFollowMap = 0;
+        _healSkill = 0;
+        _nextHealLearn = DateTime.UtcNow;
         _avoid.Clear();
         _idleUntil = DateTime.UtcNow.AddSeconds(_random.Next(2, 8));
         _nextMapCheck = DateTime.UtcNow.AddSeconds(_random.Next(5, 20));
@@ -223,7 +232,7 @@ public sealed class AiBot
             case PartyChanged change:
                 long leader = Volatile.Read(ref _leader);
                 if (leader == 0) break;
-                if (change.Left == _roleId) { Volatile.Write(ref _leader, 0); _log("was removed from the party"); }
+                if (change.Left == _roleId) { Volatile.Write(ref _leader, 0); _view.ForgetParty(); _log("was removed from the party"); }
                 else if (change.NewLeader == _roleId || change.Left == leader) await LeavePartyAsync("my party leader left");
                 else if (change.NewLeader != 0) Volatile.Write(ref _leader, change.NewLeader);
                 break;
@@ -251,7 +260,7 @@ public sealed class AiBot
         catch (Exception e) when (e is InvalidOperationException or TimeoutException) { _log($"map chat join failed: {e.Message}"); }
     }
 
-    private async Task TeleportAsync(long map, string why)
+    private async Task<bool> TeleportAsync(long map, string why)
     {
         _log($"travelling to {_atlas.MapName(map)} ({why})");
         _path = null;
@@ -261,6 +270,7 @@ public sealed class AiBot
         var response = SceneTeleportRsp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(15))).Body);
         if (response.Result != 0) _log($"travel refused: {response.Result}");
         // The scene switch (70010) that follows is loaded by HandleAsync.
+        return response.Result == 0;
     }
 
     private async Task DeadAsync()
@@ -369,30 +379,178 @@ public sealed class AiBot
         else Wander(30, idle);
     }
 
+    /// <summary>
+    /// In a real player's party: be where they are and help. The party sync (SceneView.Member) says where the leader
+    /// is even out of sight, so the bot travels to their map, switches to their line and walks to them. Next to them it
+    /// heals (a healer), fights what attacks the leader and what the leader is fighting, and takes fresh monsters nearby.
+    /// Kill EXP goes to the last hit, so a monster the leader has hit is left to them below 30% HP unless the leader is
+    /// in trouble. The bot stays until the leader leaves, kicks it, or is offline for five minutes.
+    /// </summary>
     private async Task PartyAsync()
     {
         long leaderId = Volatile.Read(ref _leader);
+        var member = _view.Member(leaderId);
         var leader = _view.Find((ulong)leaderId);
         var now = DateTime.UtcNow;
         if (leader == null)
         {
-            if (now - _leaderSeen > TimeSpan.FromMinutes(2)) await LeavePartyAsync("lost my party leader");
+            await FindLeaderAsync(member, now);
             return;
         }
         _leaderSeen = now;
+        _cantFollowMap = 0;
         _activity = $"in a party with {leader.Name}, following them";
-        if (Attacker() is { } attacker) { await DefendAsync(attacker); return; }
-        if (await RestAsync()) return;
+        if (await HealAsync(leader, member, now)) return;
         float toLeader = Dist(leader.X, leader.Z);
-        var target = CurrentTarget();
-        if (target == null && toLeader < 12) target = PickTarget(leader.X, leader.Z, 10, long.MaxValue, leaderId);
-        if (target != null && toLeader < 15) { await EngageAsync(target); return; }
+        if (PartyTarget(leader, member) is { } fight && toLeader < 20) { await EngageAsync(fight); return; }
+        if (Attacker() is { } attacker)
+        {
+            // Too strong to take alone: run back to the leader rather than to the revive point.
+            if (attacker.Level <= _view.Level + 3) { await EngageAsync(attacker); return; }
+            if (toLeader > 3) PathTo(leader.X, leader.Z, TimeSpan.Zero, slack: 2);
+            return;
+        }
+        if (_healSkill == 0 && await RestAsync()) return;
+        var target = toLeader < 12 ? PickTarget(leader.X, leader.Z, 10, long.MaxValue, leaderId) : null;
+        if (target != null) { await EngageAsync(target); return; }
         _target = 0;
         if (toLeader > 4 && (_path == null || now - _pathAt > TimeSpan.FromSeconds(1.5)))
         {
             float a = (float)(_random.NextDouble() * MathF.Tau);
             PathTo(leader.X + 2 * MathF.Cos(a), leader.Z + 2 * MathF.Sin(a), TimeSpan.Zero);
         }
+    }
+
+    /// <summary>
+    /// The leader's fight: monsters hitting the leader first, then what the leader is hitting, then the bot's own target.
+    /// A monster the leader has hit and brought below 30% HP is left for their last hit, unless the leader is below 35%.
+    /// </summary>
+    private Unit? PartyTarget(Unit leader, PartyMember? member)
+    {
+        long hp = member?.Hp ?? leader.Hp, max = Math.Max(1, member?.MaxHp ?? leader.MaxHp);
+        bool leaderInTrouble = hp * 100 / max < 35;
+        var window = TimeSpan.FromSeconds(6);
+        var candidates = _view.AttackersOf(leader.Uid, window).Select(_view.Find)
+            .Append(_view.Find(_view.LastTargetOf(leader.Uid, window)))
+            .Append(CurrentTarget());
+        foreach (var unit in candidates)
+        {
+            if (unit is not { Type: 1, Dead: false } || Flat(unit.X, unit.Z, leader.X, leader.Z) > 20
+                || _avoid.TryGetValue(unit.Uid, out var until) && until > DateTime.UtcNow) continue;
+            bool theirs = _view.HasHit(leader.Uid, unit.Uid, TimeSpan.FromSeconds(20));
+            if (theirs && !leaderInTrouble && unit.Hp * 100 / Math.Max(1, unit.MaxHp) <= 30) continue;
+            return unit;
+        }
+        return null;
+    }
+
+    /// <summary>The leader is out of sight: wait while they are offline, otherwise go to their map, line and position.</summary>
+    private async Task FindLeaderAsync(PartyMember? member, DateTime now)
+    {
+        if (member == null || member.Offline)
+        {
+            _activity = "waiting for my party leader to come back";
+            if (now - _leaderSeen > TimeSpan.FromMinutes(5))
+                await LeavePartyAsync(member == null ? "lost my party" : "my party leader has been offline for five minutes");
+            return;
+        }
+        _leaderSeen = now;
+        if (Attacker() is { } attacker) { await DefendAsync(attacker); return; }
+        if (member.MapId == 0) return; // no card yet
+        if (member.MapId != _view.SceneEntry)
+        {
+            if (member.MapId == _cantFollowMap)
+            {
+                _activity = $"waiting for my party leader to come back from {_atlas.MapName(member.MapId)}";
+                return;
+            }
+            if (now < _followTravelAt) return;
+            _followTravelAt = now.AddSeconds(20);
+            if (_atlas.Map(member.MapId)?.Nav == null || !await TeleportAsync(member.MapId, "following my party leader"))
+                await CantFollowAsync(member.MapId);
+            return;
+        }
+        _cantFollowMap = 0;
+        if (member.Line > 0 && _view.Line > 0 && member.Line != _view.Line)
+        {
+            if (now < _followTravelAt) return;
+            _followTravelAt = now.AddSeconds(15);
+            _log($"switching to line {member.Line} to join my party leader");
+            await SendAsync(() => _bot.SendGameAsync(MsgId.SwitchSceneLine,
+                new SwitchSceneLineReq { Linenum = member.Line, ESource = SwitchSceneSourceType.SwitchSceneSourceManual }));
+            return;
+        }
+        // Same map and line, out of sight: walk to where the party sync last placed them.
+        _activity = "on my way to my party leader";
+        if ((member.X != 0 || member.Z != 0) && (_path == null || now - _pathAt > TimeSpan.FromSeconds(3)))
+            PathTo(member.X, member.Z, TimeSpan.Zero, slack: 3);
+    }
+
+    /// <summary>The leader is somewhere the bot cannot go (an instance or dungeon): wait, and say so once.</summary>
+    private async Task CantFollowAsync(long map)
+    {
+        _cantFollowMap = map;
+        long leader = Volatile.Read(ref _leader);
+        _log($"cannot follow my party leader to {_atlas.MapName(map)}; waiting");
+        string line = $"I can't follow you into {_atlas.MapName(map)}, so I'll wait here and catch up when you're back out.";
+        try { await SendAsync(() => _bot.SendChatAsync(leader.ToString(), 1, line, channelIndex: 5)); }
+        catch (Exception e) when (e is InvalidOperationException or IOException) { }
+    }
+
+    /// <summary>A healer heals the leader below 70% HP and itself below 60%, walking into range first.</summary>
+    private async Task<bool> HealAsync(Unit leader, PartyMember? member, DateTime now)
+    {
+        if (_healSkill <= 0 || now < _nextHeal) return false;
+        long hp = member?.Hp ?? leader.Hp, max = Math.Max(1, member?.MaxHp ?? leader.MaxHp);
+        bool leaderNeeds = member is not { Dead: true } && hp * 100 / max < 70;
+        bool selfNeeds = _view.Hp * 100 / Math.Max(1, _view.MaxHp) < 60;
+        if (!leaderNeeds && !selfNeeds) return false;
+        long target = leaderNeeds ? (long)leader.Uid : _roleId;
+        if (leaderNeeds && Dist(leader.X, leader.Z) > 15)
+        {
+            if (_path == null || now - _pathAt > TimeSpan.FromSeconds(1)) PathTo(leader.X, leader.Z, TimeSpan.Zero, slack: 6);
+            return true;
+        }
+        if (_path != null) await StopAsync();
+        _nextHeal = now.AddSeconds(2.5);
+        using var reply = _bot.Inbox.Expect(x => x.IsGame(CombatService.UseSkill));
+        int skill = _healSkill;
+        await SendAsync(() => _bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = skill, TargetId = target }));
+        int result;
+        try { result = CastSkillRsp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(4))).Body).Result; }
+        catch (TimeoutException) { result = -1; }
+        if (result == 0) { _activity = leaderNeeds ? "healing my party leader" : "healing myself"; return true; }
+        if (result is ErrorCodes.SkillUnknown or ErrorCodes.SkillNotLearned) { _healSkill = 0; _nextHealLearn = now; }
+        else _nextHeal = now.AddSeconds(8); // out of SP or blocked: try again later
+        _log($"heal refused ({result})");
+        return false;
+    }
+
+    /// <summary>
+    /// Learns a heal when the bot's job tree has one (31151 on plan 0, the highest level its skill points allow).
+    /// Jobs without one get "not in the skill tree" and try again after a job change, ten minutes later.
+    /// </summary>
+    private async Task LearnHealAsync()
+    {
+        var now = DateTime.UtcNow;
+        if (_healSkill != 0 || now < _nextHealLearn) return;
+        _nextHealLearn = now.AddMinutes(10);
+        foreach (int group in HealGroups)
+            foreach (int level in new[] { 10, 5, 3, 1 })
+            {
+                var req = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+                req.LevelUpList[group] = new SkillData { SkillId = group, SkillLevel = level };
+                using var reply = _bot.Inbox.Expect(x => x.IsGame(SkillService.PlanUpdate));
+                await SendAsync(() => _bot.SendGameAsync(SkillService.PlanUpdate, req));
+                int result = SkillGrowthSkillPlanUpdateResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10))).Body).Result;
+                if (result == 0)
+                {
+                    _healSkill = group * 100 + level;
+                    _log($"learned heal {group} level {level}");
+                    return;
+                }
+                if (result == ErrorCodes.SkillNotInTree) break;
+            }
     }
 
     /// <summary>Low on HP: back off from the fight and wait for natural regeneration.</summary>
@@ -662,6 +820,8 @@ public sealed class AiBot
             _log($"advanced to {_progression.JobName(next)}");
         if (level != _statsLevel) await AllocateStatsAsync(level);
         if (_gm.Available && (_entry.GearLevel == 0 || level >= _entry.GearLevel + 15)) await GearUpAsync(level);
+        try { await LearnHealAsync(); }
+        catch (TimeoutException) { }
     }
 
     private async Task<bool> GmLevelAsync(int level, int jobLevel)
@@ -789,7 +949,23 @@ public sealed class AiBot
             await SendAsync(() => _bot.SendGameAsync(TeamService.TeamInviteeResp,
                 new InviteeResp { TeamId = invite.TeamId, IsAgree = accept, InviteGuid = invite.InviterId }));
             var result = InviteeRespResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10), ct)).Body).Result;
-            if (!accept) return;
+            if (!accept)
+            {
+                // Say why, so the inviter is not left wondering whether the bot is away.
+                if (Volatile.Read(ref _leader) != 0 && !_hub.IsBot(invite.InviterId))
+                    await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1,
+                        "Sorry, I'm already in someone else's party right now.", channelIndex: 5));
+                return;
+            }
+            if (result == ErrorCodes.AlreadyInParty)
+            {
+                // Still in a party from before a reconnect: leave it, and ask to be invited again.
+                _log("still in an old party; leaving it");
+                await SendAsync(() => _bot.SendGameAsync(TeamService.TeamLeave, new LeaveTeamReq { Guid = _roleId }));
+                await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1,
+                    "Oops, I was stuck in an old party. Invite me again?", channelIndex: 5));
+                return;
+            }
             if (result != 0) { _log($"party join refused: {result}"); return; }
             _leaderSeen = DateTime.UtcNow;
             Volatile.Write(ref _leader, invite.InviterId);
@@ -805,6 +981,8 @@ public sealed class AiBot
     {
         long leader = Interlocked.Exchange(ref _leader, 0);
         if (leader == 0) return;
+        _view.ForgetParty();
+        _cantFollowMap = 0;
         _log($"leaving the party ({why})");
         await SendAsync(() => _bot.SendGameAsync(TeamService.TeamLeave, new LeaveTeamReq { Guid = _roleId }));
     }
