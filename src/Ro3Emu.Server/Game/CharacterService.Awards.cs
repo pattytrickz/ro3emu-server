@@ -237,6 +237,11 @@ public sealed partial class CharacterService
         byte[]? persistedTasks = expectedTasks == null ? null : roles.LoadTasks(session.Role.Id);
         var cardSight = StageFirstCardSight?.Invoke(session, gained.Select(g => g.Entry).ToList());
         var vigorPlan = vigor > 0 ? StageVigorAward?.Invoke(session, vigor) : null;
+        // No life-skill state to raise (or nothing would change): keep the Vigor as currency 407, as before.
+        if (vigor > 0 && vigorPlan == null) staged.Currency[VigorRewardItem] = checked(staged.Currency.GetValueOrDefault(VigorRewardItem) + vigor);
+        // Vigor in the 1004 balance is a non-tradeable stamina, not a ledger asset: the economy record leaves it out.
+        var ledgerPlan = vigorPlan == null ? plan
+            : new AwardPlan(plan.GroupId, plan.AwardId, plan.Grants.Where(g => g.Entry != VigorRewardItem));
         void PublishAward()
         {
             session.Progress = staged;
@@ -255,7 +260,7 @@ public sealed partial class CharacterService
         if (ownedAward != null)
         {
             if (familyEconomy != null) throw new InvalidOperationException("Award cannot carry two economy envelopes.");
-            var economy = EconomyForOwnedAward(session, ownedAward, plan, old, staged, expense,
+            var economy = EconomyForOwnedAward(session, ownedAward, ledgerPlan, old, staged, expense,
                 baseExp, jobExp, decomposed);
             var builder = roles.NewTransaction();
             int itemReceipt = builder.ItemDelta(session.Role.Id, session.Items, items);
