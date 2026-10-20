@@ -24,21 +24,41 @@ public static class SelfUpdate
     public static bool IsNewer(string remote, string current)
         => Version.TryParse(remote, out var r) && Version.TryParse(current, out var c) && r > c;
 
-    /// <summary>Downloads and swaps in the new exe; returns true when the caller should start it and exit.</summary>
-    public static async Task<bool> ApplyAsync(RepositoryClient repo, LauncherRelease release, string currentVersion, string exePath, CancellationToken ct)
+    /// <summary>
+    /// Downloads and swaps in the new exe; returns true when the caller should start it and exit. The download streams
+    /// to <c>*.new</c> and resumes after a break (<see cref="RepositoryClient.DownloadFileAsync"/>), with no fixed time
+    /// limit: 1.2.3 gave up after 60 s, which a 64 MB launcher on a slow connection never made.
+    /// <paramref name="progress"/> gets (bytes so far, total or -1).
+    /// </summary>
+    public static async Task<bool> ApplyAsync(RepositoryClient repo, LauncherRelease release, string currentVersion, string exePath,
+        CancellationToken ct, Action<long, long>? progress = null)
     {
         if (!IsNewer(release.Version, currentVersion) || string.IsNullOrEmpty(release.Url))
         {
             return false;
         }
         PathRules.ValidateRelative(release.Url);
-        byte[]? data = await repo.TryGetBytesAsync(release.Url, ct);
-        if (data is null || !string.Equals(Hashing.Sha256Hex(data), release.Sha256, StringComparison.OrdinalIgnoreCase))
+        string staged = exePath + ".new";
+        if (File.Exists(staged)) File.Delete(staged);
+        try
         {
+            await repo.DownloadFileAsync(release.Url, staged, progress, ct);
+        }
+        catch (HttpRequestException e) when (e.StatusCode is { } status && (int)status is >= 400 and < 500)
+        {
+            File.Delete(staged);
+            return false; // the release isn't there (404): keep the working exe
+        }
+        catch
+        {
+            File.Delete(staged);
+            throw;
+        }
+        if (!string.Equals(Hashing.Sha256File(staged, ct: ct), release.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Delete(staged);
             return false; // a broken launcher release must never replace a working one
         }
-        string staged = exePath + ".new";
-        await File.WriteAllBytesAsync(staged, data, ct);
         string old = exePath + ".old";
         if (File.Exists(old)) File.Delete(old);
         File.Move(exePath, old);

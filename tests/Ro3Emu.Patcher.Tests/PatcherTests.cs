@@ -32,6 +32,58 @@ sealed class FileRepoHandler(string repo) : HttpMessageHandler
     }
 }
 
+/// <summary>
+/// Serves one file the way a slow or flaky connection does: the first response breaks off (or goes silent) halfway, and
+/// later requests honour the Range header. Records every Range it was asked for.
+/// </summary>
+sealed class FlakyFileHandler(byte[] data, bool stall) : HttpMessageHandler
+{
+    public readonly List<long?> RangesAsked = [];
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        long from = request.Headers.Range?.Ranges.First().From ?? 0;
+        RangesAsked.Add(request.Headers.Range?.Ranges.First().From);
+        bool first = RangesAsked.Count == 1;
+        var response = new HttpResponseMessage(from > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK);
+        var rest = data.AsMemory((int)from).ToArray();
+        Stream body = first ? new BreakingStream(rest, rest.Length / 2, stall) : new MemoryStream(rest);
+        response.Content = new StreamContent(body);
+        response.Content.Headers.ContentLength = rest.Length;
+        return Task.FromResult(response);
+    }
+
+    /// <summary>Gives <paramref name="upTo"/> bytes, then throws like a dropped connection or never answers again.</summary>
+    sealed class BreakingStream(byte[] data, int upTo, bool stall) : Stream
+    {
+        int _position;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_position >= upTo)
+            {
+                if (!stall) throw new IOException("connection reset");
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            int n = Math.Min(buffer.Length, upTo - _position);
+            data.AsMemory(_position, n).CopyTo(buffer);
+            _position += n;
+            return n;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+}
+
 public sealed class PatcherTests : IDisposable
 {
     readonly string _root = Path.Combine(Path.GetTempPath(), "fspatch-" + Guid.NewGuid().ToString("N"));
@@ -389,6 +441,32 @@ public sealed class PatcherTests : IDisposable
         Assert.False(await SelfUpdate.ApplyAsync(client, channel.Launcher, "1.0.0", current, CancellationToken.None));
         Assert.Equal(original, File.ReadAllBytes(current));
         Assert.False(File.Exists(current + ".old"));
+        Assert.False(File.Exists(current + ".new"));
+    }
+
+    [Theory]
+    [InlineData(false)] // the connection drops halfway
+    [InlineData(true)]  // the connection goes silent halfway
+    public async Task LauncherSelfUpdate_SlowOrBrokenDownloadCarriesOnWhereItStopped(bool stall)
+    {
+        // 1.2.3 fetched the whole launcher in one 60-second request, so a slow connection could never update.
+        string current = Path.Combine(_root, "current.exe"), next = Path.Combine(_root, "next.exe");
+        byte[] newBytes = Random(300_000, 97);
+        File.WriteAllBytes(current, Random(1000, 98));
+        File.WriteAllBytes(next, newBytes);
+        var channel = await Publisher.PublishLauncherAsync(Repo, "live", next, "1.1.0");
+        var handler = new FlakyFileHandler(newBytes, stall);
+        using var client = new RepositoryClient(new Uri("https://repo.test/"), handler)
+        {
+            StallTimeout = TimeSpan.FromMilliseconds(300), RetryDelay = TimeSpan.Zero,
+        };
+        long lastDone = 0, lastTotal = 0;
+
+        Assert.True(await SelfUpdate.ApplyAsync(client, channel.Launcher!, "1.0.0", current, CancellationToken.None,
+            (done, total) => (lastDone, lastTotal) = (done, total)));
+        Assert.Equal(newBytes, File.ReadAllBytes(current));
+        Assert.Equal([null, newBytes.Length / 2], handler.RangesAsked);
+        Assert.Equal((newBytes.Length, newBytes.Length), (lastDone, lastTotal));
         Assert.False(File.Exists(current + ".new"));
     }
 
