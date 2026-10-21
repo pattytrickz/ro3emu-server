@@ -223,6 +223,39 @@ public sealed class SkillGrowthTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task WizardCanResetSightWithItsFreeSightSprout()
+    {
+        await using var alice = await InWorld("Alice");
+        await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser);
+        await Gm("alice", "!job 2200");
+        await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser,
+            m => !m.SyncAllMark && m.SkillList?.All?.Value.Contains(12110) == true);
+        var learn = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        learn.LevelUpList[12002] = new SkillData { SkillId = 12002, SkillLevel = 1 };
+        await alice.SendGameAsync(SkillService.PlanUpdate, learn);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+
+        // Sight Sprout (initial level 1) needs Sight 1: keeping Sight cannot drop it below its free level.
+        var keep = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        keep.LevelUpList[12110] = new SkillData { SkillId = 12110, SkillLevel = 0 };
+        await alice.SendGameAsync(SkillService.PlanUpdate, keep);
+        Assert.Equal(ErrorCodes.Parameter,
+            (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+
+        // The skill panel's reset sends Sight and Sight Sprout at 0 together (mushoki, 21 Oct).
+        var reset = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        reset.LevelUpList[12002] = new SkillData { SkillId = 12002, SkillLevel = 0 };
+        reset.LevelUpList[12110] = new SkillData { SkillId = 12110, SkillLevel = 0 };
+        await alice.SendGameAsync(SkillService.PlanUpdate, reset);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+
+        await alice.SendGameAsync(SkillService.PlanUpdate, learn);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+        await alice.SendGameAsync(SkillService.SkillReset, new SkillResetReq { Plan = 0 });
+        Assert.Equal(0, (await Next(alice, SkillService.SkillReset, SkillResetResp.Parser)).Result);
+    }
+
+    [ClientDataFact]
     public async Task LoadQueueAndResetValidateInputsAndPersist()
     {
         await using (var alice = await InWorld("Alice"))
