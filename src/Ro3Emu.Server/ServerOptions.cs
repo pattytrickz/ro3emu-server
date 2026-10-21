@@ -65,6 +65,13 @@ public sealed class ServerOptions
     public bool LevelUpRefill { get; set; }
 
     /// <summary>
+    /// House rule: while a player sits (the Meditate or Sit emote, playing) out of combat, each 5 s HP/SP regeneration
+    /// cycle is multiplied by this. 1 by default = the original: nothing in the RO3 client data gives sitting its own
+    /// recovery, only Meditate's text "Meditate on the spot to recover".
+    /// </summary>
+    public double SitRegenMultiplier { get; set; } = 1;
+
+    /// <summary>
     /// House rule: every ordinary field kill pays its Bonus Time table (NPCDropConfig environment 1, about ten times
     /// the reduced environment 0), as if Bonus Time were always running. Off by default: the original pays it only
     /// while auto-battling with battle time left, and battle time unlocks at Base 37 (FunctionConfig 18), so a player
