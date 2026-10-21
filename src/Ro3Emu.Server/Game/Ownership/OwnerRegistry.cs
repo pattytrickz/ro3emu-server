@@ -19,6 +19,8 @@ public sealed class OwnerRegistry
     /// <summary>Replacement admissions that encountered an unresolved predecessor handover/readiness fence.</summary>
     public long HandoverConflicts { get; internal set; }
     internal Action<string>? DeferredForTest { get; set; }
+    /// <summary>How long a nested gate wait may keep its parent's reservations (<see cref="EnterWithGateAsync"/>).</summary>
+    internal TimeSpan GateWaitTimeout { get; set; } = TimeSpan.FromSeconds(30);
     public OwnerRegistry(GameLoop loop, RoleStore roles)
     {
         _loop = loop; _roles = roles; loop.Owners = this;
@@ -136,9 +138,12 @@ public sealed class OwnerRegistry
     // Deferred admissions by origin (C/D 16 diagnostics): count, total and max queued time, and which origin held a
     // conflicting key when the admission first had to wait. Read off the loop by the metrics endpoint, hence the lock.
     private readonly Dictionary<long, string> _origins = [];
+    // Admission time of each keyed operation and the gate it waits at while keeping its keys, for the stuck-work report.
+    private readonly Dictionary<long, long> _admittedAt = [];
+    private readonly Dictionary<long, string> _waitingAt = [];
     private sealed class WaitUse { public long Count; public double WaitMs, MaxWaitMs; public readonly Dictionary<string, long> BlockedBy = []; }
     private readonly Dictionary<string, WaitUse> _waitByOrigin = [];
-    internal void Forget(long operation) => _origins.Remove(operation);
+    internal void Forget(long operation) { _origins.Remove(operation); _admittedAt.Remove(operation); }
     // The blocking origin and the kind of key it holds: entity kind only, never an id or an account name, so there is
     // one label per conflict shape and the 16 slots per origin do not fill with individual keys.
     private string BlockerLabel(ReservationKey[] keys) => Reservations.Blocker(keys) is { } blocker
@@ -297,6 +302,7 @@ public sealed class OwnerRegistry
         catch { Reservations.Abandon(operation); throw; }
         if (deferred) { RecordQueueAgeCore(queuedAt); RecordWait(realmLabel ?? origin, blockedBy!, queuedAt); }
         _origins[operation] = realmLabel ?? origin;
+        _admittedAt[operation] = System.Diagnostics.Stopwatch.GetTimestamp();
         return new(this, permit, new OwnerContext(this, operation, ++_admissionSequence, origin)
         {
             RequestCurrent = request?.RequestCurrent, RequestSession = request?.RequestSession,
@@ -348,6 +354,7 @@ public sealed class OwnerRegistry
         }
         if (retry is { QueuedAt: not 0 }) { RecordQueueAgeCore(retry.QueuedAt); RecordWait(origin, retry.BlockedBy, retry.QueuedAt); }
         _origins[operation] = origin;
+        _admittedAt[operation] = System.Diagnostics.Stopwatch.GetTimestamp();
         return new(this, permit, new OwnerContext(this, operation, ++_admissionSequence, origin)
         {
             RequestCurrent = request?.RequestCurrent, RequestSession = request?.RequestSession,
@@ -362,11 +369,23 @@ public sealed class OwnerRegistry
         ReservationKey[] keys, CancellationToken cancellation = default)
     {
         AssertLoop();
-        if (Current is { RuntimeOnly: false })
+        if (Current is { RuntimeOnly: false } parent)
         {
             var borrowed = await EnterAsync(origin, keys, cancellation);
-            try { await gate.WaitAsync(cancellation); return borrowed; }
+            // This wait keeps the parent's reservations. A gate that never frees (the same gate taken again further
+            // up the call, or its holder waiting for a key the parent holds) kept them for good, and every Realm
+            // admission queues behind any held key. On 20 Oct 2026 buff expiry, logout cleanup and saves stopped
+            // for half an hour behind a key never released; that this wait held it is (inferred). Give up instead:
+            // the parent fails and releases its keys.
+            _waitingAt[parent.Operation] = origin;
+            try
+            {
+                if (!await gate.WaitAsync(GateWaitTimeout, cancellation))
+                    throw new TimeoutException($"{origin} waited {GateWaitTimeout.TotalSeconds:0.#} s for its gate under {parent.Origin}'s reservations.");
+                return borrowed;
+            }
             catch { borrowed.Dispose(); throw; }
+            finally { _waitingAt.Remove(parent.Operation); }
         }
         using var retry = Retries();
         while (true)
@@ -382,6 +401,21 @@ public sealed class OwnerRegistry
             gate.Release();
             await changed.WaitAsync(cancellation);
         }
+    }
+    /// <summary>Stuck-work report (GameLoop): the keyed operations admitted longer than <paramref name="age"/> ago,
+    /// oldest first, with their origin, keys and the gate they wait at.</summary>
+    internal string LongHeld(TimeSpan age)
+    {
+        AssertLoop();
+        static string Key(ReservationKey key) => $"{key.Kind}:{key.Id}{(key.Part.Length == 0 ? "" : "/" + key.Part)}";
+        var held = Reservations.Held
+            .Where(x => x.Value.Length != 0 && _admittedAt.ContainsKey(x.Key))
+            .Select(x => (x.Key, Keys: x.Value, Age: System.Diagnostics.Stopwatch.GetElapsedTime(_admittedAt[x.Key])))
+            .Where(x => x.Age >= age).OrderByDescending(x => x.Age).Take(8)
+            .Select(x => $"{x.Key}:{_origins.GetValueOrDefault(x.Key, "?")}:{x.Age.TotalMilliseconds:F0}ms[{string.Join(",", x.Keys.Select(Key))}]"
+                + (_waitingAt.TryGetValue(x.Key, out var gate) ? " waiting at " + gate : ""))
+            .ToArray();
+        return held.Length == 0 ? "none" : string.Join("; ", held);
     }
     public async Task RunAsync(string origin, ReservationKey[] keys, Func<Task> work)
     { using var scope = await EnterAsync(origin, keys); await work(); }

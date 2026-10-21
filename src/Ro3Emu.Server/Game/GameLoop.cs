@@ -59,6 +59,7 @@ public sealed partial class GameLoop : IHostedService, IDisposable
     private bool _disposeRequested;
     private bool _queueDisposed;
     private TimeSpan _lastTick;
+    private TimeSpan _nextStuckScan;
 
     public GameLoop(ILogger<GameLoop> log, ServerMetrics? metrics = null)
     {
@@ -73,6 +74,8 @@ public sealed partial class GameLoop : IHostedService, IDisposable
     public TimeSpan Now => _clock.Elapsed;
 
     internal Ownership.OwnerRegistry? Owners { get; set; }
+    /// <summary>Admitted work older than this is reported once as stuck (connections excepted).</summary>
+    internal TimeSpan StuckWorkAge { get; set; } = TimeSpan.FromSeconds(30);
     // Actual executing callback capability, not an AsyncLocal inherited by detached work.
     internal WorkPermit? CurrentWork => IsOnLoop && SynchronizationContext.Current is LoopContext context ? context.Permit : null;
 
@@ -256,7 +259,11 @@ public sealed partial class GameLoop : IHostedService, IDisposable
 
     /// <summary>Reserve a connection's final unlink before its serve task can outlive ordinary admission.</summary>
     public CompletionReservation? ReserveCompletion(string name)
-        => TryAdmit(name, cleanup: true, out var permit) ? new CompletionReservation(this, permit) : null;
+    {
+        if (!TryAdmit(name, cleanup: true, out var permit)) return null;
+        permit.LongLived = true; // a connection's completion lives as long as the connection
+        return new CompletionReservation(this, permit);
+    }
 
     public Task InvokeCleanupAsync(CompletionReservation reservation, Func<Task> work)
     {
@@ -486,6 +493,8 @@ public sealed partial class GameLoop : IHostedService, IDisposable
                         }
                         _metrics?.RecordTicker(ticker.GetType().Name, Stopwatch.GetElapsedTime(one).TotalMilliseconds);
                     }
+                    try { ReportStuckWork(now); }
+                    catch (Exception e) { _log.LogError(e, "Stuck game loop work report failed"); }
                     long finished = Stopwatch.GetTimestamp();
                     _metrics?.RecordTick((itemTicks + finished - tickStart) * 1000.0 / Stopwatch.Frequency,
                         time.Delta.TotalMilliseconds, Stopwatch.GetElapsedTime(tickerStart, finished).TotalMilliseconds,
@@ -601,6 +610,30 @@ public sealed partial class GameLoop : IHostedService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Watchdog: admitted work older than <see cref="StuckWorkAge"/> is reported once, with the reservations held
+    /// as long and the gate each waits at. On 20 Oct 2026 the loop stopped completing work for half an hour with
+    /// nothing in the log until the shutdown's drain report.
+    /// </summary>
+    private void ReportStuckWork(TimeSpan now)
+    {
+        if (now < _nextStuckScan) return;
+        _nextStuckScan = now + (StuckWorkAge < TimeSpan.FromSeconds(5) ? StuckWorkAge : TimeSpan.FromSeconds(5));
+        List<WorkPermit> stuck;
+        lock (_lifecycle)
+            stuck = _outstanding.Values.Where(p => !p.LongLived && !p.StuckReported
+                && Stopwatch.GetElapsedTime(p.StartedAt) >= StuckWorkAge).ToList();
+        if (stuck.Count == 0) return;
+        foreach (var permit in stuck) permit.StuckReported = true;
+        var oldest = stuck.MinBy(p => p.StartedAt)!;
+        _log.LogWarning("Game loop work stuck: {Count} item(s) older than {Age:0.#} s, oldest {Id}:{Name}:{Ms:F0}ms under {Scope}; "
+            + "by name {Names}; reservations held as long: {Held}",
+            stuck.Count, StuckWorkAge.TotalSeconds, oldest.Id, oldest.Name, Stopwatch.GetElapsedTime(oldest.StartedAt).TotalMilliseconds,
+            oldest.Ownership?.Origin ?? "no scope",
+            string.Join(", ", stuck.GroupBy(p => p.Name).OrderByDescending(g => g.Count()).Take(6).Select(g => $"{g.Key} x{g.Count()}")),
+            Owners?.LongHeld(StuckWorkAge) ?? "none");
+    }
+
     private void DisposeQueue()
     {
         if (_queueDisposed) return;
@@ -618,6 +651,7 @@ public sealed partial class GameLoop : IHostedService, IDisposable
         public readonly bool Cleanup = cleanup;
         public readonly long StartedAt = startedAt;
         public bool OrdinarySlot;
+        public bool LongLived, StuckReported;
         public WorkPermit? Parent;
         internal Ownership.OwnerContext? Ownership;
         // Only explicitly migrated owned commands bind a role presentation lease. The binding
