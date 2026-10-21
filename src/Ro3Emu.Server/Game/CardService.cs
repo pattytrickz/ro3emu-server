@@ -28,11 +28,12 @@ public sealed partial class CardService
     /// retains durable debt until the task pass has committed.</summary>
     internal Func<GameSession, OwnerContext, Task<bool>>? RequiredCollectionRefresh { get; set; }
 
-    /// <summary>ItemConfig._iCardPart → equipment grids (card names: Lunatic weapon, Poring armour, Worm Tail accessory ...).</summary>
+    /// <summary>ItemConfig._iCardPart → equipment grids (card names: Lunatic weapon, Poring armour, Worm Tail accessory ...);
+    /// 7 / 8 / 9 are the fashion headwear / facewear / mouthwear grids (PublicParamConfig.CardPartIcon, EquipGridConfig 8-10 icons).</summary>
     private static int[] GridsFor(long part) => part switch
     {
-        1 => [1], 2 => [2], 3 => [3], 4 => [4], 5 => [5], 6 => [6, 7], 7 => [8],
-        _ => [], // 8 / 9 "Sketch Card" (MVP): target not established
+        1 => [1], 2 => [2], 3 => [3], 4 => [4], 5 => [5], 6 => [6, 7], 7 => [8], 8 => [9], 9 => [10],
+        _ => [],
     };
 
     private readonly GameData data;
@@ -247,8 +248,12 @@ public sealed partial class CardService
     private InvItem? Socketed(GameSession session, int grid, int socket) =>
         session.Items.FirstOrDefault(i => i.Grid == CharacterService.CardGrid(grid, socket));
 
-    private bool ValidSocket(int grid, int socket) => socket is >= 1 and <= 4 && data.Table("EquipGridConfig").Values
-        .Any(r => GameData.Int(r, "_iEquipGridType") == grid && GameData.Int(r, "_iGridCategory") is 1 or 3);
+    /// <summary>The client's EquipGridType is EquipGridConfig._iID: the fashion rows (category 3) restart _iEquipGridType at 1,
+    /// so fashion headwear (8) is the row _iID 8 with _iEquipGridType 1, not the hidden _iEquipGridType 8 row.</summary>
+    private JsonElement GridRow(int grid) => data.Table("EquipGridConfig").Values
+        .FirstOrDefault(r => GameData.Int(r, "_iID") == grid && GameData.Int(r, "_iGridCategory") is 1 or 3);
+
+    private bool ValidSocket(int grid, int socket) => socket is >= 1 and <= 4 && GridRow(grid).ValueKind == JsonValueKind.Object;
 
     private int AddressError(int grid, int socket) => socket is < 1 or > 4 ? ErrorCodes.SlotIndex
         : ValidSocket(grid, socket) ? 0 : ErrorCodes.EquipSlot; // (inferred) invalid grid.
@@ -257,7 +262,7 @@ public sealed partial class CardService
     private int SocketError(GameSession session, int grid, int socket)
     {
         if (AddressError(grid, socket) is var address and not 0) return address;
-        var row = data.Table("EquipGridConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iEquipGridType") == grid && GameData.Int(r, "_iGridCategory") is 1 or 3);
+        var row = GridRow(grid);
         if (row.ValueKind != JsonValueKind.Object) return ErrorCodes.EquipSlot; // (inferred) bad grid.
         if (!row.TryGetProperty($"_kSocketOpen{socket}", out var cond) || GameData.Number(cond) is not { } id || id <= 0) return ErrorCodes.SlotSealed;
         if (grid is 1 or 2 && session.Items.All(i => i.Grid != grid)) return ErrorCodes.EquipSlot; // (inferred) no worn weapon.
