@@ -168,7 +168,16 @@ public sealed class LauncherController : IDisposable
             if (channel.Launcher is not { } release || !SelfUpdate.IsNewer(release.Version, _version)) return false;
             newer = release;
             PostState("checking", $"Updating the launcher to {release.Version}…");
-            if (!await SelfUpdate.ApplyAsync(_repo, release, _version, _exePath, _life.Token)) return MustUpdate(release);
+            int shown = -1;
+            void Progress(long done, long total)
+            {
+                if (total <= 0) return;
+                int percent = (int)(done * 100 / total);
+                if (percent == shown) return;
+                shown = percent;
+                PostState("checking", $"Updating the launcher to {release.Version}… {percent}% of {total >> 20} MB");
+            }
+            if (!await SelfUpdate.ApplyAsync(_repo, release, _version, _exePath, _life.Token, Progress)) return MustUpdate(release);
             SelfUpdate.Restart(_exePath);
             System.Windows.Application.Current.Dispatcher.Invoke(() => System.Windows.Application.Current.Shutdown());
             return true;
