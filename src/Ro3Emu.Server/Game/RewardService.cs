@@ -12,7 +12,8 @@ namespace Ro3Emu.Server.Game;
 /// / additive NpcNormalDropConfig → DropPoolConfig slots → weighted DropGroupConfig rows). Item 100 rows are Base EXP,
 /// scaled by LvExpCorrectionConfig; Job EXP equals Base EXP (inferred). Currencies go to the currency map, everything
 /// else to the bag; then one 31322 drop notify makes
-/// the client animate the loot from the corpse.
+/// the client animate the loot from the corpse. A field kill's EXP is split evenly among the killer's party members
+/// on the killer's map (owner decision, issue #3); the loot stays with the killer.
 /// </summary>
 public sealed class RewardService
 {
@@ -54,6 +55,8 @@ public sealed class RewardService
         internal long BaseExp;
         internal long JobExp;
         internal bool Published;
+        /// <summary>The other party members sharing this kill's EXP, chosen when it is admitted.</summary>
+        internal List<(GameSession Session, Role Role)> Party = [];
     }
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<MonsterUnit, KillOutcome> outcomes = new();
     internal Func<GameSession, MonsterUnit, (List<(int Entry, int Count)> Items, long BaseExp, long JobExp)>? ResolveKillForTest { get; set; }
@@ -94,7 +97,13 @@ public sealed class RewardService
             if (!outcomes.TryGetValue(monster, out var outcome))
             {
                 var (items, baseExp, jobExp) = ResolveKill(player, monster, bonus);
-                outcome = new KillOutcome { Role = role, Items = items, BaseExp = baseExp, JobExp = jobExp };
+                // Field kills: the bonused EXP is split evenly among the members online on the killer's map.
+                var party = player.InstanceId != 0 || baseExp + jobExp <= 0 ? [] : teams.SameMapMembers(player)
+                    .Where(s => s != player && s.Role is not null && s.Progress != null && s.Attachment?.Cancelled != true)
+                    .Select(s => (s, s.Role!)).ToList();
+                if (party.Count > 0)
+                    (baseExp, jobExp) = (Share(baseExp, party.Count + 1), Share(jobExp, party.Count + 1));
+                outcome = new KillOutcome { Role = role, Items = items, BaseExp = baseExp, JobExp = jobExp, Party = party };
                 outcomes.Add(monster, outcome);
             }
             character.StageKillTaskObligations?.Invoke(player, monster, settlement);
@@ -175,6 +184,7 @@ public sealed class RewardService
         await PrepareKilledAsync(player, monster); // also covers existing service/test callbacks
         if (!outcomes.TryGetValue(monster, out var outcome) || outcome.Published) return;
         outcome.Published = true;
+        await PayPartyAsync(monster, outcome);
         var role = outcome.Role;
         if (!ReferenceEquals(player.Role, role) || player.Attachment?.Cancelled == true) return;
         using (await CharacterService.Lock(player))
@@ -202,6 +212,36 @@ public sealed class RewardService
         log.LogInformation("{Name} durable loot from {Npc}: exp {Exp}, source {Source}",
             role.Name, monster.Template.NpcId, outcome.BaseExp, monster.RewardSource!.Key);
     }
+
+    private static long Share(long exp, int members) => exp > 0 ? Math.Max(1, exp / members) : 0;
+
+    /// <summary>Each member's share is its own monster-kill source (the kill's source + the role), committed after the
+    /// killer's. Like the kill itself it is paid at most once: a replay finds the source claimed.</summary>
+    private async Task PayPartyAsync(MonsterUnit monster, KillOutcome outcome)
+    {
+        foreach (var (member, role) in outcome.Party)
+        {
+            var settlement = new RewardSettlement($"{monster.RewardSource!.Key}/party/{role.Id}", "monster-kill");
+            try
+            {
+                using (await CharacterService.Lock(member))
+                {
+                    if (!ReferenceEquals(member.Role, role) || member.Progress == null || member.Attachment?.Cancelled == true
+                        || await character.RewardSourceCommittedAsync(settlement.SourceKey))
+                        continue;
+                    await character.ExchangeLockedAsync(member, [], [], popup: false, sync: false,
+                        baseExp: outcome.BaseExp, jobExp: outcome.JobExp, rewardSettlement: settlement);
+                }
+                log.LogInformation("{Name} party share from {Npc}: exp {Exp}, source {Source}",
+                    role.Name, monster.Template.NpcId, outcome.BaseExp, settlement.SourceKey);
+            }
+            catch (Exception e)
+            {
+                log.LogError(e, "Party EXP share for {Role} failed, source {Source}", role.Id, settlement.SourceKey);
+            }
+        }
+    }
+
     /// <summary>MultiverseGroupConfig id → the playbook's value, else _iValue_default (playbook 0 here).</summary>
     private long Resolve(long multiverseId) =>
         multiverseId > 0 && data.Row("MultiverseGroupConfig", multiverseId) is { } mg ? GameData.Int(mg, "_iValue_default") : 0;
