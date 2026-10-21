@@ -263,11 +263,34 @@ public sealed partial class CombatService
         float height = GameData.Int(row, "_iHeightRange") / 100f;
         if (height > 0 && MathF.Abs(origin.Y - targetPosition.Y) > height) return ErrorCodes.SkillHeight;
         if (GameData.Int(row, "_iPassBlock") == 2 && worldData.Map(s.SceneEntry)?.Nav is { } nav
-            && !nav.CanWalk(origin.X, origin.Y, origin.Z, targetPosition.X, targetPosition.Z)
+            && nav.FirstBlocked(origin.X, origin.Y, origin.Z, targetPosition.X, targetPosition.Z) is { } block
+            && (release != 1 || !BlockedNearTarget(nav, block, targetPosition))
             && (release != 1 || monster == null
                 || BlockedMonsterEndpointAllowed?.Invoke(s, monster, origin, targetPosition) != true))
+        {
+            LogBlocked(s, req.SkillId, origin, targetPosition, block);
             return ErrorCodes.SkillBlocked;
+        }
         return 0;
+    }
+
+    /// <summary>A unit standing on walkable ground against a rock edge: the line may clip the unwalkable cell beside
+    /// it within one cell diagonal of the target, like the siege crystal's terminal cell (inferred; 10.20 Ant Egg).</summary>
+    private static bool BlockedNearTarget(NavGrid nav, (float X, float Z) block, Vec3 target)
+        => nav.IsWalkable(target.X, target.Y, target.Z)
+            && MathF.Sqrt((block.X - target.X) * (block.X - target.X) + (block.Z - target.Z) * (block.Z - target.Z)) <= MathF.Sqrt(2);
+
+    // Auto-attack repeats a refused cast every swing: one line per player per 10 s, with the refusals in between.
+    private void LogBlocked(GameSession s, int skill, Vec3 origin, Vec3 target, (float X, float Z) block)
+    {
+        s.SkillBlockedRefusals++;
+        var now = DateTime.UtcNow;
+        if (now - s.SkillBlockedLoggedUtc < TimeSpan.FromSeconds(10)) return;
+        log.LogInformation("{Name} skill {Skill} blocked in scene {Scene}: {FromX:F1},{FromY:F1},{FromZ:F1} -> {X:F1},{Y:F1},{Z:F1}, "
+            + "unwalkable at {BlockX:F1},{BlockZ:F1} ({Count} refused)", s.Role?.Name, skill, s.SceneEntry,
+            origin.X, origin.Y, origin.Z, target.X, target.Y, target.Z, block.X, block.Z, s.SkillBlockedRefusals);
+        s.SkillBlockedLoggedUtc = now;
+        s.SkillBlockedRefusals = 0;
     }
 
     /// <summary>LC_ItemHelper.ItemCanUseInCurrentMap: MapConfig type/subtype blacklist (1) or whitelist (2).</summary>
