@@ -48,15 +48,43 @@ namespace Ro3Emu.ClientHooks
                     PassChallenges.RawSet(row, "_iPurchaseNum", (long)rule.Count);
                     set++;
                 }
+                int added = Add(rows);
                 var wrapper = dbm.Obf_RuA<Obf_R.Obf_ff>(Config);
                 wrapper?.Obf_RuA<Obf_R.Obf_Ef>("OnInitDatas")?.Obf_HuA(wrapper);
                 Debug.Log("[Ro3Emu.F2P] " + set + "/" + F2PRules.Commodities.Length + " shop prices set; Coin Bag now "
-                    + Describe(rows, 13123) + ", first outfit " + Describe(rows, 5000002) + ", supporter mount " + Describe(rows, 5000008));
+                    + Describe(rows, 13123) + ", first outfit " + Describe(rows, 5000002) + ", supporter mount " + Describe(rows, 5000008)
+                    + "; " + added + "/" + F2PRules.Added.Length + " Zeny Shop rows added, Yellow Potion " + Describe(rows, 12114));
             }
             catch (Exception e)
             {
                 Debug.LogWarning("[Ro3Emu.F2P] shop prices failed: " + e.Message);
             }
+        }
+
+        /// <summary>
+        /// The Zeny Shop rows the data doesn't have (F2PRules.Added, the same rows the server adds): each a copy of a Zeny
+        /// Shop row with its own id, item and price, rawset into the rows so OnInitDatas files them under the shop's class.
+        /// </summary>
+        private static int Add(Obf_R.Obf_ff rows)
+        {
+            var template = rows.Obf_ruA<long, Obf_R.Obf_ff>(F2PRules.AddedTemplate);
+            if (template == null) return 0;
+            int added = 0;
+            foreach (var a in F2PRules.Added)
+            {
+                var row = PassChallenges.Copy(template);
+                PassChallenges.RawSet(row, "_iID", (long)a.Id);
+                PassChallenges.RawSet(row, "_iItemId", (long)a.ItemId);
+                PassChallenges.RawSet(row, "_iItemPerMount", 1L);
+                PassChallenges.RawSet(row, "_kItemPerPrice", PassChallenges.List((long)F2PRules.Zeny, (long)a.Price));
+                PassChallenges.RawSet(row, "_iDiscount", 0L);
+                PassChallenges.RawSet(row, "_iPurchaseTimesLimit", 0L);
+                PassChallenges.RawSet(row, "_iPurchaseNum", 0L);
+                PassChallenges.RawSet(row, "_iSortId", (long)a.Sort);
+                PassChallenges.RawSet(rows, (long)a.Id, row);
+                added++;
+            }
+            return added;
         }
 
         /// <summary>A row's price and cap read back the way the shop reads them (for Player.log).</summary>

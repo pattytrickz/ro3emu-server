@@ -69,6 +69,24 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
             node["_iPurchaseNum"] = rule.Count;
             patched[key] = JsonDocument.Parse(node.ToJsonString()).RootElement;
         }
+        // Rows the data doesn't have (the hooked client adds the same ones): copies of a Zeny Shop row.
+        string template = Ro3Emu.Shared.F2PRules.AddedTemplate.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (patched.TryGetValue(template, out var shape))
+        {
+            foreach (var added in Ro3Emu.Shared.F2PRules.Added)
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(shape.GetRawText()) is not System.Text.Json.Nodes.JsonObject node) continue;
+                node["_iID"] = added.Id;
+                node["_iItemId"] = added.ItemId;
+                node["_iItemPerMount"] = 1;
+                node["_kItemPerPrice"] = new System.Text.Json.Nodes.JsonArray(Ro3Emu.Shared.F2PRules.Zeny, added.Price);
+                node["_iDiscount"] = 0;
+                node["_iPurchaseTimesLimit"] = 0;
+                node["_iPurchaseNum"] = 0;
+                node["_iSortId"] = added.Sort;
+                patched[added.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)] = JsonDocument.Parse(node.ToJsonString()).RootElement;
+            }
+        }
         return patched;
     }
 

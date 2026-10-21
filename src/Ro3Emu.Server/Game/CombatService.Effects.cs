@@ -152,12 +152,12 @@ public sealed partial class CombatService
             }
         }
         var stats = character.Stats(s);
-        var attacker = new Fighter(stats[103], stats[104], stats[109], stats[111], s.Progress!.Level, 1);
+        var attacker = new Fighter(stats[103], stats[104], stats[109], stats[111], s.Progress!.Level, AttackElement(s));
         var hit = new SkillHitInfo
         {
             SrcID = field?.Uid ?? action.SourceId, SkillId = action.Request.SkillId, SessionId = action.Id,
             RootCtxGuid = action.Id, ComboIndex = action.Request.ComboIndex, ShowPoint = HitEffect(GameData.Int(row, "_iScriptShow")),
-            SrcElement = (int)Math.Max(1, GameData.Int(row, "_iEleType")),
+            SrcElement = GameData.Int(row, "_iEleType") is var ele and > 1 ? (int)ele : attacker.Element,
         };
         var killed = new List<MonsterUnit>();
         var processed = new List<MonsterUnit>();

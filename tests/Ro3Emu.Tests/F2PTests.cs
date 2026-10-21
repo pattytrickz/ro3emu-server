@@ -234,6 +234,37 @@ public sealed class F2PTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task ZenyShopSellsInstantPotionsAndElementalArrowsAndTheSelectedArrowSetsTheAttackElement()
+    {
+        const int YellowPotionRow = 12114, YellowPotion = 1000002, FireArrowRow = 12117, FireArrow = 1002012, Fire = 4;
+        var data = Service<GameData>();
+        foreach (var added in F2PRules.Added)
+        {
+            var row = data.Row("ShopCommodityConfig", added.Id);
+            Assert.True(row.HasValue, $"commodity {added.Id}");
+            var price = row.Value.GetProperty("_kItemPerPrice");
+            Assert.Equal((F2PRules.Zeny, added.Price, 120, added.ItemId, 0, 0),
+                (price[0].GetInt32(), price[1].GetInt32(), (int)GameData.Int(row.Value, "_iClassID"),
+                 (int)GameData.Int(row.Value, "_iItemId"), (int)GameData.Int(row.Value, "_iPurchaseNum"),
+                 (int)GameData.Int(row.Value, "_iPurchaseTimesLimit")));
+        }
+
+        await using var alice = await InWorld("Alice");
+        await Gm(alice, "!lvl 10"); // the Zeny Shop (function 70103) opens at Base Level 10
+        await Gm(alice, "!item 1 1000");
+        long zeny = await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.Zeny));
+        Assert.Equal(0, (await Buy(alice, YellowPotionRow, 3)).Result);
+        Assert.Equal(3, await Bag(alice, YellowPotion));
+        Assert.Equal(0, (await Buy(alice, FireArrowRow)).Result);
+        Assert.Equal(zeny - 400, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.Zeny)));
+
+        Assert.Equal(1, await OnLoop(() => Service<CombatService>().AttackElement(Session(alice))));
+        await alice.SendGameAsync(CharacterService.ArrowSwitch, new ItemArrowSwitchReq { ItemId = FireArrow });
+        Assert.Equal(0, (await Next(alice, CharacterService.ArrowSwitch, ItemArrowSwitchResp.Parser)).Result);
+        Assert.Equal(Fire, await OnLoop(() => Service<CombatService>().AttackElement(Session(alice))));
+    }
+
+    [ClientDataFact]
     public async Task GmAuditLogsEveryCommandWithItsAccount()
     {
         await using var alice = await InWorld("Alice");
