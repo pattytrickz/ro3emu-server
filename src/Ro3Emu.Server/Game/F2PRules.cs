@@ -89,5 +89,37 @@ namespace Ro3Emu.Shared
 
         /// <summary>The Fashion tab's ShopConfig rows (shop 502): their currency bar also shows Supporter Tokens.</summary>
         public static readonly int[] FashionShopRows = { 25, 26, 33, 36, 39, 410 };
+
+        /// <summary>
+        /// A ShopCommodityConfig row the data doesn't have: a copy of <see cref="AddedTemplate"/> (a Zeny Shop row) selling
+        /// one <see cref="ItemId"/> for <see cref="Price"/> Zeny, no purchase cap. Owner's choice (21 Oct 2026), not RO3:
+        /// instant potions and the elemental arrows were in the data but no shop sold them.
+        /// </summary>
+        public sealed class AddedCommodity
+        {
+            public readonly int Id, ItemId, Price, Sort;
+            public AddedCommodity(int id, int itemId, int price, int sort)
+            { Id = id; ItemId = itemId; Price = price; Sort = sort; }
+        }
+
+        public const int Zeny = 1;
+        /// <summary>Zeny Shop (ShopConfig 1201, class 120) row 12109 (Oridecon): the shape every added row copies.</summary>
+        public const int AddedTemplate = 12109;
+
+        public static readonly AddedCommodity[] Added =
+        {
+            // Potions that heal at once (ItemConfig _iUseEffect 100: HP or SP, % of max), 100 Zeny each.
+            new AddedCommodity(12113, 1000001, 100, 101), // Orange Potion: 15% HP
+            new AddedCommodity(12114, 1000002, 100, 102), // Yellow Potion: 20% HP
+            new AddedCommodity(12115, 1001000, 100, 103), // Blue Potion: SP
+            new AddedCommodity(12116, 1001001, 100, 104), // Condensed Blue Potion: SP
+            // Elemental arrows (_kParam1 = element); the selected arrow is not used up and sets a bow attack's element.
+            new AddedCommodity(12117, 1002012, 100, 111), // Fire Arrow
+            new AddedCommodity(12118, 1002013, 100, 112), // Crystal Arrow (water)
+            new AddedCommodity(12119, 1002015, 100, 113), // Arrow of Wind
+            new AddedCommodity(12120, 1002016, 100, 114), // Stone Arrow (earth)
+            new AddedCommodity(12121, 1002014, 100, 115), // Silver Arrow (holy)
+            new AddedCommodity(12122, 1002011, 100, 116), // Steel Arrow
+        };
     }
 }

@@ -582,6 +582,20 @@ public sealed partial class CombatService : IGameTicker
         public long ResCri { get; init; }
     }
 
+    /// <summary>
+    /// A player's own attack element: the selected arrow's (31324 ArrowSwitch; ItemConfig _kParam1 2 wind, 3 earth,
+    /// 4 fire, 5 water, 6 poison, 7 holy, the plain Arrow 1) while one is still in the bag, else neutral. A skill with
+    /// its own element (_iEleType) keeps it (BaseDamage). Arrows are never used up. (inferred: RO's arrow rule)
+    /// </summary>
+    internal int AttackElement(GameSession s)
+    {
+        long arrow = s.BagState?.Info?.CurrentArrowID ?? 0;
+        if (arrow <= 0 || data.Row("ItemConfig", arrow) is not { } row || GameData.Int(row, "_iSubType") != 207
+            || !row.TryGetProperty("_kParam1", out var param) || GameData.Number(param) is not { } element
+            || !s.Items.Any(i => i.Grid == 0 && i.Entry == arrow && i.Stack > 0)) return 1;
+        return element is >= 1 and <= 10 ? (int)element : 1;
+    }
+
     private (long Damage, DamageHitResult Result) Damage(Fighter a, Fighter b, JsonElement skill, int branch = 0)
     {
         // A skill that never misses (_iSkillHit 10000) draws no hit roll, as before.
@@ -636,7 +650,7 @@ public sealed partial class CombatService : IGameTicker
     {
         var stats = character.Stats(p);
         var playerSkill = data.Row("SkillConfig", skills.NormalAttack(p.Progress!.Career))!.Value;
-        var player = new Fighter(stats[103], stats[104], stats[109], stats[111], p.Progress.Level, 1);
+        var player = new Fighter(stats[103], stats[104], stats[109], stats[111], p.Progress.Level, AttackElement(p));
         var asTarget = new Fighter(0, 0, m.Flee, 0, m.Level, m.Element) { Def = m.Def, Mdef = m.Mdef, Flee = m.Flee };
         double playerDps = ExpectedDamage(player, asTarget, playerSkill) * 1000.0 / Math.Max(1, SkillMs(p, playerSkill));
         var monster = new Fighter(m.Atk, m.Matk, m.Hit, m.Cri, m.Level, m.Element);

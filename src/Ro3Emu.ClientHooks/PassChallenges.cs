@@ -303,6 +303,25 @@ namespace Ro3Emu.ClientHooks
             return table;
         }
 
+        /// <summary>
+        /// A shallow copy of a Lua table (its fields walked with next); nested tables are shared, which is fine for config
+        /// rows nothing writes to.
+        /// </summary>
+        internal static Obf_R.Obf_ff Copy(Obf_R.Obf_ff source)
+        {
+            var next = _global.Obf_LuA<Obf_R.Obf_Ef>("next");
+            var copy = NewTable();
+            object key = null;
+            while (true)
+            {
+                var pair = next.Obf_HuA(source, key);
+                if (pair == null || pair.Length == 0 || pair[0] == null) break;
+                key = pair[0];
+                RawSet(copy, key, pair.Length > 1 ? pair[1] : null);
+            }
+            return copy;
+        }
+
         /// <summary>A new Lua table from key, value pairs.</summary>
         internal static Obf_R.Obf_ff Row(params object[] fields)
         {
