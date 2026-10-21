@@ -38,6 +38,8 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public long HandshakeToken { get; set; }
 
     public string? Account { get; set; }
+    /// <summary>Account as the client spelled it at SDK login (AccountStore.ClientAccount), for what the client compares with it.</summary>
+    public string? ClientAccount { get; set; }
     /// <summary>ServerHost.LauncherGate already told this outdated client to update and is disconnecting it.</summary>
     public bool LauncherTurnedAway { get; set; }
     internal long AccountGeneration { get; set; }
