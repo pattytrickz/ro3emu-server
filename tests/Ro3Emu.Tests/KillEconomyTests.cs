@@ -275,6 +275,69 @@ public sealed class KillEconomyTests : IAsyncLifetime
         await OnLoop(() => Reward(player, monster)); Assert.Equal(1, ReceiptCount());
     }
 
+    /// <summary>
+    /// Issue #3: a party kill paid only the killer. A field kill's EXP (after the level gap and party bonus) is split
+    /// evenly among the party members online on the killer's map, each through its own kill source; loot stays with
+    /// the killer, a member on another map gets nothing, and a replayed kill pays nobody twice.
+    /// </summary>
+    [ClientDataFact]
+    public async Task PartyMembersOnTheKillersMapShareTheKillExpOnce()
+    {
+        await using var bot = await Enter(); var player = Session;
+        await using var bob = await Member("partybob", "Bob");
+        await using var carol = await Member("partycarol", "Carol");
+        await using var dave = await Member("partydave", "Dave");
+        await Party(bot, bob, carol, dave);
+        GameSession Of(string account) => Service<SessionRegistry>().All().Single(s => s.Account == account && s.Role != null);
+        var (b, c, d) = (Of("partybob"), Of("partycarol"), Of("partydave"));
+        await OnLoop(() =>
+        {
+            d.SceneEntry = player.SceneEntry + 1; // another map
+            Service<RewardService>().ResolveKillForTest = (_, _) => ([(1000000, 3)], 9, 9);
+            return Task.CompletedTask;
+        });
+        var before = new[] { player, b, c, d }.Select(s => (s.Progress!.Exp, s.Progress.JobLevel, s.Progress.JobExp)).ToArray();
+        int bobLoot = b.Items.Where(i => i.Entry == 1000000).Sum(i => i.Stack);
+        var monster = Monster();
+        await OnLoop(async () => { await Reward(player, monster); await Reward(player, monster); });
+
+        foreach (var s in new[] { player, b, c }) Assert.Equal(before[0].Exp + 3, s.Progress!.Exp);
+        Assert.All(new[] { b, c }, s => Assert.Equal((player.Progress!.JobLevel, player.Progress.JobExp), (s.Progress!.JobLevel, s.Progress.JobExp)));
+        Assert.NotEqual((before[0].JobLevel, before[0].JobExp), (player.Progress!.JobLevel, player.Progress.JobExp));
+        Assert.Equal(before[3], (d.Progress!.Exp, d.Progress.JobLevel, d.Progress.JobExp));
+        Assert.Equal(23, player.Items.Single(i => i.Entry == 1000000).Stack);
+        Assert.Equal(bobLoot, b.Items.Where(i => i.Entry == 1000000).Sum(i => i.Stack));
+        Assert.Equal(3, ReceiptCount());
+        Assert.Equal(before[0].Exp + 3, Service<RoleStore>().LoadProgress(c.Role!.Id).Exp);
+    }
+
+    private async Task<BotClient> Member(string account, string name)
+    {
+        var bot = new BotClient(http, File.ReadAllText(Path.Combine(directory, "gate_rsa_public.pem")));
+        await bot.LoginAsync(account, "pw"); await bot.EnterGateAsync();
+        await bot.EnterWorldAsync((await bot.CreateRoleAsync(name)).RoleBaseInfo.Id);
+        await bot.Inbox.WaitAsync(e => e.IsGame(ShopService.ShopSync), TimeSpan.FromSeconds(10));
+        return bot;
+    }
+
+    private static async Task Party(BotClient leader, params BotClient[] members)
+    {
+        static async Task<T> Next<T>(BotClient bot, uint id, Google.Protobuf.MessageParser<T> parser)
+            where T : Google.Protobuf.IMessage<T> => parser.ParseFrom((await bot.Inbox.WaitAsync(e => e.IsGame(id), TimeSpan.FromSeconds(10))).Body);
+        await leader.SendGameAsync(TeamService.TeamCreate, new TeamCreateReq { TeamType = TeamType.Five, TargetId = 1001 });
+        var created = await Next(leader, TeamService.TeamCreate, TeamCreateResp.Parser);
+        Assert.Equal(0, created.Result);
+        foreach (var member in members)
+        {
+            await leader.SendGameAsync(TeamService.TeamInvite, new InviteIntoTeamReq { Guid = (long)member.Self!.Uuid });
+            Assert.Equal(0, (await Next(leader, TeamService.TeamInvite, InviteIntoTeamResp.Parser)).Result);
+            await Next(member, TeamService.TeamNotifyInvitee, NotifyInvitee.Parser);
+            await member.SendGameAsync(TeamService.TeamInviteeResp, new InviteeResp
+                { TeamId = created.TeamId, IsAgree = true, InviteGuid = (long)leader.Self!.Uuid });
+            Assert.Equal(0, (await Next(member, TeamService.TeamInviteeResp, InviteeRespResp.Parser)).Result);
+        }
+    }
+
     private static string RepoRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

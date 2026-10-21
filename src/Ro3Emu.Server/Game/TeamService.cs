@@ -87,12 +87,14 @@ public sealed partial class TeamService : IGameTicker
         this.loop = loop;
     }
 
-    /// <summary>Party EXP multiplier for a kill (‱ of TeamExpBuffNum by same-map members; the split rule itself is inferred).</summary>
-    public int ExpBonus(GameSession killer)
+    /// <summary>Party EXP multiplier for a kill (‱ of TeamExpBuffNum by same-map members). RewardService splits a field kill's EXP among them (owner decision, issue #3).</summary>
+    public int ExpBonus(GameSession killer) => ExpBuff[Math.Clamp(SameMapMembers(killer).Count, 1, ExpBuff.Length) - 1];
+
+    /// <summary>The killer's online party members on the killer's map (WorldScene), the killer included; solo: the killer.</summary>
+    public IReadOnlyList<GameSession> SameMapMembers(GameSession killer)
     {
-        if (killer.Role is not { } role || !_byMember.TryGetValue(role.Id, out var team)) return 10000;
-        int sameMap = team.Members.Count(m => Session(m) is { } s && s.WorldScene == killer.WorldScene);
-        return ExpBuff[Math.Clamp(sameMap, 1, ExpBuff.Length) - 1];
+        if (killer.Role is not { } role || !_byMember.TryGetValue(role.Id, out var team)) return [killer];
+        return team.Members.Select(Session).OfType<GameSession>().Where(s => s.WorldScene == killer.WorldScene).ToList();
     }
 
     /// <summary>The party a role is in: (team id, leader), or (0, the role itself) when solo.</summary>
