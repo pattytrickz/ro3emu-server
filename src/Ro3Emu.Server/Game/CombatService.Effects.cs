@@ -21,6 +21,8 @@ public sealed class SkillObject : WorldUnit
     public bool Busy { get; set; }
     public bool Removing { get; set; }
     public int Charges { get; set; }
+    /// <summary>Enemy touches left before the field breaks early (Fire Wall); null when touches are unlimited.</summary>
+    public int? Touches { get; set; }
     public int ProtectionDistanceType { get; init; }
     public HashSet<int> Skills { get; } = new();
 
@@ -206,6 +208,12 @@ public sealed partial class CombatService
                     if (CanApplyMoreEffects() && RollBuff(tuple, out int id, out int duration)) await buffs.ShowOnUnitAsync(target, id, duration, castingRole.Id);
             if (CanApplyMoreEffects() && script is ("Provoke" or "Taunt")) monsters.Engage(target, s);
             if (CanApplyMoreEffects() && script == "ArrowRepel") await RepelAsync(s, action, target, 5); // (inferred) 5m from ArrowRepel description.
+            if (CanApplyMoreEffects() && script == "Fire_Wall" && field?.Touches is int touches)
+            {
+                // Description ${5}: each touch knocks the enemy back that many metres; away from the caster is (inferred).
+                field.Touches = touches - 1;
+                await RepelAsync(s, action, target, (float)Numbers(row, "_kDescData").ElementAtOrDefault(4));
+            }
         }
         // Buff1 is self for hostile selectors, but actual friend recipients for ally selectors (Detoxify, Blessing).
         foreach (var recipient in friendly ? allies : new List<GameSession> { s })
@@ -365,12 +373,16 @@ public sealed partial class CombatService
         string script = Script(row);
         var logic = Numbers(row, "_kLogicData");
         int npc = 0, duration = 0, interval = 1000, protection = 0, charges = 0;
+        int? touches = null;
         bool trap = false;
         float radius = (float)(Numbers(row, "_kRange").FirstOrDefault(150) / 100);
         switch (script)
         {
             case "Fire_Wall" or "Quagmire" or "Fire_Pillar" or "Meteor_Storm" or "Lord_of_Vermilion" or "Storm_Gust" when logic.Length >= 3:
-                npc = (int)logic[0]; interval = (int)logic[1]; duration = (int)logic[2]; break;
+                npc = (int)logic[0]; interval = (int)logic[1]; duration = (int)logic[2];
+                // Description ${7}: "disappear early after being touched by enemies ${7} times".
+                if (script == "Fire_Wall") touches = (int)Numbers(row, "_kDescData").ElementAtOrDefault(6);
+                break;
             case "Safety_Wall" or "Pneuma" when logic.Length >= 8:
                 npc = (int)logic[5]; duration = (int)logic[2]; radius = (float)(logic[7] / 100);
                 protection = script == "Safety_Wall" ? 1 : 2; charges = script == "Safety_Wall" ? (int)logic[1] : int.MaxValue; break;
@@ -401,7 +413,7 @@ public sealed partial class CombatService
             NpcId = npc, EntityType = (int)GameData.Int(npcRow, "_iNPCType"), Cast = action,
             X = point.X, Y = point.Y, Z = point.Z, Face = action.Request.Face, ExpiresMs = Now + Math.Max(1, duration),
             IntervalMs = Math.Max(50, interval), NextTickMs = Now, Radius = radius, Trap = trap,
-            ProtectionDistanceType = protection, Charges = charges,
+            ProtectionDistanceType = protection, Charges = charges, Touches = touches,
         };
         foreach (int skill in Numbers(npcRow, "_kSkills").Select(v => (int)v)) unit.Skills.Add(skill);
         s.SkillObjects.Add(unit);
@@ -431,7 +443,7 @@ public sealed partial class CombatService
             if (unit.ProtectionDistanceType != 0) return;
             if (unit.Trap && !world.Map(unit.WorldScene).Near(unit.X, unit.Z, 1.5f).OfType<MonsterUnit>().Any(m => !m.Dead && Distance(m.Pos, unit.Pos) <= 1.5f)) return;
             await ApplyEffectsAsync(owner, unit.Cast, unit.Pos, unit);
-            if (unit.Trap) await RemoveSkillObjectAsync(unit);
+            if (unit.Trap || unit.Touches <= 0) await RemoveSkillObjectAsync(unit);
         }
         finally { unit.Busy = false; }
     }

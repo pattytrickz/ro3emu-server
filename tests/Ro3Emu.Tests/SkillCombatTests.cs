@@ -271,6 +271,47 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task FireWallKnocksEachTouchingEnemyBackAndBreaksAfterItsTouches()
+    {
+        // Fire Wall _kDescData: each touch knocks the enemy back ${5} = 2 m; the wall disappears after ${7} = 5 touches.
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 2100"); await Teach("alice", 12010);
+        var target = await Target("alice", stationary: true);
+        var session = Session("alice");
+        var start = session.Position.Clone();
+        var nav = app.Services.GetRequiredService<WorldData>().Map(session.SceneEntry)!.Nav;
+        int direction = Enumerable.Range(0, 8).Select(i => i * 45).First(angle => nav == null ||
+            nav.CanWalk(start.X, start.Y, start.Z, start.X + 5 * MathF.Sin(angle * MathF.PI / 180),
+                start.Z + 5 * MathF.Cos(angle * MathF.PI / 180)));
+        var wall = new Vec3
+        {
+            X = start.X + 2 * MathF.Sin(direction * MathF.PI / 180), Y = start.Y,
+            Z = start.Z + 2 * MathF.Cos(direction * MathF.PI / 180),
+        };
+        Task PlaceOnWall() => Loop.InvokeAsync(() =>
+        {
+            target.Hp = 1_000_000; target.Moving = false;
+            target.X = wall.X; target.Y = wall.Y; target.Z = wall.Z;
+            return Task.CompletedTask;
+        });
+        await PlaceOnWall();
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1201001, TargetPos = wall, Face = direction });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        long expires = 0;
+        for (int touch = 1; touch <= 5; touch++)
+        {
+            var pushed = await Next(alice, CombatService.SkillMove, SkillStartMoveNotify.Parser, m => m.EntityID == (ulong)target.Uid);
+            Assert.True(MonsterService.Distance(start.X, start.Z, pushed.EndPos.X, pushed.EndPos.Z) > 3.5f);
+            if (touch == 1) expires = await Loop.InvokeAsync(() => Task.FromResult(Assert.Single(session.SkillObjects).ExpiresMs));
+            if (touch < 5) await PlaceOnWall();
+        }
+        var deadline = DateTime.UtcNow + Wait;
+        while (await Loop.InvokeAsync(() => Task.FromResult(session.SkillObjects.Count)) > 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Empty(session.SkillObjects);
+        Assert.True(MonsterService.NowMs < expires, "the wall broke on its touches, not on its 5 s lifetime");
+    }
+
+    [ClientDataFact]
     public async Task HealSelectsAllyAndInsufficientSpDoesNotStartCooldown()
     {
         await using var alice = await InWorld("Alice"); await using var bob = await InWorld("Bob");
