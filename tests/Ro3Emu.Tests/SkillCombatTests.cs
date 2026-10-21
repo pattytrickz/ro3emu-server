@@ -246,10 +246,30 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1200403, TargetId = target.Uid });
         var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
         Assert.Equal(0, accepted.Result);
+        var bolts = await Next(alice, CombatService.SkillBullet, SkillFixTimeBulletNotify.Parser, b => b.TargetId == target.Uid);
+        Assert.Equal(1200411, bolts.EffectId); // the falling-bolt Bullet effect, drawn only from 31120
+        Assert.Equal(3, bolts.Split);
+        Assert.Equal(1200403, bolts.SkillConfigId);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
         Assert.Equal(3, hit.Split); // Fire Bolt Lv 3: _kShowDmg [3], the description's total "over 3 bolts"
         Assert.Equal(1200404, hit.ShowPoint); // its multistage hit effect, which replays per number
         Assert.True(Assert.Single(hit.Dsts).Damage > 0);
+    }
+
+    [ClientDataFact]
+    public async Task ArcherNormalAttackFiresItsArrowAndShowsTheActionHit()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 3100");
+        var target = await Target("alice");
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1300001, TargetId = target.Uid });
+        var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+        Assert.Equal(0, accepted.Result);
+        var arrow = await Next(alice, CombatService.SkillBullet, SkillFixTimeBulletNotify.Parser, b => b.TargetId == target.Uid);
+        Assert.Equal(1300002, arrow.EffectId);
+        Assert.Equal(1, arrow.Split);
+        var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
+        Assert.Equal(1300003, hit.ShowPoint); // the Action hit, not the arrow Bullet 1300002 the client cannot play as a hit
     }
 
     [ClientDataFact]

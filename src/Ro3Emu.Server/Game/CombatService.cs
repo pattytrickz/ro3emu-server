@@ -298,13 +298,44 @@ public sealed partial class CombatService : IGameTicker
         log.LogDebug("{Name} locks {Target}", s.Role?.Name, req.EnemyId);
     }
 
-    /// <summary>The template's damage EffectData (hit fx + flinch): the first with m_kDamage in [show*100, show*100+99].</summary>
+    // EffectData m_kDamage.m_kDamageType (client enum_DamageType): Trigger 1, Bullet 2, Action 3.
+    private const int TriggerDamage = 1, BulletDamage = 2, ActionDamage = 3;
+
+    /// <summary>
+    /// The template's hit EffectData (hit fx + flinch) in [show*100, show*100+99]: the first Action entry, else the first
+    /// Trigger one. A Bullet entry is never a hit: LC_DamageHelper.CalcDamageHitPoint plays only m_kActionDamge, so a
+    /// bullet showPoint (Cold Bolt 1200603, the Archer's arrow 1300002) showed no hit at all.
+    /// </summary>
     private int HitEffect(long scriptShow)
+    {
+        int trigger = 0;
+        foreach (var (id, type, _) in DamageEffects(scriptShow))
+        {
+            if (type == ActionDamage) return id;
+            if (type == TriggerDamage && trigger == 0) trigger = id;
+        }
+        return trigger != 0 ? trigger : 1000002;
+    }
+
+    /// <summary>
+    /// The template's projectile: its first Bullet EffectData, with m_fBulletLifeTime (0 for speed-driven bullets).
+    /// The client draws it only from 31120 (LC_Scene_Sync._skillFixTimeBullet -> SkillCreateFixTimeBullet), firing
+    /// <c>split</c> bullets; skill timelines without m_kClientPoints (every bolt, the Archer's arrow) never draw it locally.
+    /// </summary>
+    internal (int Id, int LifeMs)? BulletEffect(long scriptShow)
+    {
+        foreach (var (id, type, damage) in DamageEffects(scriptShow))
+            if (type == BulletDamage)
+                return (id, damage.TryGetProperty("m_kBulletData", out var bullet) ? (int)GameData.Int(bullet, "m_fBulletLifeTime") : 0);
+        return null;
+    }
+
+    private IEnumerable<(int Id, long Type, JsonElement Damage)> DamageEffects(long scriptShow)
     {
         var effects = data.SkillTemplateTable("Lua_Config_EffectData");
         for (long id = scriptShow * 100; id < scriptShow * 100 + 100; id++)
-            if (effects.TryGetValue(id.ToString(), out var e) && e.TryGetProperty("m_kDamage", out _)) return (int)id;
-        return 1000002;
+            if (effects.TryGetValue(id.ToString(), out var e) && e.TryGetProperty("m_kDamage", out var damage))
+                yield return ((int)id, GameData.Int(damage, "m_kDamageType"), damage);
     }
 
     /// <summary>
