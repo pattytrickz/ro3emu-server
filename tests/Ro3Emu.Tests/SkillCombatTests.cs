@@ -671,10 +671,12 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         Assert.True(target.Hp < before);
     }
     [ClientDataFact]
-    public async Task AMonsterAgainstARockEdgeCanBeHitButOneBehindTheRockCannot()
+    public async Task AMonsterBehindARockEdgeCanBeHit()
     {
-        // In-game 10.20, Ant Hell: an Ant Egg beside a rock edge refused auto-attacks with 3026 "invalid skill
-        // wall-piercing level" because the last stretch of the line clipped the rock cell next to it.
+        // In-game 10.20 and 10.21, Ant Hell and field maps: auto-attacks and skills on an Ant Egg or a monster across a
+        // rock edge were refused 3026 "invalid skill wall-piercing level" because the line crossed an unwalkable cell
+        // of the walk grid. The walk grid is not the client's line of sight: rock between caster and target does not
+        // refuse a cast.
         await using var alice = await InWorld("Alice");
         var start = Session("alice").Position.Clone();
         var nav = app.Services.GetRequiredService<WorldData>().Map(Session("alice").SceneEntry)!.Nav!;
@@ -687,18 +689,16 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
                         orderby Math.Abs(dx) + Math.Abs(dz)
                         select (x, z)).First();
         float y = Floor(x0, z0)!.Value;
-        var edge = await SpawnAt("alice", new MapPoint(x0 + 2.3f, Floor(x0 + 2, z0)!.Value, z0 + 0.5f, 0));
         var behind = await SpawnAt("alice", new MapPoint(x0 + 3.5f, Floor(x0 + 3, z0)!.Value, z0 + 0.5f, 0));
         await Loop.InvokeAsync(() => app.Services.GetRequiredService<SceneService>()
             .TeleportInMapAsync(Session("alice"), new MapPoint(x0 + 0.4f, y, z0 + 0.5f, 0)));
+        Assert.False(nav.CanWalk(x0 + 0.4f, y, z0 + 0.5f, behind.Pos.X, behind.Pos.Z));
 
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = behind.Uid, ComboIndex = 1 });
-        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = edge.Uid, ComboIndex = 1 });
         var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
         Assert.Equal(0, accepted.Result);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, p => p.SessionId == accepted.SessionId);
-        Assert.Equal(edge.Uid, Assert.Single(hit.Dsts).DstID);
+        Assert.Equal(behind.Uid, Assert.Single(hit.Dsts).DstID);
     }
 
     private Task<MonsterUnit> SpawnAt(string name, MapPoint at) => Loop.InvokeAsync(async () =>

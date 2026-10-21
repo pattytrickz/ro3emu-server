@@ -181,10 +181,6 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     /// <summary>Walk check refusals of this session (logged sparsely).</summary>
     internal int WalkCheckWarnings { get; set; }
 
-    /// <summary>Wall-piercing (3026) refusals since the last logged one, and when that was (logged sparsely).</summary>
-    internal int SkillBlockedRefusals { get; set; }
-    internal DateTime SkillBlockedLoggedUtc { get; set; }
-
     /// <summary>The last accepted walk was a move, not a stop: the client is somewhere along it now.</summary>
     public bool Walking { get; set; }
 

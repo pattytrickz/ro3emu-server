@@ -300,22 +300,8 @@ public sealed class SiegeTests : IAsyncLifetime
         await OnLoop(async () =>
         {
             run.Crystal!.Hp = 1;
-            await Service<SceneService>().TeleportInMapAsync(Session(attack), point);
+            await Service<SceneService>().TeleportInMapAsync(Session(attack), new MapPoint(153.5f, point.Y, 119.5f, 0));
         });
-        await attack.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = run.Crystal!.Uid });
-        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(attack, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        await OnLoop(() => Service<SceneService>().TeleportInMapAsync(Session(attack), new MapPoint(150.5f, point.Y, 119.5f, 0)));
-        await attack.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = run.Crystal!.Uid });
-        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(attack, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        await OnLoop(() => Service<SceneService>().TeleportInMapAsync(Session(attack), new MapPoint(153.5f, point.Y, 119.5f, 0)));
-        await OnLoop(() => { Session(attack).Progress!.Skills[11104] = 1; return Task.CompletedTask; });
-        await attack.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1110401, TargetId = run.Crystal!.Uid,
-            TargetPos = new Romsg.Vec3 { X = 151.5f, Y = point.Y, Z = 119.5f } });
-        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(attack, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        var decoy = await Service<GameLoop>().InvokeAsync(() => Service<InstanceService>().SpawnAsync(run.Room, 4900009,
-            Service<WorldData>().Map(2230101)!.Grounded(point)));
-        await attack.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = decoy!.Uid });
-        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(attack, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
         var combat = Service<CombatService>();
         var attackerSession = Session(attack);
         var crystal = run.Crystal!;

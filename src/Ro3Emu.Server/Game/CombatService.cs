@@ -229,7 +229,6 @@ public sealed partial class CombatService : IGameTicker
     public List<Func<GameSession, GameSession, Task>> PlayerKilled { get; } = new();
     public Func<GameSession, GameSession, bool>? PlayerHostile { get; set; }
     public Func<GameSession, MonsterUnit, bool>? MonsterTargetAllowed { get; set; }
-    public Func<GameSession, MonsterUnit, Vec3, Vec3, bool>? BlockedMonsterEndpointAllowed { get; set; }
 
     /// <summary>A monster damaged a player; the flag says the hit was lethal (MVP statistics).</summary>
     public List<Action<MonsterUnit, GameSession, long, bool>> Taken { get; } = new();
