@@ -532,6 +532,28 @@ public sealed class PetTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task HatchingFollowsTheRoundsOpenActivity()
+    {
+        await using var bot = await InWorld();
+        await Unlock(hatch: true);
+        await Gm("!item 1250709 3");
+        // PetIncubationSlotConfig: 10009 is the permanent pool of activity 1023, 10002 the limited pool of 1016.
+        Assert.Contains(1023L, Session.NewActivities!.ActivityInfo.Keys);
+        await bot.SendGameAsync(PetService.GenerateEgg, new PetGenEggReq { RoundId = 10009, SlotId = 1 });
+        Assert.Equal(0, (await Next(bot, PetService.GenerateEgg, PetGenEggRes.Parser)).Result);
+        Assert.Contains(10009L, Saved(bot).IncubationSlot[1].IncubateInfo.Keys);
+        await _app.Services.GetRequiredService<GameLoop>().InvokeAsync(async () =>
+        {
+            using var held = await CharacterService.Lock(Session);
+            Session.NewActivities!.ActivityInfo.Remove(1016);
+        });
+        await bot.SendGameAsync(PetService.GenerateEgg, new PetGenEggReq { RoundId = 10002, SlotId = 2 });
+        Assert.Equal(ErrorCodes.FeatureUnavailable, (await Next(bot, PetService.GenerateEgg, PetGenEggRes.Parser)).Result);
+        Assert.False(Saved(bot).IncubationSlot.ContainsKey(2));
+        Assert.Equal(2, Count(bot, 1250709));
+    }
+
+    [ClientDataFact]
     public async Task FastHatchRequiresRoomTwoAndAtomicallyConsumesMaterialsAndAccelerators()
     {
         await using var bot = await InWorld();

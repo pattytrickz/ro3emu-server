@@ -28,9 +28,11 @@ public sealed partial class PetService
     {
         int code = Gate(s, incubation: true);
         if (code != 0) return code;
-        if (data.Row("PetIncubationSlotConfig", round) == null) return ErrorCodes.Parameter;
-        // Base normal pool only: event/season availability of the other eight pools is not established (§3).
-        return round == 10001 ? 0 : ErrorCodes.FeatureUnavailable;
+        if (data.Row("PetIncubationSlotConfig", round) is not { } config) return ErrorCodes.Parameter;
+        // Each pool belongs to its _iActivity (1015-1023, server-day windows of TimeLimitConfig 1065-1073); the client
+        // shows the pool its open activity names (inferred), so a round is usable while that activity is listed for the role.
+        return s.NewActivities?.ActivityInfo.ContainsKey(GameData.Int(config, "_iActivity")) == true
+            ? 0 : ErrorCodes.FeatureUnavailable;
     }
 
     /// <summary>
