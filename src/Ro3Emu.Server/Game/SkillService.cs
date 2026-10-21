@@ -167,11 +167,28 @@ public sealed class SkillService
         return list.DistinctBy(t => t.Group).ToList();
     }
 
+    /// <summary>
+    /// The free level SkillConfig._iInitialLevel grants once _iActivateCondition (base level) is reached. A free skill
+    /// with a prerequisite is free only while that prerequisite is learned: Sight Sprout (12110, needs Sight 1) is the
+    /// only one, and the skill panel's reset sends it at 0 together with Sight (inferred: client reset requests).
+    /// </summary>
     private int Initial(RoleProgress p, int group)
     {
         if (data.Row("SkillConfig", RealId(group, 1)) is not { } row) return 0;
         int activation = (int)GameData.Int(row, "_iActivateCondition");
-        return activation <= 0 || p.Level >= activation ? (int)GameData.Int(row, "_iInitialLevel") : 0;
+        if (activation > 0 && p.Level < activation) return 0;
+        return Prerequisites(row).All(r => r.Level <= 0 || p.Skills.GetValueOrDefault(r.Group) >= r.Level)
+            ? (int)GameData.Int(row, "_iInitialLevel") : 0;
+    }
+
+    /// <summary>SkillConfig._kPreSkillRequired: [group, level] pairs; level -1 means the group must not be learned.</summary>
+    private static IEnumerable<(int Group, int Level)> Prerequisites(JsonElement row)
+    {
+        if (!row.TryGetProperty("_kPreSkillRequired", out var pre) || pre.ValueKind != JsonValueKind.Array) yield break;
+        foreach (var req in pre.EnumerateArray())
+            if (req.ValueKind == JsonValueKind.Array && req.GetArrayLength() >= 2 && GameData.Number(req[0]) is { } g
+                && GameData.Number(req[1]) is { } l)
+                yield return ((int)g, (int)l);
     }
 
     private int Parameter(string key, int fallback) => data.Table("PublicParamConfig").TryGetValue(key, out var value)
@@ -645,7 +662,7 @@ public sealed class SkillService
                     code = !tree.Contains(group) ? ErrorCodes.SkillNotInTree
                         : target.SkillId != 0 && target.SkillId != group ? ErrorCodes.Parameter
                         : target.SkillLevel > MaxLevel(group) ? ErrorCodes.SkillMaxLevel
-                        : target.SkillLevel < Initial(p, group) || target.SkillLevel < 0 ? ErrorCodes.Parameter : 0;
+                        : target.SkillLevel < 0 ? ErrorCodes.Parameter : 0;
                     if (code != 0) break;
                     selected.SkillAssigns[group] = new SkillData { SkillId = group, SkillLevel = target.SkillLevel };
                 }
@@ -662,6 +679,9 @@ public sealed class SkillService
                     int oldIndex = plans.CurrentPlanIndex;
                     code = StageSkillPlan(session, plans, candidate, req.Plan);
                     plans.CurrentPlanIndex = oldIndex;
+                    // Below the free level only once the candidate no longer grants it (Sight Sprout without Sight).
+                    if (code == 0 && req.LevelUpList.Any(kv => kv.Value.SkillLevel < Initial(candidate, kv.Key)))
+                        code = ErrorCodes.Parameter;
                     if (code == 0)
                     {
                         PruneLoads(selected, candidate);
@@ -701,14 +721,11 @@ public sealed class SkillService
             int level = Level(p, group);
             if (level <= 0) continue;
             if (data.Row("SkillConfig", RealId(group, level)) is not { } row) return false;
-            if (!row.TryGetProperty("_kPreSkillRequired", out var pre) || pre.ValueKind != JsonValueKind.Array) continue;
-            foreach (var req in pre.EnumerateArray())
-                if (req.ValueKind == JsonValueKind.Array && req.GetArrayLength() >= 2 && GameData.Number(req[0]) is { } g
-                    && GameData.Number(req[1]) is { } l)
-                {
-                    int actual = tree.Contains((int)g) ? Level(p, (int)g) : 0;
-                    if (l == -1 ? actual > 0 : l > 0 && actual < l) return false;
-                }
+            foreach (var (g, l) in Prerequisites(row))
+            {
+                int actual = tree.Contains(g) ? Level(p, g) : 0;
+                if (l == -1 ? actual > 0 : l > 0 && actual < l) return false;
+            }
         }
         return true;
     }
@@ -807,8 +824,10 @@ public sealed class SkillService
         if (code == 0)
         {
             var selected = plans.SkillAssignPlans[req.Plan];
+            var unlearned = CharacterService.GenreCloneProgress(session.Progress!);
+            unlearned.Skills.Clear(); // free levels as they stand after the reset, not before it
             foreach (var (group, assigned) in selected.SkillAssigns)
-                assigned.SkillLevel = IsNormalGroup(session.Progress!, group) ? 1 : Initial(session.Progress!, group);
+                assigned.SkillLevel = IsNormalGroup(unlearned, group) ? 1 : Initial(unlearned, group);
             var progress = CharacterService.GenreCloneProgress(session.Progress!);
             int oldIndex = plans.CurrentPlanIndex;
             code = StageSkillPlan(session, plans, progress, req.Plan);
