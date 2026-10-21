@@ -421,6 +421,39 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(ErrorCodes.SkillNotLearned, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser, m => m.Result != 0)).Result);
     }
 
+    /// <summary>
+    /// #bug-reports "Can't socket card into fashion mid headgear": the fashion grids are EquipGridType 8/9/10
+    /// (EquipGridConfig _iID 8/9/10, category 3, socket 1 at base level 20). Card parts 7/8/9 go there
+    /// (PublicParamConfig.CardPartIcon headwear/facewear/mouthwear, the grids' icons).
+    /// </summary>
+    [ClientDataFact]
+    public async Task HeadgearCardsGoIntoTheFashionHeadgearSockets()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 20");
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Alice");
+        foreach (var (card, grid) in new[] { (1420700, 8), (1430809, 9), (1440909, 10) }) // upper / mid (Elder Willow) / lower
+        {
+            await Gm("alice", $"!item {card} 1");
+            await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser, m => m.PackInfo.ContainsKey(3));
+            long guid = session.Items.Single(i => i.Entry == card && i.Grid == 0).Guid;
+            if (grid != 8)
+            {
+                await alice.SendGameAsync(CardService.SlotInsert, new EquipmentCardInsertReq { EquipPos = (EquipGridType)8, CardGuid = guid, SlotIndex = 1 });
+                Assert.Equal(ErrorCodes.EquipSlot, (await Next(alice, CardService.SlotInsert, EquipmentCardInsertResp.Parser)).Result);
+            }
+            await alice.SendGameAsync(CardService.SlotInsert, new EquipmentCardInsertReq { EquipPos = (EquipGridType)grid, CardGuid = guid, SlotIndex = 1 });
+            Assert.Equal(0, (await Next(alice, CardService.SlotInsert, EquipmentCardInsertResp.Parser)).Result);
+            Assert.Equal(card, session.Items.Single(i => i.Grid == CharacterService.CardGrid(grid, 1)).Entry);
+        }
+        // Socket 2 of a fashion grid never opens (_kSocketOpen2 0).
+        await Gm("alice", "!item 1430809 1");
+        await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser, m => m.PackInfo.ContainsKey(3));
+        long second = session.Items.Single(i => i.Entry == 1430809 && i.Grid == 0).Guid;
+        await alice.SendGameAsync(CardService.SlotInsert, new EquipmentCardInsertReq { EquipPos = (EquipGridType)9, CardGuid = second, SlotIndex = 2 });
+        Assert.Equal(ErrorCodes.SlotSealed, (await Next(alice, CardService.SlotInsert, EquipmentCardInsertResp.Parser)).Result);
+    }
+
     [ClientDataFact]
     public async Task ACardGoesIntoTheWeaponSocketAndBackAndCountsInStats()
     {
