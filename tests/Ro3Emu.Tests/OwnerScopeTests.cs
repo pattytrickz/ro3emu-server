@@ -13,12 +13,14 @@ public sealed class OwnerScopeTests : IAsyncLifetime
     private sealed class LoopErrors : ILogger<GameLoop>
     {
         public ConcurrentQueue<Exception> Exceptions { get; } = new();
+        public ConcurrentQueue<string> Warnings { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel level) => level >= LogLevel.Error;
+        public bool IsEnabled(LogLevel level) => level >= LogLevel.Warning;
         public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
             if (level >= LogLevel.Error) Exceptions.Enqueue(exception ?? new InvalidOperationException(formatter(state, exception)));
+            else if (level == LogLevel.Warning) Warnings.Enqueue(formatter(state, exception));
         }
     }
 
@@ -460,5 +462,56 @@ public sealed class OwnerScopeTests : IAsyncLifetime
         });
         await blocker;
         Assert.Equal(0, owners.Reservations.Active);
+    }
+
+    [Fact]
+    public async Task ANestedGateWaitThatNeverGetsItsGateGivesUpAndLetsRealmWorkRun()
+    {
+        // 20 Oct 2026: from 23:22:37 no Realm work (buff expiry, logout cleanup) was admitted again until the restart:
+        // a reservation was never released. A nested character lock keeps its parent's reservations while it waits
+        // for the character gate; when the gate never frees (here the same gate, taken again), the wait used to last
+        // for good and every Realm admission behind it with it.
+        owners.GateWaitTimeout = TimeSpan.FromMilliseconds(200);
+        var role = roles.Create("owner", 1, "NestedGate", 1, 1000, 1)!;
+        var session = new GameSession(null!, null!) { Role = role, Progress = roles.LoadProgress(role.Id), Owners = owners };
+        var held = loop.InvokeAsync(async () =>
+        {
+            session.Owner = owners.Get(role.Id);
+            using var outer = await CharacterService.Lock(session);
+            using var inner = await CharacterService.Lock(session);
+        });
+        var realm = loop.InvokeAsync(() => owners.RunAsync("timer/buff expiration", [ReservationKey.Realm], () => Task.CompletedTask));
+        await realm.WaitAsync(TimeSpan.FromSeconds(5));
+        var refused = await Assert.ThrowsAsync<TimeoutException>(() => held);
+        Assert.Contains("Character.StateLock", refused.Message);
+        Assert.Equal(0, owners.Reservations.Active);
+        Assert.Equal(1, session.StateLock.CurrentCount);
+    }
+
+    [Fact]
+    public async Task StuckWorkIsReportedWithTheReservationsHeldAndTheGateItWaitsAt()
+    {
+        loop.StuckWorkAge = TimeSpan.FromMilliseconds(200);
+        using var gate = new SemaphoreSlim(0, 1);
+        var stuck = loop.InvokeAsync(() => owners.RunAsync("kill reward", [ReservationKey.Role(401), ReservationKey.Role(402)], async () =>
+        {
+            using var scope = await owners.EnterWithGateAsync("Character.StateLock", gate, [ReservationKey.Role(402)]);
+            gate.Release();
+        }));
+        string? report = null;
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (report == null && DateTime.UtcNow < until)
+        {
+            report = errors.Warnings.FirstOrDefault(w => w.Contains("stuck"));
+            if (report == null) await Task.Delay(20);
+        }
+        gate.Release();
+        await stuck.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(report);
+        Assert.Contains("invoke", report);
+        Assert.Contains("kill reward", report);
+        Assert.Contains("RolePart:401", report);
+        Assert.Contains("waiting at Character.StateLock", report);
+        Assert.Single(errors.Warnings, w => w.Contains("stuck")); // once per item
     }
 }
