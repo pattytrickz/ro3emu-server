@@ -95,7 +95,7 @@ public sealed class RoleSessionService(RoleStore roles, Data.GameData data, Buff
         var resp = new AccountLoginCreateRoleResp { Result = result };
         if (role != null)
         {
-            resp.RoleBaseInfo = RoleProto.BaseInfo(role);
+            resp.RoleBaseInfo = RoleProto.BaseInfo(role, session.ClientAccount);
             resp.Appearances.Add(RoleProto.Appearances(role));
         }
         await session.SendGameAsync(MsgId.LoginRoleCreate, resp);
@@ -291,7 +291,7 @@ public sealed class RoleSessionService(RoleStore roles, Data.GameData data, Buff
             Result = 0,
             RoleAssets = new RoleAssets
             {
-                BasicInfo = RoleProto.BaseInfo(role),
+                BasicInfo = RoleProto.BaseInfo(role, session.ClientAccount),
                 ServerTimeMs = NowMs(),
                 ServerInfo = new ServerBasicInfo
                 {
