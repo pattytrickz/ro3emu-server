@@ -38,13 +38,12 @@ public sealed class PublisherGame : IDisposable
 
     public static string Key(string dir) => Path.GetFullPath(dir).TrimEnd('\\', '/').ToLowerInvariant();
 
-    /// <summary>The signed manifests of the publisher's current release.</summary>
-    public async Task<ClientInstaller.Manifests> FetchAsync(CancellationToken ct)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(45));
-        return await _installer.FetchAsync(timeout.Token);
-    }
+    /// <summary>
+    /// The signed manifests of the publisher's current release. No overall time limit (each request gives up when it
+    /// stalls): the full and delta manifests are about 25 MB, and a fixed 45 s cut a slow line off during the delta,
+    /// so a 5 MB update was planned from the full packages, 22 GB for release 140072 (inferred: no launcher log).
+    /// </summary>
+    public Task<ClientInstaller.Manifests> FetchAsync(CancellationToken ct) => _installer.FetchAsync(ct);
 
     /// <summary>
     /// The release the folder holds: our record, else the one the publisher's launcher wrote

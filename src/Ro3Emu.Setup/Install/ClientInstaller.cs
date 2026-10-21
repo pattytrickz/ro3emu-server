@@ -21,6 +21,12 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
 
     public Action<string>? Log { get; set; }
 
+    /// <summary>
+    /// A manifest request gives up after this long without data, not after a fixed time: the two manifests are about
+    /// 25 MB (Oct 2026), minutes on a slow line.
+    /// </summary>
+    public TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
     public int MaxAttempts { get; set; } = 8;
 
     public Func<int, TimeSpan> Backoff { get; set; } = attempt => TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(attempt, 5)));
@@ -57,7 +63,9 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
                         delta = ReleaseManifest.Verify(await GetBytesAsync(origin + dm, ct), await GetBytesAsync(origin + ds, ct), config);
                         if (delta.Release.TargetBuild.ContentSha256 != manifest.Release.TargetBuild.ContentSha256) delta = null;
                     }
-                    catch (Exception e) when (e is HttpRequestException or InstallException or TaskCanceledException)
+                    // Only a real failure means "no delta". Cancelled by the caller, the fetch is cancelled: without the delta
+                    // every changed file comes from a full package of ~2 GB.
+                    catch (Exception e) when (!ct.IsCancellationRequested && e is HttpRequestException or InstallException or OperationCanceledException)
                     {
                         Log?.Invoke($"delta manifest from {origin} skipped: {e.Message}");
                     }
@@ -65,7 +73,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
                 return new Manifests(manifest, delta, origin);
             }
             catch (InstallException e) { last = e; Log?.Invoke($"{origin}: {e.Message}"); }
-            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
+            catch (Exception e) when (!ct.IsCancellationRequested && e is HttpRequestException or OperationCanceledException or IOException)
             {
                 last = e;
                 Log?.Invoke($"{origin}: {e.Message}");
@@ -76,11 +84,24 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
             "Check the internet connection and try again. If the servers moved, a newer RO3Emu (or RO3Emu.download.json) has the new addresses.");
     }
 
+    /// <summary>The whole body, cancelled after <see cref="StallTimeout"/> without data.</summary>
     private async Task<byte[]> GetBytesAsync(string url, CancellationToken ct)
     {
-        using var response = await http.GetAsync(url, ct);
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        stall.CancelAfter(StallTimeout);
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(ct);
+        await using var body = await response.Content.ReadAsStreamAsync(stall.Token);
+        using var memory = new MemoryStream();
+        var buffer = new byte[1 << 16];
+        int read;
+        stall.CancelAfter(StallTimeout);
+        while ((read = await body.ReadAsync(buffer, stall.Token)) > 0)
+        {
+            memory.Write(buffer, 0, read);
+            stall.CancelAfter(StallTimeout);
+        }
+        return memory.ToArray();
     }
 
     /// <summary>
