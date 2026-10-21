@@ -181,32 +181,6 @@ public sealed partial class TerritoryWarsService
     private bool SiegeCanHit(GameSession s, MonsterUnit m, SiegeRun battle)
         => m != battle.Crystal || SiegeActive(battle) && SiegeMember(s, battle) && OwnId(s) == battle.State.Attack;
 
-    /// <summary>The configured crystal sits in a blocked navigation footprint at point 44. Preserve
-    /// straight-line path checks up to its target cell, and allow only that terminal cell to be blocked
-    /// for a live, authorized attacker (inferred siege objective geometry).</summary>
-    private bool SiegeCrystalBlockedEndpointAllowed(GameSession s, MonsterUnit m, Vec3 origin, Vec3 target)
-    {
-        if (s.SiegeBattle is not { } battle || m != battle.Crystal || !SiegeActive(battle)
-            || !SiegeMember(s, battle) || Own(s)?.Id != battle.State.Attack
-            || m.InstanceId != battle.Room.Id || m.WorldScene != s.WorldScene
-            || target.X != m.Pos.X || target.Y != m.Pos.Y || target.Z != m.Pos.Z
-            || maps.Map(SiegeScene)?.Nav is not { } nav || !nav.IsWalkable(origin.X, origin.Y, origin.Z)) return false;
-        float dx = target.X - origin.X, dz = target.Z - origin.Z;
-        float distance = MathF.Sqrt(dx * dx + dz * dz);
-        if (distance <= 0) return false;
-        int steps = (int)MathF.Ceiling(distance / 0.25f);
-        float lastX = origin.X, lastZ = origin.Z;
-        for (int i = 1; i <= steps; i++)
-        {
-            float t = (float)i / steps, x = origin.X + dx * t, z = origin.Z + dz * t;
-            if (nav.IsWalkable(x, origin.Y, z)) { lastX = x; lastZ = z; continue; }
-            return MathF.Floor(x) == MathF.Floor(target.X) && MathF.Floor(z) == MathF.Floor(target.Z)
-                && distance * (1 - t) <= MathF.Sqrt(2)
-                && nav.CanWalk(origin.X, origin.Y, origin.Z, lastX, lastZ);
-        }
-        return false;
-    }
-
     private async Task SiegeDamageRecordedAsync(GameSession s, MonsterUnit m, long amount)
     {
         if (s.SiegeBattle is not { } battle || !SiegeActive(battle) || !SiegeMember(s, battle)
