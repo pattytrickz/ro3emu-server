@@ -66,7 +66,10 @@ public sealed class NavGrid
     /// Whether the straight 2D segment from a to b crosses only walkable cells (sampled every half metre, heights
     /// followed cell by cell like the client's direct-walk check).
     /// </summary>
-    public bool CanWalk(float ax, float ay, float az, float bx, float bz)
+    public bool CanWalk(float ax, float ay, float az, float bx, float bz) => FirstBlocked(ax, ay, az, bx, bz) == null;
+
+    /// <summary>The first sample of the segment from a to b that <see cref="CanWalk"/> refuses, or null when it is clear.</summary>
+    public (float X, float Z)? FirstBlocked(float ax, float ay, float az, float bx, float bz)
     {
         float dx = bx - ax, dz = bz - az;
         int steps = Math.Max(1, (int)MathF.Ceiling(MathF.Sqrt(dx * dx + dz * dz) / 0.5f));
@@ -74,9 +77,9 @@ public sealed class NavGrid
         for (int i = 1; i <= steps; i++)
         {
             float t = (float)i / steps, x = ax + dx * t, z = az + dz * t;
-            if (WalkHeight(x, z, y) is not { } h || MathF.Abs(h - y) > WalkHeightTolerance) return false;
+            if (WalkHeight(x, z, y) is not { } h || MathF.Abs(h - y) > WalkHeightTolerance) return (x, z);
             y = h;
         }
-        return true;
+        return null;
     }
 }

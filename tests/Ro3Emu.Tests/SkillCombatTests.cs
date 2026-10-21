@@ -612,4 +612,45 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         Assert.True(damage.Damage > 0);
         Assert.True(target.Hp < before);
     }
+    [ClientDataFact]
+    public async Task AMonsterAgainstARockEdgeCanBeHitButOneBehindTheRockCannot()
+    {
+        // In-game 10.20, Ant Hell: an Ant Egg beside a rock edge refused auto-attacks with 3026 "invalid skill
+        // wall-piercing level" because the last stretch of the line clipped the rock cell next to it.
+        await using var alice = await InWorld("Alice");
+        var start = Session("alice").Position.Clone();
+        var nav = app.Services.GetRequiredService<WorldData>().Map(Session("alice").SceneEntry)!.Nav!;
+        // A row along x: walkable cell x0, rock at x0 + 1, walkable x0 + 2 and x0 + 3, all on one floor.
+        float? Floor(int x, int z) => nav.WalkHeight(x + 0.5f, z + 0.5f, start.Y) is { } h && MathF.Abs(h - start.Y) <= 1 ? h : null;
+        var (x0, z0) = (from dz in Enumerable.Range(-60, 121) from dx in Enumerable.Range(-60, 121)
+                        let x = (int)start.X + dx let z = (int)start.Z + dz
+                        where Floor(x, z) != null && Floor(x + 1, z) == null && nav.WalkHeight(x + 1.5f, z + 0.5f, start.Y) == null
+                            && Floor(x + 2, z) != null && Floor(x + 3, z) != null
+                        orderby Math.Abs(dx) + Math.Abs(dz)
+                        select (x, z)).First();
+        float y = Floor(x0, z0)!.Value;
+        var edge = await SpawnAt("alice", new MapPoint(x0 + 2.3f, Floor(x0 + 2, z0)!.Value, z0 + 0.5f, 0));
+        var behind = await SpawnAt("alice", new MapPoint(x0 + 3.5f, Floor(x0 + 3, z0)!.Value, z0 + 0.5f, 0));
+        await Loop.InvokeAsync(() => app.Services.GetRequiredService<SceneService>()
+            .TeleportInMapAsync(Session("alice"), new MapPoint(x0 + 0.4f, y, z0 + 0.5f, 0)));
+
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = behind.Uid, ComboIndex = 1 });
+        Assert.Equal(ErrorCodes.SkillBlocked, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = edge.Uid, ComboIndex = 1 });
+        var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+        Assert.Equal(0, accepted.Result);
+        var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, p => p.SessionId == accepted.SessionId);
+        Assert.Equal(edge.Uid, Assert.Single(hit.Dsts).DstID);
+    }
+
+    private Task<MonsterUnit> SpawnAt(string name, MapPoint at) => Loop.InvokeAsync(async () =>
+    {
+        var s = Session(name);
+        var monsters = app.Services.GetRequiredService<MonsterService>();
+        var template = monsters.Template(5000001)! with { RoamDistance = 0 };
+        var result = await monsters.SpawnSingleAsync(s.SceneEntry, 5000001, at, s.InstanceId, customTemplate: template);
+        Assert.NotNull(result);
+        result.NextRoamMs = long.MaxValue;
+        return result;
+    });
 }
