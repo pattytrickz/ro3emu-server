@@ -265,6 +265,73 @@ public sealed class InstallerTests : IAsyncLifetime
         Assert.Equal(newDll, File.ReadAllBytes(Path.Combine(game, "ro3_Data/Managed/HUD.dll")));
     }
 
+    /// <summary>Serves the file in small pieces with a pause between them, or stops sending halfway (stall).</summary>
+    private Func<HttpContext, Task<bool>> Slowly(string path, TimeSpan pause, bool stall = false) => async context =>
+    {
+        var body = _files[path];
+        context.Response.ContentLength = body.Length;
+        int piece = Math.Max(1, body.Length / 8);
+        for (int at = 0; at < body.Length; at += piece)
+        {
+            if (stall && at >= body.Length / 2) { await Task.Delay(Timeout.Infinite, context.RequestAborted); return true; }
+            await context.Response.Body.WriteAsync(body.AsMemory(at, Math.Min(piece, body.Length - at)), context.RequestAborted);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+            await Task.Delay(pause, context.RequestAborted);
+        }
+        return true;
+    };
+
+    private Dictionary<string, (string, byte[])[]> WithDelta()
+    {
+        var packages = TwoPackages();
+        var newDll = Bytes("new dll", 10);
+        packages["p2"] = [.. packages["p2"], ("ro3_Data/Managed/HUD.dll", newDll)];
+        packages["d"] = [("ro3_Data/Managed/HUD.dll", newDll)];
+        Publish(packages, deltaPackage: "d");
+        return packages;
+    }
+
+    [Fact]
+    public async Task ASlowButSteadyManifestDownloadKeepsTheDelta()
+    {
+        // The real manifests are about 25 MB: a slow line takes minutes, which is fine as long as data keeps coming.
+        WithDelta();
+        _faults["a/full/manifest.json"] = Slowly("a/full/manifest.json", TimeSpan.FromMilliseconds(100));
+        _faults["a/delta/manifest.json"] = Slowly("a/delta/manifest.json", TimeSpan.FromMilliseconds(100));
+        var installer = Installer();
+        installer.StallTimeout = TimeSpan.FromMilliseconds(500);
+        var manifests = await installer.FetchAsync();
+        Assert.Equal(_origin + "a/", manifests.Origin);
+        Assert.NotNull(manifests.Delta);
+    }
+
+    [Fact]
+    public async Task AStalledDeltaManifestIsSkippedInsteadOfHanging()
+    {
+        WithDelta();
+        _faults["a/delta/manifest.json"] = Slowly("a/delta/manifest.json", TimeSpan.Zero, stall: true);
+        var installer = Installer();
+        installer.StallTimeout = TimeSpan.FromMilliseconds(300);
+        var manifests = await installer.FetchAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Null(manifests.Delta);
+    }
+
+    [Fact]
+    public async Task ACancelledFetchThrowsRatherThanReportingNoDelta()
+    {
+        // Cut off while the delta manifest downloads: answering "no delta" would plan the update from the ~2 GB full
+        // packages (one per changed data file: 22 GB for release 140072's 9 files).
+        WithDelta();
+        using var cancel = new CancellationTokenSource();
+        _faults["a/delta/manifest.json"] = async context =>
+        {
+            cancel.Cancel();
+            await Task.Delay(Timeout.Infinite, context.RequestAborted);
+            return true;
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Installer().FetchAsync(cancel.Token));
+    }
+
     [Fact]
     public async Task KeepsADllPatchedByRo3EmuAndRefreshesItsBackupOnUpdate()
     {
