@@ -220,6 +220,7 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         Assert.Equal(target.Uid, use.TargetId);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, p => p.SessionId == reply.SessionId);
         Assert.Equal(1100101, hit.ShowPoint); // master's skill-specific EffectData entry for Bash
+        Assert.Equal(0, hit.Split); // no _kShowDmg: one number
         Assert.True(Assert.Single(hit.Dsts).Damage > 0);
         Assert.True(target.Hp < before);
         var statistics = await Next(alice, CombatService.DamageStatistics, DamageStatisticsNotify.Parser,
@@ -233,6 +234,22 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         await Teach("alice", 11009);
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1100901, TargetId = target.Uid });
         Assert.Equal(ErrorCodes.SkillPassive, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+    }
+
+    [ClientDataFact]
+    public async Task MultiHitSkillsSplitTheirTotalIntoTheConfiguredNumberOfHits()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 2100");
+        await Loop.InvokeAsync(() => { Session("alice").Progress!.Skills[12004] = 3; return Task.CompletedTask; });
+        var target = await Target("alice");
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1200403, TargetId = target.Uid });
+        var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+        Assert.Equal(0, accepted.Result);
+        var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
+        Assert.Equal(3, hit.Split); // Fire Bolt Lv 3: _kShowDmg [3], the description's total "over 3 bolts"
+        Assert.Equal(1200404, hit.ShowPoint); // its multistage hit effect, which replays per number
+        Assert.True(Assert.Single(hit.Dsts).Damage > 0);
     }
 
     [ClientDataFact]

@@ -307,6 +307,13 @@ public sealed partial class CombatService : IGameTicker
         return 1000002;
     }
 
+    /// <summary>
+    /// SkillConfig._kShowDmg [hits]: how many numbers the client splits the skill's total into
+    /// (SkillHitInfo.split; LC_DamageHelper divides the damage and replays the hit effect per stage).
+    /// The descriptions give the damage as a total "over N hits", so this only changes the display.
+    /// </summary>
+    internal static int ShowHits(JsonElement row) => Numbers(row, "_kShowDmg") is [var hits, ..] && hits > 1 ? (int)Math.Min(hits, 20) : 0;
+
     // ---- monsters hitting players ----
 
     /// <summary>
@@ -360,7 +367,7 @@ public sealed partial class CombatService : IGameTicker
             var hit = new SkillHitInfo
             {
                 SrcID = pet.Uid, SkillId = skillId, ShowPoint = HitEffect(GameData.Int(row, "_iScriptShow")),
-                SessionId = castId, SrcElement = pet.Element,
+                SessionId = castId, SrcElement = pet.Element, Split = ShowHits(row),
             };
             var processed = new List<MonsterUnit>();
             var killed = new List<MonsterUnit>();

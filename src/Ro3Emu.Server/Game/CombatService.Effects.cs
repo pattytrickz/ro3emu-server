@@ -157,7 +157,7 @@ public sealed partial class CombatService
         {
             SrcID = field?.Uid ?? action.SourceId, SkillId = action.Request.SkillId, SessionId = action.Id,
             RootCtxGuid = action.Id, ComboIndex = action.Request.ComboIndex, ShowPoint = HitEffect(GameData.Int(row, "_iScriptShow")),
-            SrcElement = GameData.Int(row, "_iEleType") is var ele and > 1 ? (int)ele : attacker.Element,
+            SrcElement = GameData.Int(row, "_iEleType") is var ele and > 1 ? (int)ele : attacker.Element, Split = ShowHits(row),
         };
         var killed = new List<MonsterUnit>();
         var processed = new List<MonsterUnit>();
