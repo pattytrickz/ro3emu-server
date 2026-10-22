@@ -256,6 +256,30 @@ public sealed class SkillGrowthTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task WizardRebuildingMageTreeOneDropsSightWithoutListingSightSprout()
+    {
+        // mazrine (22 Oct): on Mage tree I, Fire Bolt/Fire Ball/Fire Wall -10, Sight -1, Lightning Bolt +5, Thunderstorm +10,
+        // Increase SP Recovery +3 got "Client Parameter error". Sight Sprout (tree II, free, needs Sight) is not in the request.
+        await using var alice = await InWorld("Alice");
+        await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser);
+        await Gm("alice", "!lvl 60");
+        await Gm("alice", "!job 2200");
+        await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser,
+            m => !m.SyncAllMark && m.SkillList?.All?.Value.Contains(12110) == true);
+        var learn = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        foreach (var (skill, level) in new[] { (12002, 1), (12004, 10), (12012, 10), (12010, 10) })
+            learn.LevelUpList[skill] = new SkillData { SkillId = skill, SkillLevel = level };
+        await alice.SendGameAsync(SkillService.PlanUpdate, learn);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+
+        var rebuild = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        foreach (var (skill, level) in new[] { (12004, 0), (12012, 0), (12010, 0), (12002, 0), (12005, 5), (12013, 10), (12001, 3) })
+            rebuild.LevelUpList[skill] = new SkillData { SkillId = skill, SkillLevel = level };
+        await alice.SendGameAsync(SkillService.PlanUpdate, rebuild);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+    }
+
+    [ClientDataFact]
     public async Task LoadQueueAndResetValidateInputsAndPersist()
     {
         await using (var alice = await InWorld("Alice"))
