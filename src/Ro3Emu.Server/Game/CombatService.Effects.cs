@@ -226,6 +226,8 @@ public sealed partial class CombatService
             if (field == null)
                 foreach (var tuple in Tuples(row, "_kBuff1"))
                     if (CanApplyMoreEffects() && RollBuff(tuple, out int id, out int duration)) await buffs.AddAsync(recipient, id, duration, castingRole.Id);
+            if (recipient == s && field == null && script == "Relax" && CanApplyMoreEffects())
+                await StartRelaxAsync(s, action);
             if (friendly && damage)
             {
                 double multiplier = Numbers(row, "_kDamageParam1").FirstOrDefault(), flat = Numbers(row, "_kDamageParam2").FirstOrDefault();
