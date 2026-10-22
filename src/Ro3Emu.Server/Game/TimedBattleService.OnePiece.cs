@@ -90,7 +90,9 @@ public sealed partial class TimedBattleService
             Result = session.Role == null ? ErrorCodes.Parameter : 0,
             IsOpen = open,
             CurIndex = open ? 1 : 0,
-            NextOpenTime = start > time.GetUtcNow().ToUnixTimeSeconds() ? start * 1000 : 0,
+            // Seconds, like 83350's endTime: UI_Sys_OnepieceWidgetCtrl compares iNextOpenTime with
+            // TimerManager.GetSystemTime (seconds) and hands it to Lua_TimeHelper.GetWeekDayNum (os.date).
+            NextOpenTime = start > time.GetUtcNow().ToUnixTimeSeconds() ? start : 0,
         };
         response.TimeMap[1] = new HiddenTreasureRoundInfo { Index = 1, StartTime = start * 1000, EndTime = end * 1000 };
         if (session.Role != null && session.Progress != null && data.Row("OnePieceRewardConfig", 3200101) is { } reward)
