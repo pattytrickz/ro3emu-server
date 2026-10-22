@@ -174,7 +174,7 @@ public sealed partial class CombatService
                 var defender = new Fighter(0, 0, target.Template.Flee, 0, target.Template.Level, target.Template.Element)
                 { Def = target.Template.Def, Mdef = target.Template.Mdef, Flee = target.Template.Flee };
                 var (amount, result) = Damage(attacker, defender, row,
-                    script == "Heal" ? 1 : script == "SonicBlow" ? SonicBlowBranch(s, target, row) : 0);
+                    script == "Heal" ? 1 : script == "SonicBlow" ? SonicBlowBranch(s, target, row) : 0, AuraBladeBonus(s, row));
                 if (amount > 0)
                 {
                     foreach (var modifier in DamageAdjusters) amount = Math.Max(0, modifier(s, target, row, result, amount));

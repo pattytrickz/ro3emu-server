@@ -329,6 +329,48 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task AuraBladeRaisesOnlyNormalAttackMultipliersWhileItsBuffLasts()
+    {
+        // Aura Blade Lv 10 (buff 1120110): "increasing the percentage damage multiplier of Normal Attack skills by 15%".
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 1300");
+        var combat = app.Services.GetRequiredService<CombatService>();
+        var data = app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>();
+        var normal = data.Row("SkillConfig", 1100001)!.Value;
+        var bash = data.Row("SkillConfig", 1100101)!.Value;
+        Assert.Equal(0, await Loop.InvokeAsync(() => Task.FromResult(combat.AuraBladeBonus(Session("alice"), normal))));
+        await Loop.InvokeAsync(() => app.Services.GetRequiredService<BuffService>().AddAsync(Session("alice"), 1120110, 120000, Session("alice").Role!.Id));
+        Assert.Equal(1500, await Loop.InvokeAsync(() => Task.FromResult(combat.AuraBladeBonus(Session("alice"), normal))));
+        Assert.Equal(0, await Loop.InvokeAsync(() => Task.FromResult(combat.AuraBladeBonus(Session("alice"), bash))));
+    }
+
+    [ClientDataFact]
+    public async Task ShieldReflectHitsTheMeleeAttackerButNeverKillsIt()
+    {
+        // Shield Reflect Lv 1: PATK * 11% + 32 Neutral physical to a melee attacker within 5 m, once a second.
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 1210"); await Teach("alice", 11410);
+        var attacker = await Target("alice", stationary: true);
+        await Loop.InvokeAsync(() => { attacker.Hp = 1_000_000; return Task.CompletedTask; });
+        await Loop.InvokeAsync(() => app.Services.GetRequiredService<BuffService>().AddAsync(Session("alice"), 1140401, 120000, Session("alice").Role!.Id));
+        await Loop.InvokeAsync(() => app.Services.GetRequiredService<MonsterService>().Attack!(attacker, Session("alice")));
+        var reflected = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SkillId == 1141001);
+        Assert.Equal((long)alice.Self!.Uuid, reflected.SrcID);
+        var dst = Assert.Single(reflected.Dsts);
+        Assert.Equal(attacker.Uid, dst.DstID);
+        Assert.True(dst.Damage > 0);
+        Assert.Equal(1_000_000 - dst.Damage, await Loop.InvokeAsync(() => Task.FromResult(attacker.Hp)));
+
+        // At 1 HP the reflection holds back: real hits keep the kill.
+        await Loop.InvokeAsync(() => { attacker.Hp = 1; return Task.CompletedTask; });
+        await Task.Delay(1100); // the once-a-second limit
+        await Loop.InvokeAsync(() => app.Services.GetRequiredService<MonsterService>().Attack!(attacker, Session("alice")));
+        await Task.Delay(1500);
+        Assert.Equal(1, await Loop.InvokeAsync(() => Task.FromResult(attacker.Hp)));
+        Assert.False(attacker.Dead);
+    }
+
+    [ClientDataFact]
     public async Task CastSpeedFromDexShortensTheVariableCastTime()
     {
         // Fire Bolt Lv 1: _iChantFix 0, _iChantVar 1000. Client: varchant = -3 * cspd / (800 + cspd), cspd 2 per DEX.
