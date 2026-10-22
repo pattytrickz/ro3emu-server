@@ -367,6 +367,54 @@ public sealed class AwardTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task ASelectionChestGrantsTheChosenOptionAndRefusesAChoiceThatDoesNotAddUp()
+    {
+        // #bug-reports "Unable to choose Blue Card Selection Chest", "Unable to open T3 Orange Equipment Slot Selection
+        // Chest": a SelfChooseGift 303 box answered "This feature is unavailable" after the choice.
+        await using var bot = await InWorld("ChestAlice");
+        await Next(bot, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        var character = _app.Services.GetRequiredService<CharacterService>();
+        var awards = _app.Services.GetRequiredService<AwardService>();
+        var data = _app.Services.GetRequiredService<GameData>();
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "ChestAlice");
+        var store = _app.Services.GetRequiredService<ItemStore>();
+        // The first selection chest whose award offers at least two items this role can receive.
+        var (chest, options) = data.Table("ItemConfig")
+            .Where(kv => GameData.Int(kv.Value, "_iType") == 3 && GameData.Int(kv.Value, "_iIsUse") == 1
+                && GameData.Int(kv.Value, "_iSubType") == 303 && GameData.Int(kv.Value, "_iAward") > 0)
+            .Select(kv =>
+            {
+                try { return (Entry: int.Parse(kv.Key), Options: awards.Resolve(session, GameData.Int(kv.Value, "_iAward")).Grants
+                    .Where(g => g.Entry is not (100 or 101)).ToList()); }
+                catch (AwardResolutionException) { return (Entry: 0, Options: new List<AwardGrant>()); }
+            })
+            .First(c => c.Entry > 0 && c.Options.Count >= 2 && c.Options.Select(o => o.Entry).Distinct().Count() == c.Options.Count);
+        Assert.True(await loop.InvokeAsync(() => character.ApplyAwardAsync(session,
+            new AwardPlan(0, 0, [new AwardGrant(chest, 2)]), suppressRewardNotice: true)));
+        long box = store.Load(session.Role!.Id).Single(i => i.Entry == chest).Guid;
+
+        // Two units chosen for a one-unit use: refused, the chest stays.
+        var wrong = new ItemUseReq { ItemGuid = box, ItemCount = 1 };
+        wrong.ItemParam.Add(new ItemUseParamInfo { SelfChooseGift = new ItemUseParamInfo.Types.SelfChooseGift { ChooseGift = { [2] = 2 } } });
+        await bot.SendGameAsync(CharacterService.ItemUse, wrong);
+        Assert.Equal(155, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        await loop.InvokeAsync(() => Task.CompletedTask);
+        Assert.Equal(2, store.Load(session.Role.Id).Single(i => i.Entry == chest).Stack);
+
+        // Option 2, one unit: exactly that option arrives and one chest is used.
+        var pick = new ItemUseReq { ItemGuid = box, ItemCount = 1 };
+        pick.ItemParam.Add(new ItemUseParamInfo { SelfChooseGift = new ItemUseParamInfo.Types.SelfChooseGift { ChooseGift = { [2] = 1 } } });
+        int before = store.Load(session.Role.Id).Where(i => i.Entry == options[1].Entry).Sum(i => i.Stack);
+        await bot.SendGameAsync(CharacterService.ItemUse, pick);
+        Assert.Equal(0, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        await loop.InvokeAsync(() => Task.CompletedTask);
+        var items = store.Load(session.Role.Id);
+        Assert.Equal(1, items.Single(i => i.Entry == chest).Stack);
+        Assert.Equal(before + options[1].Count, items.Where(i => i.Entry == options[1].Entry).Sum(i => i.Stack));
+    }
+
+    [ClientDataFact]
     public async Task RewardVigorRaisesTheLifeSkillVigorBalance()
     {
         // #bug-reports chat 20.10: Vigor rewards never showed. Awards grant ItemConfig 407; the client shows and
