@@ -75,6 +75,7 @@ public sealed partial class DungeonService
     {
         a.StepDone = false;
         await SyncSceneActorsAsync(a, step.Actors);
+        if (step.Slide && !a.Settled && !a.Room.Closed) await SetSlideAsync(a, true);
         if (step.Story != 0 && !a.Settled && !a.Room.Closed)
             // Once, in a var-change event: the client calls PlayCutSceneStory on every push of this var.
             await BroadcastAsync(a, Event, new DungeonEventNotify
@@ -93,6 +94,29 @@ public sealed partial class DungeonService
                 foreach (var member in Present(a).Where(m => a.Loaded.Contains(m) && !m.SceneLoading).ToList())
                     await PlayerMovedAsync(member);
             }, "dungeon scripted step position");
+    }
+
+    // LC_DunGeon_Base decodes one value per EventParams for DungeonEventInvokeClientFunc.
+    // LC_DunGeon_Actions.SetSlideMode accepts view mode, active, forward speed and A/D speed.
+    // Free view (1) and the controller's default speeds avoid inventing a locked camera preset.
+    private static DungeonEventNotify SlideMode(Attempt a, bool active) => new()
+    {
+        DungeonEntry = a.Plan.SceneEntry, EventType = (DungeonEventType)6,
+        StageNum = a.Wave + 1, LevelNum = 1, CliFuncname = "SetSlideMode",
+        Params =
+        {
+            new EventParams { IntParams = { 1 } },
+            new EventParams { BoolParams = { active } },
+            new EventParams { DoubleParams = { 10 } },
+            new EventParams { DoubleParams = { 8 } },
+        },
+    };
+
+    private async Task SetSlideAsync(Attempt a, bool active)
+    {
+        if (a.Sliding == active) return;
+        a.Sliding = active;
+        await BroadcastAsync(a, Event, SlideMode(a, active));
     }
 
     /// <summary>
@@ -286,6 +310,7 @@ public sealed partial class DungeonService
             return;
         }
         a.StepDone = true;
+        await SetSlideAsync(a, false);
         log.LogInformation("Scripted scene {Scene} step {Step} '{Stage}' completed by {Role} ({Events})",
             a.Plan.SceneEntry, a.Wave + 1, step.Stage, s.Role?.Id, string.Join(", ", events));
         if (step.TeleportAfter != 0 && catalog.ScenePoint(a.Plan.SceneEntry, step.TeleportAfter) is { } to)
