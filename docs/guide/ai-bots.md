@@ -13,8 +13,11 @@ A separate program that keeps the world populated. Each bot logs in like a real 
   easier; this fades after 15 minutes without dying.
 - **Town bots** (`townShare`, default 30%) hang out in Prontera. They wander between NPCs, stop for a while and
   sometimes go AFK for a few minutes.
-- **Parties.** A bot accepts a party invite from a real player, then follows that player and fights next to them. It
-  leaves when the leader leaves, kicks it, or is out of sight for two minutes.
+- **Parties.** A bot accepts a party invite from a real player within 10 base levels of its own (otherwise it
+  declines and whispers why), then follows that player and fights next to them. It never takes the last hit on a
+  monster near a player of the party or one they hit: it stops at 30% HP, or earlier when its own hits could finish
+  the monster. It leaves when the leader leaves, kicks it, is offline for five minutes, or when no real player is
+  left in the party.
 - **Manners.** Bots never attack a monster someone else has damaged, or one next to a real player, so they don't
   steal kills. They don't trade, sell, use the auction or post in world chat.
 - **Chat.** Bots answer whispers, and map-chat lines that name them. Now and then they answer an open "hi" or

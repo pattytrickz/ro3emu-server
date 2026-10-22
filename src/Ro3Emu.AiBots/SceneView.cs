@@ -56,6 +56,8 @@ public sealed class SceneView
     /// <summary>Recent hits between units: who each unit last hit, and who hit each unit (source, when).</summary>
     private readonly Dictionary<ulong, (ulong Target, DateTime At)> _lastHit = new();
     private readonly Dictionary<ulong, Dictionary<ulong, DateTime>> _hitBy = new();
+    /// <summary>The damage of the bot's own last few hits.</summary>
+    private readonly Queue<long> _ownHits = new();
     private readonly Channel<ViewEvent> _events = Channel.CreateBounded<ViewEvent>(
         new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.DropOldest });
 
@@ -175,6 +177,11 @@ public sealed class SceneView
                             if (!_hitBy.TryGetValue((ulong)d.DstID, out var sources)) _hitBy[(ulong)d.DstID] = sources = new();
                             sources[(ulong)hit.SrcID] = now;
                             if (_hitBy.Count > 512) PruneHits(now - TimeSpan.FromSeconds(30));
+                            if ((ulong)hit.SrcID == SelfUid && d.Damage > 0)
+                            {
+                                _ownHits.Enqueue(d.Damage);
+                                if (_ownHits.Count > 8) _ownHits.Dequeue();
+                            }
                         }
                         if ((ulong)d.DstID == SelfUid)
                         {
@@ -214,7 +221,14 @@ public sealed class SceneView
                     _events.Writer.TryWrite(new PartyChanged(Left: 0, NewLeader: oper.TargetGuid));
                 break;
             case TeamService.TeamBroadcastLeave:
-                _events.Writer.TryWrite(new PartyChanged(Left: BroadCastMemberLeave.Parser.ParseFrom(body).Guid, NewLeader: 0));
+                long left = BroadCastMemberLeave.Parser.ParseFrom(body).Guid;
+                lock (_lock) _party.Remove(left);
+                _events.Writer.TryWrite(new PartyChanged(Left: left, NewLeader: 0));
+                break;
+            case TeamService.TeamNewMember:
+                // Only into a roster the bot has (42048): a joiner gets its own notice just before the roster.
+                if (BroadCastNewMemberEnter.Parser.ParseFrom(body).DetailInfo is { } joined)
+                    lock (_lock) if (_party.Count > 0) Card(joined);
                 break;
             case TeamService.TeamAll:
                 var all = TeamTotalDetailInfo.Parser.ParseFrom(body);
@@ -263,6 +277,12 @@ public sealed class SceneView
     }
 
     public void ForgetParty() { lock (_lock) _party.Clear(); }
+
+    /// <summary>The party roster's members, the bot included; empty when it is in no party.</summary>
+    public long[] PartyGuids() { lock (_lock) return _party.Keys.ToArray(); }
+
+    /// <summary>The biggest of the bot's last few hits (0 before its first).</summary>
+    public long BiggestHit { get { lock (_lock) return _ownHits.Count > 0 ? _ownHits.Max() : 0; } }
 
     private void PruneHits(DateTime before)
     {

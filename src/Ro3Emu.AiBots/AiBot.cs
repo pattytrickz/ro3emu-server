@@ -198,6 +198,8 @@ public sealed class AiBot
             if (_view.Disconnected) throw new IOException("the server closed the connection");
             while (_view.Events.TryRead(out var e)) await HandleAsync(e, ct);
             if (_view.SceneEntry == 0 || _view.SceneGeneration != _handledScene) continue;
+            // Free to be invited again: a party whose players have all left (one from before a reconnect too).
+            if (PartyRules.NoPlayerLeft(_view.PartyGuids(), _roleId, _hub.IsBot)) await LeavePartyAsync("no player left in it");
             if (_view.Dead) { await DeadAsync(); continue; }
             _deadSince = null;
             if (Volatile.Read(ref _leader) != 0) await PartyAsync();
@@ -230,10 +232,10 @@ public sealed class AiBot
                 _ = Task.Run(() => AnswerInviteAsync(invite, ct), ct);
                 break;
             case PartyChanged change:
+                if (change.Left == _roleId) { Volatile.Write(ref _leader, 0); _view.ForgetParty(); _log("was removed from the party"); break; }
                 long leader = Volatile.Read(ref _leader);
                 if (leader == 0) break;
-                if (change.Left == _roleId) { Volatile.Write(ref _leader, 0); _view.ForgetParty(); _log("was removed from the party"); }
-                else if (change.NewLeader == _roleId || change.Left == leader) await LeavePartyAsync("my party leader left");
+                if (change.NewLeader == _roleId || change.Left == leader) await LeavePartyAsync("my party leader left");
                 else if (change.NewLeader != 0) Volatile.Write(ref _leader, change.NewLeader);
                 break;
         }
@@ -383,8 +385,8 @@ public sealed class AiBot
     /// In a real player's party: be where they are and help. The party sync (SceneView.Member) says where the leader
     /// is even out of sight, so the bot travels to their map, switches to their line and walks to them. Next to them it
     /// heals (a healer), fights what attacks the leader and what the leader is fighting, and takes fresh monsters nearby.
-    /// Kill EXP goes to the last hit, so a monster the leader has hit is left to them below 30% HP unless the leader is
-    /// in trouble. The bot stays until the leader leaves, kicks it, or is offline for five minutes.
+    /// It never takes the last hit on a monster near a player of the party or one they hit (LeaveToPlayers). The bot
+    /// stays until the leader leaves, kicks it, or is offline for five minutes.
     /// </summary>
     private async Task PartyAsync()
     {
@@ -402,11 +404,11 @@ public sealed class AiBot
         _activity = $"in a party with {leader.Name}, following them";
         if (await HealAsync(leader, member, now)) return;
         float toLeader = Dist(leader.X, leader.Z);
-        if (PartyTarget(leader, member) is { } fight && toLeader < 20) { await EngageAsync(fight); return; }
+        if (PartyTarget(leader) is { } fight && toLeader < 20) { await EngageAsync(fight); return; }
         if (Attacker() is { } attacker)
         {
-            // Too strong to take alone: run back to the leader rather than to the revive point.
-            if (attacker.Level <= _view.Level + 3) { await EngageAsync(attacker); return; }
+            // Too strong to take alone, or the players' to finish: back to the leader rather than to the revive point.
+            if (attacker.Level <= _view.Level + 3 && !LeaveToPlayers(attacker)) { await EngageAsync(attacker); return; }
             if (toLeader > 3) PathTo(leader.X, leader.Z, TimeSpan.Zero, slack: 2);
             return;
         }
@@ -422,13 +424,11 @@ public sealed class AiBot
     }
 
     /// <summary>
-    /// The leader's fight: monsters hitting the leader first, then what the leader is hitting, then the bot's own target.
-    /// A monster the leader has hit and brought below 30% HP is left for their last hit, unless the leader is below 35%.
+    /// The leader's fight: monsters hitting the leader first, then what the leader is hitting, then the bot's own target,
+    /// leaving out those low enough for the players' last hit.
     /// </summary>
-    private Unit? PartyTarget(Unit leader, PartyMember? member)
+    private Unit? PartyTarget(Unit leader)
     {
-        long hp = member?.Hp ?? leader.Hp, max = Math.Max(1, member?.MaxHp ?? leader.MaxHp);
-        bool leaderInTrouble = hp * 100 / max < 35;
         var window = TimeSpan.FromSeconds(6);
         var candidates = _view.AttackersOf(leader.Uid, window).Select(_view.Find)
             .Append(_view.Find(_view.LastTargetOf(leader.Uid, window)))
@@ -436,12 +436,27 @@ public sealed class AiBot
         foreach (var unit in candidates)
         {
             if (unit is not { Type: 1, Dead: false } || Flat(unit.X, unit.Z, leader.X, leader.Z) > 20
-                || _avoid.TryGetValue(unit.Uid, out var until) && until > DateTime.UtcNow) continue;
-            bool theirs = _view.HasHit(leader.Uid, unit.Uid, TimeSpan.FromSeconds(20));
-            if (theirs && !leaderInTrouble && unit.Hp * 100 / Math.Max(1, unit.MaxHp) <= 30) continue;
+                || _avoid.TryGetValue(unit.Uid, out var until) && until > DateTime.UtcNow || LeaveToPlayers(unit)) continue;
             return unit;
         }
         return null;
+    }
+
+    /// <summary>
+    /// A monster whose last hit belongs to the players of the bot's party (owner decision, #58): near one of them or hit
+    /// by one, and low enough that the bot could finish it (PartyRules.LeaveToPlayer). The bot stops hitting it.
+    /// </summary>
+    private bool LeaveToPlayers(Unit monster)
+    {
+        var party = _view.PartyGuids();
+        if (party.Length == 0 || !PartyRules.LeaveToPlayer(monster.Hp, monster.MaxHp, _view.BiggestHit)) return false;
+        foreach (long guid in party.Append(Volatile.Read(ref _leader)).Distinct())
+        {
+            if (guid == 0 || guid == _roleId || _hub.IsBot(guid)) continue;
+            if (_view.HasHit((ulong)guid, monster.Uid, TimeSpan.FromSeconds(20))) return true;
+            if (_view.Find((ulong)guid) is { } player && Flat(player.X, player.Z, monster.X, monster.Z) <= PartyRules.NearPlayer) return true;
+        }
+        return false;
     }
 
     /// <summary>The leader is out of sight: wait while they are offline, otherwise go to their map, line and position.</summary>
@@ -612,7 +627,7 @@ public sealed class AiBot
 
     /// <summary>
     /// The nearest monster near (x, z) worth attacking. Manners: leave alone monsters someone else has hurt and those
-    /// next to a real player (other than the party leader), so the bots never steal kills.
+    /// next to a real player (other than the party leader), so the bots never steal kills, and those left to the party.
     /// </summary>
     private Unit? PickTarget(float x, float z, float range, long maxLevel, long partyLeader)
     {
@@ -626,7 +641,7 @@ public sealed class AiBot
             .Where(m => Flat(m.X, m.Z, x, z) <= range)
             // Monsters have their own nav data: one standing where players cannot walk cannot be hit (SkillBlocked).
             .Where(m => nav == null || nav.WalkHeight(m.X, m.Z, m.Y) is { } h && MathF.Abs(h - m.Y) <= NavGrid.WalkHeightTolerance)
-            .Where(m => !players.Any(p => Flat(p.X, p.Z, m.X, m.Z) < PlayerBuffer))
+            .Where(m => !players.Any(p => Flat(p.X, p.Z, m.X, m.Z) < PlayerBuffer) && !LeaveToPlayers(m))
             .OrderBy(m => Dist(m.X, m.Z))
             .FirstOrDefault();
     }
@@ -634,6 +649,12 @@ public sealed class AiBot
     private async Task EngageAsync(Unit target)
     {
         var now = DateTime.UtcNow;
+        if (LeaveToPlayers(target))
+        {
+            _target = 0;
+            _activity = "leaving the last hit to my party";
+            return;
+        }
         if (_target != target.Uid) { _target = target.Uid; _refusals = 0; }
         _crowd.Claim(target.Uid, _roleId);
         string monster = _atlas.MonsterName(target.TemplateId);
@@ -943,8 +964,12 @@ public sealed class AiBot
     {
         try
         {
-            bool accept = _hub.Options.AcceptPartyInvites && Volatile.Read(ref _leader) == 0 && !_hub.IsBot(invite.InviterId);
+            bool player = !_hub.IsBot(invite.InviterId), free = Volatile.Read(ref _leader) == 0;
             await Task.Delay(TimeSpan.FromSeconds(_random.Next(2, 5)), ct);
+            // Only players within ten base levels (owner decision, #58), so the bot helps rather than carries.
+            long? level = _hub.Options.AcceptPartyInvites && free && player ? await PlayerLevelAsync(invite.InviterId, ct) : null;
+            bool inRange = PartyRules.InLevelRange(_view.Level, level);
+            bool accept = _hub.Options.AcceptPartyInvites && free && player && inRange;
             using var reply = _bot.Inbox.Expect(x => x.IsGame(TeamService.TeamInviteeResp));
             await SendAsync(() => _bot.SendGameAsync(TeamService.TeamInviteeResp,
                 new InviteeResp { TeamId = invite.TeamId, IsAgree = accept, InviteGuid = invite.InviterId }));
@@ -952,9 +977,11 @@ public sealed class AiBot
             if (!accept)
             {
                 // Say why, so the inviter is not left wondering whether the bot is away.
-                if (Volatile.Read(ref _leader) != 0 && !_hub.IsBot(invite.InviterId))
-                    await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1,
-                        "Sorry, I'm already in someone else's party right now.", channelIndex: 5));
+                string? why = !player || !_hub.Options.AcceptPartyInvites ? null
+                    : !free ? "Sorry, I'm already in someone else's party right now."
+                    : PartyRules.LevelDecline(_view.Level, level);
+                if (!free || !inRange) _log($"declined a party invite from {invite.InviterId} (level {level?.ToString() ?? "unknown"})");
+                if (why != null) await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1, why, channelIndex: 5));
                 return;
             }
             if (result == ErrorCodes.AlreadyInParty)
@@ -962,6 +989,7 @@ public sealed class AiBot
                 // Still in a party from before a reconnect: leave it, and ask to be invited again.
                 _log("still in an old party; leaving it");
                 await SendAsync(() => _bot.SendGameAsync(TeamService.TeamLeave, new LeaveTeamReq { Guid = _roleId }));
+                _view.ForgetParty();
                 await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1,
                     "Oops, I was stuck in an old party. Invite me again?", channelIndex: 5));
                 return;
@@ -977,10 +1005,30 @@ public sealed class AiBot
         catch (Exception e) when (e is not OperationCanceledException) { _log($"party invite failed: {e.Message}"); }
     }
 
+    /// <summary>
+    /// A player's base level: the level the bot sees on them, else the client's head-name lookup
+    /// (UserDataService.getAttributeBatchByVersion); null when neither answers.
+    /// </summary>
+    private async Task<long?> PlayerLevelAsync(long roleId, CancellationToken ct)
+    {
+        if (_view.Find((ulong)roleId) is { Level: > 0 } seen) return seen.Level;
+        try
+        {
+            var reply = await _bot.GetRoleAttributesAsync(roleId).WaitAsync(TimeSpan.FromSeconds(8), ct);
+            if (reply.GetValueOrDefault("Results") is object?[] results)
+                foreach (var result in results.OfType<Dictionary<object, object?>>())
+                    if (Convert.ToInt64(result.GetValueOrDefault("Uid")) == roleId && result.GetValueOrDefault("Data") is Dictionary<object, object?> data
+                        && data.GetValueOrDefault("Level") is { } level)
+                        return Convert.ToInt64(level);
+        }
+        catch (Exception e) when (e is not OperationCanceledException) { _log($"level lookup for {roleId} failed: {e.Message}"); }
+        return null;
+    }
+
     private async Task LeavePartyAsync(string why)
     {
         long leader = Interlocked.Exchange(ref _leader, 0);
-        if (leader == 0) return;
+        if (leader == 0 && _view.PartyGuids().Length == 0) return;
         _view.ForgetParty();
         _cantFollowMap = 0;
         _log($"leaving the party ({why})");
