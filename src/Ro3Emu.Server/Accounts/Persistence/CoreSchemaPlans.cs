@@ -65,6 +65,8 @@ internal sealed class RoleSchemaPlan : DbPlan
         SchemaSql.AddColumn(db, tx, "role", "guides", "BLOB");
         // Serialized romsg.DBEmojiPlayInfo (emote favourites, unlocks, idle emote; AUTO_SYNC 5006).
         SchemaSql.AddColumn(db, tx, "role", "emoji_play", "BLOB");
+        // 5044 profile cosmetics: owned config IDs and equipped selections.
+        SchemaSql.AddColumn(db, tx, "role", "social_outfit", "BLOB");
         // Serialized romsg.DBRoleAchievementInfo (achievement statuses, scores, reward/hint levels; AUTO_SYNC 5019)
         // and its server-only JSON runtime (AchievementService.RuntimeState: the login-day counter's last day).
         SchemaSql.AddColumn(db, tx, "role", "achievements", "BLOB");

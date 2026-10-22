@@ -23,7 +23,7 @@ public static partial class EconomySnapshotReader
         ["settings"] = BlobFormat.Protobuf, ["skill_plans"] = BlobFormat.Protobuf,
         ["tasks"] = BlobFormat.Protobuf, ["task_runtime"] = BlobFormat.Json,
         ["task_followup"] = BlobFormat.StringSet,
-        ["guides"] = BlobFormat.Protobuf, ["emoji_play"] = BlobFormat.Protobuf,
+        ["guides"] = BlobFormat.Protobuf, ["emoji_play"] = BlobFormat.Protobuf, ["social_outfit"] = BlobFormat.Protobuf,
         ["achievements"] = BlobFormat.Protobuf, ["achievement_runtime"] = BlobFormat.Json,
         ["adventure_group"] = BlobFormat.Protobuf, ["library"] = BlobFormat.Protobuf,
         ["card_plans"] = BlobFormat.Protobuf, ["shop"] = BlobFormat.Json,

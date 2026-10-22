@@ -170,7 +170,7 @@ public sealed partial class CharacterService
         if (!row.TryGetProperty("_iUseEffect", out var effects) || effects.ValueKind != JsonValueKind.Array
             || effects.GetArrayLength() != 1 || effects[0].ValueKind != JsonValueKind.Array
             || effects[0].GetArrayLength() == 0) return false;
-        return GameData.Number(effects[0][0]) is 200 or 201;
+        return GameData.Number(effects[0][0]) is 200 or 201 or 349;
     }
 
     private static bool HandlesLifeItem(JsonElement row)

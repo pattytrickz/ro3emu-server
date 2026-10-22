@@ -141,7 +141,7 @@ public static partial class EconomySnapshotReader
         private static readonly Dictionary<string, MessageDescriptor> ProtoDescriptors = new(StringComparer.Ordinal)
         {
             ["settings"] = DBSettingInfo.Descriptor, ["skill_plans"] = DBSkillData.Descriptor,
-            ["tasks"] = DBTaskInfo.Descriptor, ["guides"] = DBGuideInfo.Descriptor, ["emoji_play"] = DBEmojiPlayInfo.Descriptor,
+            ["tasks"] = DBTaskInfo.Descriptor, ["guides"] = DBGuideInfo.Descriptor, ["emoji_play"] = DBEmojiPlayInfo.Descriptor, ["social_outfit"] = DBSocialOutfit.Descriptor,
             ["achievements"] = DBRoleAchievementInfo.Descriptor, ["adventure_group"] = DBAdventureGroupRelationData.Descriptor,
             ["library"] = DBLibraryInfo.Descriptor, ["card_plans"] = DBStorageHoleInfo.Descriptor,
             ["trade_info"] = DBUserTradeInfo.Descriptor, ["stalls_info"] = DBStallsInfo.Descriptor,

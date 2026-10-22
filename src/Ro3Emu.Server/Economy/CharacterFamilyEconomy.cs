@@ -11,10 +11,12 @@ internal static class CharacterFamilyEconomy
     /// unlock and the _iAppearanceAwardId bonus goods commit together; only this shop command may write "wardrobe".
     /// A mount look also writes "mounts": its 5012 system-mount ownership (MountService.PlanShopGrant).</summary>
     internal const string ShopAppearanceKind = "cd13a/shop-appearance";
+    internal const string SocialOutfitItemKind = "cd13a/character-social-outfit";
 
     internal static IReadOnlySet<string> AllowedBlobs(string kind)
     {
-        string[] parts = kind == ShopAppearanceKind ? ["shop", "wardrobe", "mounts", "equip_plans"] : kind[6..].Split('-')[0] switch
+        string[] parts = kind == SocialOutfitItemKind ? ["social_outfit", "bag_state"]
+            : kind == ShopAppearanceKind ? ["shop", "wardrobe", "mounts", "equip_plans"] : kind[6..].Split('-')[0] switch
         {
             "character" => ["bag_state", "equip_plans", "stat_plans", "activity_runtime"],
             "equipment" => ["equip_levels", "equip_plans", "auto_decompose"],

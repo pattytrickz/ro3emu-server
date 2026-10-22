@@ -68,7 +68,7 @@ public sealed class S3EconomyDecoderTests
                 CREATE TABLE server_state(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 """);
             // Hand-authored E00 role blob inventory, based on CoreSchemaPlans rather than reader reflection.
-            foreach (string column in ("settings skill_plans tasks task_runtime task_followup guides emoji_play achievements achievement_runtime adventure_group library card_plans shop trade_info stalls_info " +
+            foreach (string column in ("settings skill_plans tasks task_runtime task_followup guides emoji_play social_outfit achievements achievement_runtime adventure_group library card_plans shop trade_info stalls_info " +
                 "auction guild_info guild_challenge pet_books daily new_activities activity_runtime timed_activity timed_battle " +
                 "training lottery tower wild_afk dungeons territory_escort lifejob life_restrict life_runtime season_talent " +
                 "season_page season_page_meta season_refine equip_levels equip_plans auto_decompose bag_state stat_plans " +

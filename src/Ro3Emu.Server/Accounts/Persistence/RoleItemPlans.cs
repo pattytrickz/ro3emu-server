@@ -572,7 +572,7 @@ internal static class RoleColumns
 {
     internal static readonly HashSet<string> Blobs = new(StringComparer.Ordinal)
     {
-        "settings", "guides", "emoji_play", "achievements", "achievement_runtime", "adventure_group", "library", "card_plans", "shop", "trade_info", "stalls_info", "daily",
+        "settings", "guides", "emoji_play", "social_outfit", "achievements", "achievement_runtime", "adventure_group", "library", "card_plans", "shop", "trade_info", "stalls_info", "daily",
         "new_activities", "activity_runtime", "timed_activity", "timed_battle", "training", "guild_challenge",
         "lottery", "tower", "dungeons", "territory_wars", "territory_escort", "lifejob", "life_restrict",
         "life_runtime", "season_talent", "season_page", "season_page_meta", "season_refine", "pets", "mounts",

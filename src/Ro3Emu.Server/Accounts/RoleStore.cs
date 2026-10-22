@@ -206,6 +206,8 @@ public sealed class RoleStore
 
     public byte[]? LoadGuides(long id) => LoadBlob(id, "guides");
     public byte[]? LoadEmojiPlay(long id) => LoadBlob(id, "emoji_play");
+    public byte[]? LoadSocialOutfit(long id) => LoadBlob(id, "social_outfit");
+    public void SaveSocialOutfit(long id, byte[] value) => SaveBlob(id, "social_outfit", value);
     public void SaveEmojiPlay(long id, byte[] value) => SaveBlob(id, "emoji_play", value);
     public byte[]? LoadAchievements(long id) => LoadBlob(id, "achievements");
     public void SaveAchievements(long id, byte[] value, RoleItemPlanBuilder? transaction = null) => SaveBlob(id, "achievements", value, transaction);

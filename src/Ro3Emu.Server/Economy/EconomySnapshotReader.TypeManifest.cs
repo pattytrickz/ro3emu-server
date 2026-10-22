@@ -38,7 +38,9 @@ public static partial class EconomySnapshotReader
     // granted by its own cd13e/monsterhunt-award receipt whose claimed marker is only that receipt's once-only source.
     // Growth classroom: TaskRuntimeState.GrowthRanksClaimed lists the claimed BecomeStrongerRankConfig ranks. No balance:
     // a rank's goods are granted by its own award receipt, which saves the claimed rank as its once-only marker.
-    public const string ExpectedFormatManifestHash = "2F4FCB0AB017CD7CE96C265ED0F25A02E4495A1E96FE772D5B90B13D7AF7EDC8";
+    // Social outfits: DBSocialOutfit contains cosmetic IDs, ownership statuses, timestamps and selected slots,
+    // not balances. Its permanent unlock consumes a voucher through cd13a/character-social-outfit atomically.
+    public const string ExpectedFormatManifestHash = "4E250FA84109637B8A1E2C86AABF3984528CECA5376BAD59C6B70404ADC10607";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State

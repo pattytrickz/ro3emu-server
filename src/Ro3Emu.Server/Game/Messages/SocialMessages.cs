@@ -5,7 +5,7 @@ using Romsg;
 namespace Ro3Emu.Server.Game;
 
 /// <summary>Chat, teams, friends, guilds and their caravan, challenge, campfire and home, emblems.</summary>
-public sealed class SocialMessages(ChatService chat, TeamService teams, EmblemService emblems, GuildService guilds, GuildCaravanService caravan, GuildChallengeService guildChallenge, FriendExtraService friendExtra, GuildCampfireService campfire, GuildHomeService guildHome, GuildHuntingService hunting) : Messaging.IMessageModule
+public sealed class SocialMessages(SocialOutfitService socialOutfits, ChatService chat, TeamService teams, EmblemService emblems, GuildService guilds, GuildCaravanService caravan, GuildChallengeService guildChallenge, FriendExtraService friendExtra, GuildCampfireService campfire, GuildHomeService guildHome, GuildHuntingService hunting) : Messaging.IMessageModule
 {
     private const uint SetFriendSystemMetadata = 82208, GetGuildLeagueMgrData = GuildLeagueService.MgrData;
 
@@ -24,6 +24,12 @@ public sealed class SocialMessages(ChatService chat, TeamService teams, EmblemSe
         routes.AdmitRole(id => id is >= 82422 and <= 82426); // emblems
         // Hunting Challenge history reads the settled week and answers its sender only.
         routes.AdmitRole(id => id is GuildHuntingService.History);
+
+        routes.AdmitRole(id => id is SocialOutfitService.Equip or SocialOutfitService.Refresh);
+        routes.Map(SocialOutfitService.Equip, "socialOutfit", async (session, _, body) =>
+            await socialOutfits.EquipAsync(session, EquipSocialOutfitReq.Parser.ParseFrom(body.Span)));
+        routes.Map(SocialOutfitService.Refresh, "socialOutfit", async (session, _, _) =>
+            await socialOutfits.RefreshAsync(session));
 
         // Not a guild-social owner: the default Realm reservation serializes the first entries of one guild, as 30400.
         routes.Map(GuildHomeService.EnterHome, "guildHome", async (session, msgId, body) =>

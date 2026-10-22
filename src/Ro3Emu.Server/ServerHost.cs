@@ -85,6 +85,7 @@ public static class ServerHost
         builder.Services.AddSingleton<GatheringService>();
         builder.Services.AddSingleton<GuideService>();
         builder.Services.AddSingleton<EmojiService>();
+        builder.Services.AddSingleton<SocialOutfitService>();
         builder.Services.AddSingleton<AchievementService>();
         builder.Services.AddSingleton<TeamService>();
         builder.Services.AddSingleton<MvpService>();
