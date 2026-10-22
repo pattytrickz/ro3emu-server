@@ -64,13 +64,16 @@ public sealed partial class CharacterService
         var before = JsonSerializer.Deserialize<DailyActivityService.DailyState>(previousDaily);
         var after = JsonSerializer.Deserialize<DailyActivityService.DailyState>(nextDaily);
         if (before?.Claims == null || after?.Claims == null || before.DailyEpoch != after.DailyEpoch ||
-            after.Claims.Except(before.Claims).ToArray() is not [int stage] ||
+            after.Claims.Except(before.Claims).Order().ToArray() is not { Length: > 0 } stages ||
             before.Claims.Except(after.Claims).Any() || questExp < 0 ||
             goods.Any(g => g.Count <= 0 || data.Row("ItemConfig", g.Entry) == null)) return false;
         var plan = new AwardPlan(0, 0, goods.Select(g => new AwardGrant(g.Entry, g.Count, g.Bind)));
+        // One stage (31178) or a batch (31175): the batch's source names all of its stages (upstream 733835d).
+        object outcome = stages is [int stage]
+            ? new { Version = 1, Stage = stage, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp }
+            : new { Version = 1, Stages = stages, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp };
         var source = new OwnedAwardSource("cd13e/daily-stage",
-            $"daily-stage/{session.Role!.Id}/{after.DailyEpoch}/{stage}",
-            new { Version = 1, Stage = stage, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp });
+            $"daily-stage/{session.Role!.Id}/{after.DailyEpoch}/{string.Join(",", stages)}", outcome);
         try
         {
             return await ApplyAwardAsync(session, plan, taskBaseExp: questExp,
@@ -93,13 +96,13 @@ public sealed partial class CharacterService
         byte[]? taskRuntimeState = null, int manifestType = 1, byte[]? expectedDaily = null,
         byte[]? nextDaily = null, byte[]? expectedTasks = null, Action<RoleItemPlanBuilder>? persist = null,
         bool stateLockHeld = false, Action? committed = null, EconomyMutation? familyEconomy = null,
-        OwnedAwardSource? ownedAward = null, bool suppressRewardNotice = false)
+        OwnedAwardSource? ownedAward = null, bool suppressRewardNotice = false, IReadOnlyList<int>? rewardIndexes = null)
     {
         using var _ = stateLockHeld ? null : await LockAsync(session);
         var context = RequireOwnedRole(session);
         return await ApplyAwardCoreAsync(session, context, plan, taskBaseExp, costs, deliveredTaskState,
             taskRuntimeState, manifestType, expectedDaily, nextDaily, expectedTasks, persist, committed,
-            familyEconomy, ownedAward, suppressRewardNotice);
+            familyEconomy, ownedAward, suppressRewardNotice, rewardIndexes);
     }
 
     /// <summary>Checked owned Core: stage copied award values, commit, apply before notices.</summary>
@@ -107,13 +110,16 @@ public sealed partial class CharacterService
         long taskBaseExp, IReadOnlyList<(int Entry, int Count)>? costs, byte[]? deliveredTaskState,
         byte[]? taskRuntimeState, int manifestType, byte[]? expectedDaily, byte[]? nextDaily,
         byte[]? expectedTasks, Action<RoleItemPlanBuilder>? persist, Action? committed,
-        EconomyMutation? familyEconomy, OwnedAwardSource? ownedAward, bool suppressRewardNotice)
+        EconomyMutation? familyEconomy, OwnedAwardSource? ownedAward, bool suppressRewardNotice,
+        IReadOnlyList<int>? rewardIndexes = null)
     {
         context.AssertRole(session.Role!.Id);
         context.BindPresentation(session);
         var attachment = session.Attachment;
         if (taskBaseExp < 0) throw new ArgumentOutOfRangeException(nameof(taskBaseExp));
-        if (manifestType is < 1 or > 19 or 15 or 18) throw new ArgumentOutOfRangeException(nameof(manifestType));
+        // 18 ManifestTypeRunRing is the wheel's notice: LC_DAL_Reward reads its rewardIndexes, so it needs them.
+        if (manifestType is < 1 or > 19 or 15 || manifestType == 18 && rewardIndexes is not { Count: > 0 })
+            throw new ArgumentOutOfRangeException(nameof(manifestType));
         if ((expectedDaily == null) != (nextDaily == null)) throw new ArgumentException("Daily award requires before and after state");
         if (expectedTasks != null && deliveredTaskState == null) throw new ArgumentException("Task comparison requires next task state");
         if (expectedDaily != null && (session.Daily == null
@@ -351,9 +357,11 @@ public sealed partial class CharacterService
                 foreach (var handler in ProgressHandlers) await handler(session);
             }
         }
-        if (!suppressRewardNotice && notification.Rewards.Count > 0)
+        // A wheel (rewardIndexes) waits for its notice to stop and unlock, even when nothing showable was granted.
+        if (!suppressRewardNotice && (notification.Rewards.Count > 0 || rewardIndexes is { Count: > 0 }))
         {
             notification.RewardType.Add(manifestType);
+            if (rewardIndexes != null) notification.RewardIndexes.Add(rewardIndexes);
             await session.SendGameAsync(GetRewardNotify, notification);
         }
         if (decomposed.DecomposeItemInfo.Count > 0)

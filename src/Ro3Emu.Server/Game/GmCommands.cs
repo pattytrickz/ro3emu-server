@@ -50,7 +50,7 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         var allowed = options.GmAccounts;
         if (loopbackTool && ToolAccount(options, account)) return true;
         if (allowed.Length == 0) return loopbackTool || options.GmOpenWhenEmpty != false;
-        return account != null && allowed.Contains(account, StringComparer.OrdinalIgnoreCase);
+        return account != null && allowed.Contains(account, StringComparer.Ordinal);
     }
 
     /// <summary>ServerOptions.GmToolAccounts: exact names, or prefixes written with a trailing *.</summary>

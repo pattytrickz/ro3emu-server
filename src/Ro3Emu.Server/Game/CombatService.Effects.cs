@@ -266,6 +266,15 @@ public sealed partial class CombatService
                 });
             }
             if (CurrentCaster() && hit.Dsts.Any(d => d.HitResult != DamageHitResult.Miss)) await buffs.RecoverEnergyOnHitAsync(s, row);
+            if (CurrentCaster() && field == null && BulletEffect(GameData.Int(row, "_iScriptShow")) is { } bullet)
+                foreach (var target in processed.Where(t => hit.Dsts.Any(d => d.DstID == t.Uid)))
+                    await SendSkillBulletAsync(s, new SkillFixTimeBulletNotify
+                    {
+                        SourceId = s.Role.Id, MasterId = s.Role.Id, TargetId = target.Uid, EffectId = bullet.Id,
+                        FixedTime = Math.Max(1, bullet.LifeMs), Split = Math.Max(1, hit.Split), SkillConfigId = action.Request.SkillId,
+                        SourcePosition = s.Position.Clone(), TargetPosition = new Vec3 { X = target.X, Y = target.Y, Z = target.Z },
+                        StartTimestampMs = Now,
+                    }, highLevel: GameData.Int(row, "_iSkillEffectLevel") > 0);
             var sourceViewers = CurrentCaster() ? world.Viewers(s).Append(s) : Enumerable.Empty<GameSession>();
             foreach (var viewer in processed.SelectMany(t => t.Viewers).Concat(sourceViewers).Distinct()) await viewer.SendGameAsync(SkillHit, hit);
             if (CurrentCaster() && field?.Trap == true)
