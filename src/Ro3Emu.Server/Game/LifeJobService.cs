@@ -73,6 +73,7 @@ public sealed partial class LifeJobService
         Reconcile(life, restriction, runtime);
         EnsureJobRows(life);
         NormalizeTitles(life);
+        UnlockEarnedCollections(s, life);
         restriction.RestrictCount[VigorId].LimitCount = VigorLimit(s, life);
         byte[] lifeBytesNext = life.ToByteArray(), restrictionBytesNext = restriction.ToByteArray(),
             runtimeBytesNext = JsonSerializer.SerializeToUtf8Bytes(runtime);
@@ -245,6 +246,7 @@ public sealed partial class LifeJobService
             // (inferred) Free, condition-zero gathering entries are the initial profession curriculum.
             foreach (var c in data.Table("LifeCollectionConfig").Values.Where(c => Current(c) && GameData.Int(c, "_iJobId") == job && GameData.Int(c, "_iCondition") == 0))
                 UnlockCollection(next, c);
+            UnlockEarnedCollections(s, next); // a profession learned again keeps the resources its level earned
             if (await CommitAsync(s, "cd13c/life-switch", next, s.Restrictions!.Clone(), Copy(s.LifeRuntime), cost, [],
                 result: new { Job = job, Slot = req.OpJobType }) == null)
                 error = character.ShortageOf(s, cost);
@@ -576,6 +578,44 @@ public sealed partial class LifeJobService
             && GameData.Int(row, "_iNextNeedExp") is var need and > 0 && info.JobExp >= need
             && functions.ConditionMet(s, GameData.Int(row, "_iCondition")))
         { info.JobExp -= need; info.JobLevel++; }
+        UnlockEarnedCollections(s, next);
+    }
+
+    /// <summary>
+    /// A gathering resource unlocks itself once its LifeCollectionConfig._iCondition holds. Every collection has
+    /// _iMapIds, and for those the client's Unlock button (UI_Sys_Life_ContentWidgetCtrl.OnClickUnlock) only walks to
+    /// the gathering area: it never sends StudyCollection, so Lv. 2 ore stayed locked at Mining 3 (#bug-reports
+    /// "Level 3 mining does not grant access to level 2 resources", "Cannot unlock Lv.2 Gardener"). The conditions are
+    /// the profession's own level (LC_ConditionList 11001 [job, 1, level]), read from <paramref name="next"/> so a
+    /// level gained by this very gather counts before it is committed.
+    /// </summary>
+    private void UnlockEarnedCollections(GameSession s, DBLifeJobInfo next)
+    {
+        foreach (var c in data.Table("LifeCollectionConfig").Values)
+        {
+            long job = GameData.Int(c, "_iJobId");
+            if (!Current(c) || !next.ActiveLifejob.Values.Contains(job) || !next.LifeJobInfoMap.TryGetValue(job, out var info)
+                || info.JobLevel <= 0 || info.GatherInfo.ItemDetails.ContainsKey(GameData.Int(c, "_iCollectionId"))
+                || !EarnedBy(s, next, GameData.Int(c, "_iCondition"))) continue;
+            UnlockCollection(next, c);
+        }
+    }
+
+    private bool EarnedBy(GameSession s, DBLifeJobInfo next, long conditionId)
+    {
+        if (conditionId == 0) return true;
+        if (data.Row("LC_ConditionList", conditionId) is not { } cond || !cond.TryGetProperty("m_kSubConditionList", out var subs)
+            || subs.ValueKind != JsonValueKind.Array) return functions.ConditionMet(s, conditionId);
+        var levels = new List<(long Job, long Level)>();
+        foreach (var sub in subs.EnumerateArray())
+        {
+            if (!sub.TryGetProperty("m_kData", out var d) || d.ValueKind != JsonValueKind.Array || d.GetArrayLength() < 3
+                || GameData.Number(d[0]) != 11001 || sub.TryGetProperty("m_bInverse", out var inverse) && inverse.ValueKind == JsonValueKind.True)
+                return functions.ConditionMet(s, conditionId);
+            levels.Add(((long)(GameData.Number(d[1]) ?? 0), (long)(GameData.Number(d[2]) ?? 0)));
+        }
+        return levels.All(l => next.ActiveLifejob.Values.Contains(l.Job) && next.LifeJobInfoMap.TryGetValue(l.Job, out var info)
+            && info.JobLevel >= l.Level);
     }
 
     private async Task OnLevelChangedAsync(GameSession s)
