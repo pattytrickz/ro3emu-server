@@ -444,6 +444,9 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         Assert.Equal(0, accepted.Result);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, x => x.SessionId == accepted.SessionId);
         Assert.Equal((long)bob.Self.Uuid, Assert.Single(hit.Dsts).DstID); Assert.Equal(DamageType.Heal, hit.Dsts[0].DamageType);
+        // Heal's show template has no damage effect. Do not substitute the normal attack's
+        // hit sound/flinch; its recovery presentation already comes from the cast template.
+        Assert.Equal(0, hit.ShowPoint);
         await Task.Delay(600);
         await Loop.InvokeAsync(() => Character.SetHpSpAsync(Session("alice"), null, 0));
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1400101 });
