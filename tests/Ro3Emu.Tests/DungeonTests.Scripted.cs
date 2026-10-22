@@ -65,11 +65,53 @@ public sealed partial class DungeonTests
             "the jump lands at point 21, the top of the passage");
         await ActorsIn(alice, 0); // nothing is shown now
 
+        var slide = await Next(alice, DungeonService.Event, DungeonEventNotify.Parser,
+            e => e.EventType == (DungeonEventType)6 && e.CliFuncname == "SetSlideMode");
+        Assert.Equal(1, Assert.Single(slide.Params[0].IntParams)); // Free view mode
+        Assert.True(Assert.Single(slide.Params[1].BoolParams));
+        Assert.Equal(10, Assert.Single(slide.Params[2].DoubleParams)); // client default forward speed
+        Assert.Equal(8, Assert.Single(slide.Params[3].DoubleParams)); // client default A/D speed
+
         await WalkInto(alice, map.Regions[22]); // the bottom of the passage
+        await Next(alice, DungeonService.Event, DungeonEventNotify.Parser,
+            e => e.EventType == (DungeonEventType)6 && e.CliFuncname == "SetSlideMode"
+                && !e.Params[1].BoolParams[0]);
         var result = await Next(alice, DungeonService.Result, DungeonResNotify.Parser);
         Assert.Equal((DungeonRes)1, result.Res);
         await StoryMovesOn(alice, 10104290, 10104300);
         Assert.DoesNotContain(Service<World>().AllUnits(), u => u.InstanceId == instance);
+    }
+
+    [ClientDataTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LeavingOrSurrenderingThePassageRestoresNormalMovement(bool surrender)
+    {
+        const long scene = 1000201;
+        await using var alice = await InWorld("Alice");
+        Assert.Equal(0, await Enter(alice, new EnterDungeonReq { SceneEntry = scene }));
+        await Load(alice, scene);
+        await Stage(alice, 1, quest: 1);
+        var map = Service<WorldData>().Map(scene)!;
+        await WalkInto(alice, map.Regions[25]);
+        await Stage(alice, 2, quest: 2);
+        var vortex = Assert.Single(await ActorsIn(alice, 1, a => a.NpcId == 5300030));
+        await Beside(alice, vortex.X, vortex.Y, vortex.Z);
+        Assert.Equal(0, await Interact(alice, vortex, 5300030));
+        await Stage(alice, 3, quest: 3);
+        await Next(alice, DungeonService.Event, DungeonEventNotify.Parser,
+            e => e.CliFuncname == "SetSlideMode" && e.Params[1].BoolParams[0]);
+
+        if (surrender)
+            await alice.SendGameAsync(DungeonService.ClientEvent, new ClientDungeonEvent { StrCmd = "DungeonGiveUp" });
+        else
+            await alice.SendGameAsync(DungeonService.Leave, new LeaveDungeonReq());
+        await Next(alice, DungeonService.Event, DungeonEventNotify.Parser,
+            e => e.CliFuncname == "SetSlideMode" && !e.Params[1].BoolParams[0]);
+        if (surrender)
+            Assert.NotEqual((DungeonRes)1, (await Next(alice, DungeonService.Result, DungeonResNotify.Parser)).Res);
+        else
+            Assert.Equal(0, (await Next(alice, DungeonService.Leave, LeaveDungeonRsp.Parser)).Result);
     }
 
     [ClientDataFact]

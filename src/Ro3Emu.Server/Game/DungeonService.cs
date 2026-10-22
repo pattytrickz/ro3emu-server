@@ -130,6 +130,7 @@ public sealed partial class DungeonService
         public bool Spawning { get; set; }
         /// <summary>The current scripted step got one of its completing client events (DungeonService.Scripted).</summary>
         public bool StepDone { get; set; }
+        public bool Sliding { get; set; }
         /// <summary>The last step moved the participants (TeleportAfter): the next step checks where they stand.</summary>
         public bool MovedByStep { get; set; }
         /// <summary>The scripted scene actors shown now (also tracked by the room for cleanup).</summary>
@@ -717,6 +718,7 @@ public sealed partial class DungeonService
         if (pending.TryGetValue(s, out var p)) await CancelAsync(p, ErrorCodes.MemberLeft, s.Role?.Id ?? 0);
         if (s.DungeonAttempt is not { } a) return;
         s.DungeonAttempt = null; s.Attack = null;
+        if (a.Sliding) await SendQuietAsync(s, Event, SlideMode(a, false));
         if (a.Dracula is { } dracula) await dracula.Owner.LeftAsync(a, s);
         await ClearBondsAsync(s, a);
         await instances.AbandonAsync(s);
@@ -757,6 +759,7 @@ public sealed partial class DungeonService
         await FreezeAsync(a, won);
         won = a.FrozenWin;
         a.Settled = true;
+        await SetSlideAsync(a, false);
         var participants = Present(a).Where(a.Loaded.Contains).Select(s => (Session: s, Role: s.Role!.Id)).ToArray();
         var notifications = new List<Func<Task>>();
         var auctionAwards = new List<ItemBaseInfo>();
