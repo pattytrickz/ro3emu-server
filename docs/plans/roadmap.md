@@ -51,7 +51,9 @@ live.
 | 1.8 | **Bot taper**: the bot runner keeps `max(0, target − real online)` bots in the world | `Ro3Emu.AiBots` | S |
 | 1.9 | Phase 1 cap set on live (≥ the top real player from 0.1); the cap schedule is published | config | S |
 | 1.10 | **Bring upstream `main` into the live line** (16 commits: Rift Crisis, Seven-Day Goal, Codex monster unlocks, profile likes, pet hatchery fixes, MVP summons, Guild League elites, award boxes). Expect conflicts where both lines built Growth Classroom. Release them as the Phase 2 and 3 content drops. | merge into `v1.0.0-fixes` on a `feat/` branch | M |
-| 1.11 | **🚀 Phase 2 launch: cap 80** (≈ Fri 27 Nov), with a Bonus Weekend via 1.4 and the first content drop from 1.10 | config + event | S |
+| 1.11 | **Party access for a small realm**: a house rule for the minimum party size of dungeons (e.g. 3 instead of 5; the `!dungeonsolo` test aid shows the path), monster HP scaled to the party if needed; AI players may fill a short dungeon party | `ServerOptions`, `DungeonService`, `Ro3Emu.AiBots` | M |
+| 1.12 | **Stall and trade-center sales tax** (a few %, removed from the economy) as the first Zeny sink | `StallsService`, trade center | S–M |
+| 1.13 | **🚀 Phase 2 launch: cap 80** (≈ Fri 27 Nov), with a Bonus Weekend via 1.4 and the first content drop from 1.10 | config + event | S |
 
 **Exit KPIs:** every Arena Night queue fires; D7 return ≥ 25 %; no more than 15 % of real players sit at the cap for
 more than 2 weeks before the next phase.
@@ -70,7 +72,10 @@ more than 2 weeks before the next phase.
 | 2.6 | **Economy sinks round 1**: a cosmetic Zeny shop rotation, guild donation goals (guild-wide cosmetic or buff), and World Auction Nights | M |
 | 2.7 | Catch-up EXP: +50 % for roles below the current cap minus 10 | S |
 | 2.8 | **🎄 Lutie Lights** (18 Dec – 3 Jan), with an advent login gift via 1.5; **🎆 New Year** countdown | S |
-| 2.9 | **🚀 Phase 3 launch: cap 90** (≈ Fri 8 Jan) together with balance patch #1 | S |
+| 2.9 | **🚀 Phase 3 launch: cap 90** (≈ Fri 8 Jan) together with balance patch #1; **🌱 Fresh Start Week** (11–17 Jan) | S |
+| 2.10 | **Party over auto**: bonus EXP for 3+ real players together on a map; auto-battle (`session.AutoBattle`) stays on the budgeted Bonus Time | S–M |
+| 2.11 | **Event spawn command**: many weak monsters on a field, or a chosen monster at the GM's position (Poring Pop, Novice Survival) | M |
+| 2.12 | **Pity counter for rare drops**: after N kills without the rare drop, its chance rises step by step | M |
 
 **Exit KPIs:** D30 return ≥ 10 %; weekly active / monthly active ≥ 50 %; Zeny sunk ≥ 70 % of minted; at least 4
 guilds active in guild content each week.
@@ -88,6 +93,8 @@ guilds active in guild content each week.
 | 3.5 | **💘 Valentine's** (12–16 Feb) with the built-in Wedding Crashers | S |
 | 3.6 | **🚀 Phase 4 launch: cap 99** (≈ Fri 19 Feb) and the "first 99 per class" hall of fame | S |
 | 3.7 | **🏆 Season 1 finale** (March): final ladders, rewards granted, Season 2 preview and survey #2 | S |
+| 3.8 | **GvG balance**: tiered limits on game-deciding items in Territory Wars (NovaRO-style, set with the player council); daily castle rewards for the holder, with diminishing returns for long holds | M |
+| 3.9 | **Duel ladder**: 1v1 and 2v2 ratings and a monthly tournament | M |
 
 ---
 
@@ -98,7 +105,7 @@ guilds active in guild content each week.
 | 4.1 | **Optional fresh-start realm**, OSRS Leagues / PoE league style: a second `DataDir`/cluster for 8–10 weeks with its own rules (for example faster rates or a race to 99). Cosmetic rewards carry back to the main realm; the main realm is **never** wiped | L |
 | 4.2 | **Bar (tavern)**: still unimplemented (README "Not yet"), and a social hub that helps retention | L |
 | 4.3 | Season 2 theme and phases (if the main realm is capped at 99: new cosmetic tracks, Codex goals, guild progression and harder MVP variants instead of a higher cap) | M–L |
-| 4.4 | **Recruitment push** before the official RO3 launch (expected 2027): RateMyServer and top-list listings, a "why play here" page (free, fair, community-run, no pay-to-win), and outreach to players from the closed official services (RO Brazil, Prime EU) | S–M |
+| 4.4 | **Recruitment push** before the official RO3 launch (expected 2027): RateMyServer and top-list listings, a "why play here" page (free, fair, community-run, no pay-to-win), and outreach to players from the closed official services (RO Brazil, Prime EU). Target **EU players**: the official RO3 excludes them, and Reddit commenters say they'll go private because of it. On r/RagnarokOnline, post as a person, not an ad: threads that read as ads or AI text get dismissed. Server lists that track non-predatory servers are worth submitting to | S–M |
 
 ---
 
@@ -113,6 +120,8 @@ guilds active in guild content each week.
 | Economy inflation | The ×10 budget (1.3), weekly mint/sink numbers (1.7), sinks (2.6), auctions |
 | Legal pressure on RO private servers ([Massively OP](https://massivelyop.com/?p=386938)) | Keep the realm non-commercial in spirit: no money for power, Supporter rewards cosmetic only, and no game files hosted (the launcher already downloads them from the publisher) |
 | The official RO3 launch pulls players away (2027) | Build the community and guild bonds first; be the free, fair alternative to a monetised official launch |
+| Other RO3 private servers open (at least one is monetising heavily, per Reddit) | Compete on fairness, stability and community, not on rates or freebies |
+| Players reject autoplay-heavy play | Party bonuses (2.10), budgeted Bonus Time (1.3), and rewards concentrated in social content |
 
 ## The weekly operating loop
 

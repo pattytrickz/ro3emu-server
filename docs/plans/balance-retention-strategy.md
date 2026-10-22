@@ -1,7 +1,9 @@
 # Sol RO3: balance and retention strategy
 
-*Written 22 Oct 2026, about a week after the realm opened. It is based on the live branch `v1.0.0-fixes` and on
-outside research (sources at the end). Companion plans: [events](events-plan.md) · [roadmap](roadmap.md).*
+*Written 22 Oct 2026, about a week after the realm opened. It is based on the live branch `v1.0.0-fixes`, on outside
+research, and on about 45 Reddit threads from r/RagnarokOnline, r/RagnarokOnline3 and r/MMORPG (2022–Oct 2026),
+including the thread about this emulator itself (sources at the end). Companion plans: [events](events-plan.md) ·
+[roadmap](roadmap.md).*
 
 ## In one paragraph
 
@@ -14,6 +16,12 @@ rush to cap, nothing left to do, low population, inactive staff, players leave. 
 start and adds back **a pacing spine** (phased caps and a budgeted Bonus Time), **a reason to log in each week**
 (scheduled guild and PvP nights sized for our population), **a cosmetic and social endgame** that never runs out,
 and **visible, regular staff activity**.
+
+Reddit adds one big point: **RO players want "RO3 without the cash grab"**. When this emulator went public, the
+thread got 220 upvotes, and the top reply was "So the community can fix this cashgrab and make a real game?"
+Players don't object to RO3's graphics or world. They object to pay-to-win, combat power, card-pack gacha, and
+autoplay that plays the game for you. Our pitch is the fair, social version of RO3. The balance work should make
+**playing together worth more than AFK auto-hunting**.
 
 ---
 
@@ -118,14 +126,55 @@ These are mobile numbers. An MMO community should be judged on day 30 and beyond
 Reasons people gave for quitting their last MMO (a reader poll): poor design 10 %, no fulfilling endgame 10 %,
 pay-to-win 13 %, toxic community 8 % ([Massively OP](https://massivelyop.com/2016/11/13/leaderboard-what-made-you-quit-your-last-mmorpg/)).
 
-> **Research gap:** Reddit (r/RagnarokOnline, r/RagnarokMobile, r/PrivateServers) blocks access from the
-> environment this plan was written in, and search engines index it poorly. The forum evidence above comes from
-> rAthena, RateMyServer, Steam and Massively OP. Before Phase 2, ask the Discord community directly
-> ([events plan §6](events-plan.md#6-community-and-discord)). It is the most relevant "forum" we have.
+### What Reddit says
+
+Read through the Arctic Shift Reddit archive (Reddit blocks cloud IPs directly). Upvote counts are shown where they
+indicate how widely a view is shared. Links are in the sources.
+
+**About RO3 itself** (most relevant to us)
+
+| Finding | Evidence |
+|---|---|
+| There's real demand for a fair RO3 private server | The thread on this emulator: 220 upvotes. "So the community can fix this Cashgrab, and make a real game?" (87). "If official servers don't allow EU players, I'm playing on a private server" (13). Others: "i hope they release it soon, that way ill be able to pick a private server that actually makes their game good." |
+| Other RO3 private servers are monetising heavily | "There's a pServer releasing this Friday of RO3 and they not only didn't remove the monetization, they doubled up on it" (53) |
+| Autoplay and auto-walk are the main gameplay complaint | "You have to do 10 daily quests, but the game does them for you… then you have stamina to make your character autohunt… basically cookie clicker" ([Thoughts on RO3](https://www.reddit.com/r/RagnarokOnline/comments/1vqt82e/), 159). "Imagine… not knowing the names of the cities… That's what autoplay does" ([Feelings about Ragnarok 3](https://www.reddit.com/r/RagnarokOnline/comments/1w4clc3/)). A minority view: older players with little time like auto for low-level grinding |
+| Small groups get locked out of dungeons | "All the dungeons require 5 to 10 player party, so if you don't make friends you're shit out of luck" (12). "There's a 'match making' button in RO3 but it literally never works… you have to 'apply' to [parties]… they ignore" |
+| PvP and stats feel off | "Pvp modes are an unbalanced mess… a bad version of [MOBAs]" (9). "The stats are a lie… no actual breakpoints" |
+| Pay-to-win is the expectation to beat | "RO3 is P2W and we can't do anything about it" (117 / 94 comments). "Ragnarok 3 is complete garbage" (144). Combat power and card packs are read as P2W signs ([reel thread](https://www.reddit.com/r/RagnarokOnline/comments/1iusmr1/)) |
+| WoE is the bright spot | "The WoE footage out of RO3 is genuinely great, and honestly that makes the rest of it sadder." |
+| Official Ragnarok Zero Global (2026) shows what drives people away | Cash ores within a month ([44](https://www.reddit.com/r/RagnarokOnline/comments/1w67wcv/)); "Uninstalled… save your money" (117 / 85 comments); paid EXP buffs and death-penalty protection; a level-60 wall; "no party play at all… Auto Hunt does suck and ruin everything" |
+
+**About RO private servers in general**
+
+| Finding | Evidence |
+|---|---|
+| Too-fast rates kill parties and then the server | "50/50/50 is pretty much instant level which obliterates parties"; "if the server doesn't have the population it usually dies off fast due to boredom. 10x or 15x… the better middle ground" ([rates thread](https://www.reddit.com/r/RagnarokOnline/comments/1u78smd/)). "5x… everyone levels in comodo and quits after a week" ([what makes a successful server](https://www.reddit.com/r/RagnarokOnline/comments/1l9hpqb/)) |
+| The journey is the point | "Because the journey gives meaning to the goal. Killing an MvP with your guild after months of effort? You'll never forget." (25, [low rates thread](https://www.reddit.com/r/RagnarokOnline/comments/1jz5djv/)). "Progression is too fast, it's not satisfying" (about uaRO) |
+| What makes a server successful | "The server owner not needing your money" (17); "all equipment can be achieved in game via farming… instead of gacha" (16); "A community…" (15). Payon Stories is the most-recommended server: "best community and helpful GMs", donation-free |
+| How players spot a dead server | "When you go to the main city and there aren't any people selling/buying stuff" (7); level parties scarce, MVP hunting stale, no WoE; "when new players are significantly disadvantaged relative to early adopters" ([dead server thread](https://www.reddit.com/r/RagnarokOnline/comments/1ekol34/)) |
+| Inflation arrives fast without sinks | "Crazy inflation… in a span of two months… huge incentives to farm zennies and the lack of sinking mechanism." Suggested fixes: tax vending/autotrade; *affordable* stat/skill resets (expensive ones go unused); costly, non-guaranteed card removal; Zeny-cost random enchant rerolls ([inflation thread](https://www.reddit.com/r/RagnarokOnline/comments/1tfx1jd/)) |
+| Seasonal wipes are divisive | "It burns out players… People won't be motivated to start 2 months late." A success case: ccRO, where card collection unlocks **permanent account rewards that survive the wipe**. "PoE's reset isn't the mechanic, the league is… a plain wipe just asks you to redo work" ([reset thread](https://www.reddit.com/r/RagnarokOnline/comments/1vlhwn9/)) |
+| Players take breaks rather than quit | "Nobody truly quits. You just take extended breaks." (57). "Xmas season is the best to play the game" ([quit thread](https://www.reddit.com/r/RagnarokOnline/comments/1het4z9/)) |
+| What makes WoE fun, and what kills it | "The feeling of being an important part of a complex machine… the pre and post woe administration… visiting 'your' treasure room once per day" (26, [WoE thread](https://www.reddit.com/r/RagnarokOnline/comments/1sblgyk/)). It dies when one guild dominates, rewards are useless, or rare power items decide fights. NovaRO's fix: tiered limits on MVP cards in WoE ([MVP cards thread](https://www.reddit.com/r/RagnarokOnline/comments/1rxu2ou/)) |
+| What open-world PvP still works | 2v2 and 3v3 duels; PK on MVP maps "was actually pretty fun for a while" ([PvP thread](https://www.reddit.com/r/RagnarokOnline/comments/ruusk2/)) |
+| AI and fake players: wanted for atmosphere, distrusted in counts | An AI "population engine" pack got 73 upvotes: "one of [the game's] major flaws nowadays is the lack of players… that nostalgia hit of going to culvert at level 12 and seeing 100 other players." But on headcounts: "Uaro rewards you for being afk, so the numbers are inflated" |
+| The cozy social town is the memory | "Just chilling somewhere in prontera… Then someone accidentally summoning an MVP, and all hell breaks loose" (66, [cozy thread](https://www.reddit.com/r/RagnarokOnline/comments/1c1ecvj/)) |
+| Readers spot AI-written posts and punish them | A server owner's post was dismissed with "The AI text though" (19) and "Can't be bothered to write his own post means I can't be bothered to try his… server" ([1v4vwze](https://www.reddit.com/r/RagnarokOnline/comments/1v4vwze/)) |
+| Monetising a private server attracts Gravity | "The issue of a monthly subscription private server is that it will easily be a target to Gravity to shut down" ([subscription thread](https://www.reddit.com/r/RagnarokOnline/comments/1x6d72f/)) |
+
+**r/MMORPG on catch-up and chores:** catch-up gear drives many players away ("Makes me quit faster", 16, [catch-up
+thread](https://www.reddit.com/r/MMORPG/comments/1nrgvvh/)). "The easier things are to do, the more of a chore they
+feel like" ([theme park thread](https://www.reddit.com/r/MMORPG/comments/1u3we09/)). And "the worst way to experience
+a MMO as a beginner is to rush so you can catch up with your veteran friends" (340,
+[1awrfrz](https://www.reddit.com/r/MMORPG/comments/1awrfrz/)). That last one argues for ways veterans can play
+*with* newcomers, not just faster levelling for the newcomers.
+
+The 30-day Discord survey ([events plan §6](events-plan.md#6-community-and-discord)) is still worth running. Reddit
+tells us what RO players in general want; the survey tells us what *our* players want.
 
 ---
 
-## 3. Strategy: nine principles
+## 3. Strategy: twelve principles
 
 ### 3.1 Pace the runway with a published schedule
 Add back a **phased level cap** that rises on dates everyone can see, like WoW SoD or RO episodes. Each phase opens
@@ -181,6 +230,34 @@ headcounts ([builtbybit thread](https://builtbybit.com/threads/fake-players.6854
 - Shrink the bot count as real population grows. Keep bots where they help (empty levelling fields, party fill for
   dungeons), not in PvP, guild ranks or the economy.
 
+Reddit matches this: players like AI players for atmosphere ("seeing 100 other players" at a levelling spot), but
+they call out servers whose AFK or bot counts inflate their numbers.
+
+### 3.10 Playing together must beat AFK auto-hunting
+RO3's autoplay, auto-walk and stamina-based auto-hunt are the biggest complaint about the official game. We can't
+remove them (the client is the client), and some players with little time want them. But the rewards can lean
+toward active, social play:
+- Auto-battle (`session.AutoBattle`, which the server already tracks) stays on the budgeted Bonus Time.
+- **Party play earns more than solo auto:** for example +25 % EXP for 3+ real players on the same map, on top of the
+  existing party share.
+- MVPs, guild content, WoE and events (the things people remember) give the best rewards, not AFK time.
+
+### 3.11 A small population must still be able to party
+"All the dungeons require 5 to 10 player party" and "match making… literally never works" are two of RO3's most
+upvoted complaints. On a young realm they are worse. So:
+- Add a house rule for dungeon minimum party sizes (the `!dungeonsolo` test aid shows the path), for example 3 instead of
+  5. Scale monster HP to the party size if needed.
+- Let the AI players fill a dungeon party when a real party is short (they already join real players' parties).
+- Use a Discord `#party-finder` with a "LFG" ping role, and a fixed weekly Party Night.
+
+### 3.12 Our identity: the fair RO3
+Gravity's official RO3 and at least one other RO3 private server sell power. We don't. Say so everywhere, and keep
+it true:
+- No Crystals, ores, EXP or death protection for money. Supporter rewards stay cosmetic.
+- Write public posts (Reddit, Discord, patch notes) in a human voice. The bug automation's drafts are a starting
+  point, but an owner should edit them before they go out. Reddit readers dismiss posts that read as AI-written.
+- Stay non-commercial in spirit. A subscription or power shop is exactly what draws Gravity's lawyers.
+
 ---
 
 ## 4. Balance plan by area
@@ -194,6 +271,17 @@ headcounts ([builtbybit thread](https://builtbybit.com/threads/fake-players.6854
 | Base 40, first job change | Day 2–3 | Day 1–2 |
 | Base 70 | Week 3–4 | Probably week 1–2 |
 | Base 99 | Week 10–12 (end of Phase 4) | Probably weeks 3–5 |
+
+**Cap or slower EXP? Use a cap.**
+- Cutting the EXP rate after launch feels like a bait and switch on a server whose rates were the selling point. It
+  hurts casual players and alts most, and the most dedicated players still reach the top in weeks.
+- A rising cap keeps everyone **near the same level** (good for parties, guilds and WoE, which a small population
+  can't afford to split) and turns each raise into an event.
+- It's also RO3's own design (the client still shows the cap line), and it fits the Reddit view that 50× "obliterates
+  parties" while the journey "gives meaning to the goal".
+- But a cap doesn't stop the ×10 **loot**, so budget the ×10 table above level ~50 as well (step 2 below).
+- Check the level histogram first (roadmap 0.1). If most real players are already near 99, a cap changes nothing,
+  and the effort goes into endgame content and events instead.
 
 **Mechanism (recommended):**
 1. **`LevelCapPhases` house rule.** A list of `{date, cap}`. EXP past the cap is banked as Bonus Time credit or
@@ -213,7 +301,14 @@ headcounts ([builtbybit thread](https://builtbybit.com/threads/fake-players.6854
   Crystals minted and spent; the stall/trade price index of 10 staple items (Oridecon, Elunium, potions, popular
   cards).
 - **Sinks to add as needed:** a cosmetic Zeny shop rotation, guild donation goals that unlock guild-wide buffs or
-  cosmetics, a Zeny fee on refine safety, and event entry tokens bought with Zeny.
+  cosmetics, a Zeny fee on refine safety, and event entry tokens bought with Zeny. Reddit's suggestions on top of
+  those: a small **tax on stall and trade-center sales** (taken out of the economy, not given to anyone), stat and
+  skill resets **priced low enough that people use them**, card removal that costs Zeny and can fail, and Zeny-cost
+  random enchant rerolls.
+- **Keep the town market alive.** A Prontera full of stalls is what players read as "this server is alive". Make
+  stalls easy, put a stall area near the Kafra, and post a weekly "market report" on Discord.
+- **Rare drops: consider a pity counter.** After N kills of the same monster without its rare drop, the chance
+  rises step by step. Grinding stays meaningful without days of bad luck ([rates thread](https://www.reddit.com/r/RagnarokOnline/comments/1u78smd/)).
 - **Crystal model.** Watch how many weeks a typical player needs for one cosmetic set (≈450 Crystals). Aim for
   2–3 weeks of normal play. If it's faster, Crystals have lost their value; if it's slower, the reward feels out of
   reach.
@@ -240,6 +335,14 @@ headcounts ([builtbybit thread](https://builtbybit.com/threads/fake-players.6854
 - A fixed weekly "war night" in the realm's prime time (see the [events plan](events-plan.md)).
 - Rewards for showing up (a participation award, Competition Medals), plus bigger rewards for the winners, so small
   guilds keep coming.
+- **Castle rewards that matter**, paid daily to the holder (WoE players remember "visiting your treasure room once
+  per day"). Use **diminishing returns for long holds**, so one guild can't snowball forever.
+- **Limit game-deciding items in GvG.** Copy NovaRO's tiered limits on MVP cards: at most N tier-1 power items per
+  guild in Territory Wars, decided with the player council.
+- **Brackets when there are enough guilds:** for example a "below 80" war bracket, so new guilds have a war they can
+  win.
+- **Small-format PvP that needs no population:** a 2v2 and 3v3 duel ladder and a monthly duel tournament. Reddit
+  says these are the PvP formats in RO that still work.
 
 ### 4.5 MVPs and bosses
 - Keep the Crystals for the first MVPs of the day. They reward showing up without encouraging an all-day farm.
@@ -279,6 +382,8 @@ The roadmap adds a small admin report (`/ro3emu/stats` or a weekly Discord post)
 5. **Seasons.** Call Phases 1–4 "Season 1" with an end-of-season cosmetic reward (recommended)? Plan an optional
    fresh-start realm for Q2 2027?
 6. **Bot policy.** Approve the taper formula and "never count bots" rule.
+7. **Party over auto.** A bonus for 3+ real players together (§3.10)? A smaller dungeon minimum party size (§3.11)?
+8. **GvG limits.** Tiered limits on power items in Territory Wars, and a stall/trade tax as a Zeny sink?
 
 ---
 
@@ -299,6 +404,39 @@ RO community and private servers: [rAthena: What make you leave a private server
 [TecMundo: RO Brazil closing](https://www.tecmundo.com.br/voxel/504158-servidor-de-ragnarok-online-brasil-sera-desativado-apos-mais-de-20-anos.htm) ·
 [ruRO wiki: Prime EU closing](https://www.rurowiki.ru/news/show/2545/) ·
 [Massively OP: Gravity and private servers](https://massivelyop.com/?p=386938)
+
+Reddit (read through the [Arctic Shift](https://arctic-shift.photon-reddit.com/) archive):
+[open-source RO3 emulator](https://www.reddit.com/r/RagnarokOnline/comments/1x4yowq/) ·
+[Thoughts on RO3](https://www.reddit.com/r/RagnarokOnline/comments/1vqt82e/) ·
+[Feelings about Ragnarok 3](https://www.reddit.com/r/RagnarokOnline/comments/1w4clc3/) ·
+[RO3 PC suggestions thread](https://www.reddit.com/r/RagnarokOnline/comments/1iq3d7a/) ·
+[RO3 is P2W](https://www.reddit.com/r/RagnarokOnline/comments/1mj4r6q/) ·
+[RO3 producer on P2W](https://www.reddit.com/r/RagnarokOnline/comments/1n84p3l/) ·
+[RO3 combat power reel](https://www.reddit.com/r/RagnarokOnline/comments/1iusmr1/) ·
+[Point of autoplay in RO3](https://www.reddit.com/r/RagnarokOnline/comments/1mobq8r/) ·
+[RO Zero Global P2W ores](https://www.reddit.com/r/RagnarokOnline/comments/1w67wcv/) ·
+[Uninstalled RO Zero Global](https://www.reddit.com/r/RagnarokOnline/comments/1wt9t2r/) ·
+[What makes a successful server](https://www.reddit.com/r/RagnarokOnline/comments/1l9hpqb/) ·
+[What makes you play a server](https://www.reddit.com/r/RagnarokOnline/comments/1seyrij/) ·
+[Rates preference](https://www.reddit.com/r/RagnarokOnline/comments/1u78smd/) ·
+[Why play low rates](https://www.reddit.com/r/RagnarokOnline/comments/1jz5djv/) ·
+[When is a server dead](https://www.reddit.com/r/RagnarokOnline/comments/1ekol34/) ·
+[Inflation in private servers](https://www.reddit.com/r/RagnarokOnline/comments/1tfx1jd/) ·
+[Seasonal server resets](https://www.reddit.com/r/RagnarokOnline/comments/1vlhwn9/) ·
+[Why did you quit RO](https://www.reddit.com/r/RagnarokOnline/comments/1het4z9/) ·
+[What made WoE fun](https://www.reddit.com/r/RagnarokOnline/comments/1sblgyk/) ·
+[MVP cards ruining WoE](https://www.reddit.com/r/RagnarokOnline/comments/1rxu2ou/) ·
+[Why PvP is dead](https://www.reddit.com/r/RagnarokOnline/comments/ruusk2/) ·
+[GM event ideas](https://www.reddit.com/r/RagnarokOnline/comments/1sn1qfg/) ·
+[AI population engine](https://www.reddit.com/r/RagnarokOnline/comments/1x7zncp/) ·
+[Subscription private server](https://www.reddit.com/r/RagnarokOnline/comments/1x6d72f/) ·
+[Cozy MMOs](https://www.reddit.com/r/RagnarokOnline/comments/1c1ecvj/) ·
+[Building a private server](https://www.reddit.com/r/RagnarokOnline/comments/1v4vwze/) ·
+[Low-rate PvE/party servers](https://www.reddit.com/r/RagnarokOnline/comments/1slogf4/) ·
+[Farmable premium currency](https://www.reddit.com/r/RagnarokOnline/comments/1tmrf9q/) ·
+[r/MMORPG: catch-up mechanics](https://www.reddit.com/r/MMORPG/comments/1nrgvvh/) ·
+[r/MMORPG: theme park retention](https://www.reddit.com/r/MMORPG/comments/1u3we09/) ·
+[r/MMORPG: rushing to catch up](https://www.reddit.com/r/MMORPG/comments/1awrfrz/)
 
 Other MMOs and retention: [WoW SoD wiki](https://warcraft.wiki.gg/wiki/Season_of_Discovery) ·
 [Warcraft Tavern: SoD phases](https://www.warcrafttavern.com/wow-classic-sod/guides/phases/) ·

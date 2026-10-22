@@ -35,7 +35,7 @@ population turns up together, and adds a GM layer on top.
 | **Tuesday** | MVP Hunt | 2–3 MVPs announced 15 minutes ahead in one area; the top contributors get shout-outs | `!mvp spawn`, `!announce` |
 | **Wednesday** | Arena Night | Survivor Battle and Dragon Coffin Island queues at a fixed hour (needs the small-population match sizes, roadmap P1) | Built-in + house rule |
 | **Thursday** | Community Night | GM event from the rotation in §3 (Find the GM, trivia, treasure hunt, fashion show) | `!warp`, `!jump`, `!announce` |
-| **Friday** | Social / Screens | Screenshot or fashion theme of the week on Discord; party-finder push for dungeons | Discord |
+| **Friday** | Party Night | A `#party-finder` LFG ping at a fixed hour; GMs and volunteers fill dungeon parties so nobody is left out (RO3's "5–10 player dungeons" are its most-cited barrier); a screenshot theme of the week on Discord | Discord; smaller party minimum (roadmap 1.11) |
 | **Saturday** | War Night | Territory Wars on its 14-day cycle; on the other Saturdays, Guild League or a guild-vs-guild scrim | Built-in |
 | **Sunday** | Bonus Sunday | A Bonus Time / EXP window (once the event-rate tool is in, roadmap P1); the weekly recap and patch notes | Tooling |
 
@@ -59,9 +59,15 @@ shout-out.
 | **World Auction Night** | `!worldauction open <items>` with cosmetic or limited items. **This doubles as a Zeny sink.** | Bidders pay Zeny |
 | **Guild Boss Rush** | Guilds sign up, the GM spawns one MVP per guild in turn, and the fastest kill wins (timed on stream or Discord). | A guild cosmetic or a guild-wide consumable pack |
 | **Build Contest** | Players post a build or guide in `#builds-and-guides`; the community votes; the winner is pinned. | Consumables + recognition |
+| **Pet Fashion Show** *(from Reddit)* | Bring your pet to Prontera; themes like "smallest pet" or "best pet + outfit combo"; Discord vote | A pet cosmetic or treats |
+| **Novice Survival** *(from Reddit, "my favorite")* | Everyone makes a fresh level 1 character with nothing. They meet in a small field, the GM spawns something deadly, and the last novice standing wins. Needs one test run to pick a map and a monster that `!mvp spawn` can place | A cosmetic for the winner and the last 3 |
+| **Roleplay Quest** *(from Reddit)* | The GM plays an NPC with a story ("the Payon orphanage needs repairs, gather materials"), the players collect items, and they hand them in by trade. Improvised, D&D style | Zeny + a title shout-out |
+| **Town Chill Night** *(from Reddit)* | A tea party in Prontera: sit, emote, chat, and take a group photo, with a surprise MVP spawn mid-way ("someone accidentally summoning an MVP, and all hell breaks loose" is the most-upvoted RO memory in the cozy thread) | The MVP's drops |
+| **Duel Tournament** | A monthly 1v1 and 2v2 bracket on a PvP map, run on Discord. Small-format PvP is the kind that still works in RO | A title, Competition Medals |
+| **Poring Pop** *(from Reddit; needs the spawn tool, roadmap 2.11)* | The GM floods a field with weak monsters; a few marked ones drop the prize | Whatever is inside |
 
-Rotate these on Community Night: weeks 1–4 = Find the GM → Trivia → Treasure Hunt → Fashion Show, then repeat with
-substitutions.
+Rotate these on Community Night: weeks 1–4 = Find the GM → Trivia → Treasure Hunt → Fashion Show, weeks 5–8 = Novice
+Survival → Pet Fashion Show → Roleplay Quest → Town Chill Night, then repeat with substitutions.
 
 ---
 
@@ -75,9 +81,10 @@ beats. Holiday events sit in between, so there's a reason to log in every 2–3 
 | **Fri 30 Oct – Sun 8 Nov 2026** | 🎃 **Night of the Pumpkin** (Halloween) | Nightly MVP Invasion on a dark map; Find the GM in costume; a costume Fashion Show (Sat 31 Oct); a pumpkin-themed treasure hunt | Today's GM tools only. Announce by 26 Oct |
 | **≈ Tue 17 Nov** | 🎂 **One-month realm anniversary** | A thank-you post with player stats (top guild, MVP slayer, most popular class) and a group photo in Prontera | Stats query |
 | **≈ Fri 27 – Sun 29 Nov** | 🚀 **Phase 2 launch: cap 80** | Phase 2 patch notes; a Bonus Weekend (EXP window); a "first to 80 by job" race, posted on Discord | `LevelCapPhases`, event rates (P1) |
-| **Fri 18 Dec – Sun 3 Jan** | 🎄 **Lutie Lights** (Winter; RO1's Christmas town) | A daily advent gift for 12 days (login gift tool); "Santa" MVP Invasions; a gift-exchange week (players mail each other); a Winter Fashion Show | Gift tool (P1) |
+| **Fri 18 Dec – Sun 3 Jan** | 🎄 **Lutie Lights** (Winter; RO1's Christmas town). This is the biggest event of the season: "Xmas season is the best to play the game" is a common RO nostalgia line | A daily advent gift for 12 days (login gift tool); "Santa" MVP Invasions; a gift-exchange week (players mail each other); a Winter Fashion Show | Gift tool (P1) |
 | **Thu 31 Dec** | 🎆 **New Year countdown** | Meet in Prontera; countdown via `!announce`; a fireworks emote group photo; the year's patch notes recap | GM tools |
 | **≈ Fri 8 – Sun 10 Jan 2027** | 🚀 **Phase 3 launch: cap 90** | The first balance patch from the Training Ground data; a Bonus Weekend; a Guild League season kick-off | P2 items |
+| **Mon 11 – Sun 17 Jan 2027** | 🌱 **Fresh Start Week** | Everyone (veterans too) makes a new character and races to the Base 40 job change, with bonus EXP for parties that mix new and old players, and prizes for the first of each class. Veterans and newcomers play the same content side by side, which is the "league" feeling without a wipe. Repeat once per phase | Event rates (P1) |
 | **Sat 6 – Sun 21 Feb 2027** | 🧧 **Lunar New Year** | Red envelopes: players gift Zeny to guildmates (social + sink with a fee); lucky draw tickets from dailies; a lion-dance group photo | Event token / draw (P2) |
 | **Fri 12 – Tue 16 Feb** | 💘 **Valentine's** | A Wedding Crashers weekend; duo MVP hunts; a couples' Fashion Show | Built-in Wedding Crashers |
 | **≈ Fri 19 Feb** | 🚀 **Phase 4 launch: cap 99** | The final cap; endgame guild content in focus; a "first 99 per class" hall of fame | P2 |
@@ -99,6 +106,8 @@ optional fresh-start seasonal realm (see roadmap P4). The 🎂 **one-year annive
   cosmetic and Bonus Time credit.
 
 ### Returners (14 or 30 days away)
+RO players "don't quit, they take extended breaks" (57 upvotes on r/RagnarokOnline), so expect returners and make
+their way back easy.
 - A **welcome-back kit** on login: Bonus Time credit, a consumable pack, a returner cosmetic, and a "what changed
   while you were away" mail linking the patch notes (Black Desert-style comeback kit).
 - Catch-up EXP for levels below the current cap minus 10 (see the strategy).
@@ -120,7 +129,9 @@ optional fresh-start seasonal realm (see roadmap P4). The 🎂 **one-year annive
 - **Player council:** 5–7 active players from different guilds and classes. A monthly voice or text call before each
   balance patch.
 - **The 30-day survey (Google Form):** why you play, what you'd change, what nearly made you quit, prime-time
-  hours, and favourite events. This replaces the Reddit research we couldn't do and gives the best data we can get.
+  hours, and favourite events. Reddit tells us what RO players in general want; this tells us what our players want.
+- **Write announcements in your own voice.** Reddit readers spot and dismiss AI-written server posts. Use the bug
+  automation's patch-notes drafts as notes, then rewrite them before posting.
 - **Event reminders:** the existing `solro3-auto` box can post the scheduled reminders in §1.5 (as its own job, kept
   apart from bug triage).
 
@@ -144,3 +155,4 @@ optional fresh-start seasonal realm (see roadmap P4). The 🎂 **one-year annive
 | **Event scheduler:** a config list that announces and starts/stops events on time | Everything weekly | P2 |
 | **Event token currency + shop** (an unused ItemConfig currency, like the Supporter Token) | Seasonal cosmetics bought later, less FOMO | P2 |
 | **Stats report:** weekly numbers for posts and ladders | Anniversary, ladders, balance | P1 |
+| **Event spawn command:** many weak monsters on a field, or a chosen monster at the GM's position | Poring Pop, Novice Survival, Town Chill Night | P2 |
