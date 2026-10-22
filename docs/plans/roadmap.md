@@ -27,10 +27,11 @@ Rules so the lanes don't collide:
 |---|---|---|---|
 | 0.1 | **Baseline numbers.** SQL against the realm DB: the level histogram (real players vs `aibot*`), D1/D7 return for every account since launch, job spread, peak concurrent real players, total Zeny and Crystals | S | Numbers posted in `#staff-chat`. They set the first cap phase (it must be ≥ the top real player) |
 | 0.2 | **Owner decisions** from [strategy §6](balance-retention-strategy.md#6-decisions-the-owner-needs-to-make): time to 99, cap schedule, Bonus Time budget, match sizes, seasons, bot policy | S | Decisions written into this file |
-| 0.3 | Review and merge the open player-report PRs: [#48](https://github.com/pattytrickz/ro3emu-server/pull/48), [#50](https://github.com/pattytrickz/ro3emu-server/pull/50), [#51](https://github.com/pattytrickz/ro3emu-server/pull/51), [#52](https://github.com/pattytrickz/ro3emu-server/pull/52), [#53](https://github.com/pattytrickz/ro3emu-server/pull/53), [#54](https://github.com/pattytrickz/ro3emu-server/pull/54) | S | Merged or answered |
+| 0.3 | Review and merge the open player-report PRs: ~~[#48](https://github.com/pattytrickz/ro3emu-server/pull/48), [#50](https://github.com/pattytrickz/ro3emu-server/pull/50), [#51](https://github.com/pattytrickz/ro3emu-server/pull/51), [#52](https://github.com/pattytrickz/ro3emu-server/pull/52), [#53](https://github.com/pattytrickz/ro3emu-server/pull/53), [#54](https://github.com/pattytrickz/ro3emu-server/pull/54)~~ all merged 22 Oct | S | Done |
 | 0.4 | Check that the **100 z instant potions** don't trivialise MVPs and PvP (their cooldown vs. MVP damage) | S | Kept, repriced or limited |
 | 0.5 | **🎃 Night of the Pumpkin** (30 Oct – 8 Nov) with today's GM tools ([events §4](events-plan.md#4-seasonal-calendar-season-1-nov-2026--mar-2027)) | S | Announced by Mon 26 Oct |
 | 0.6 | Post the **public roadmap** (a short version of this file) in `#announcements` and open the **30-day player survey** | S | Posted |
+| 0.7 | Work the [fix priorities](fix-priorities.md) list, P0 first: lag spikes and the upstream security-audit fixes | M | P0 items closed |
 
 **Exit:** we know the real population and pace, the owner has signed off on the pacing plan, and the first event is
 live.
@@ -50,7 +51,7 @@ live.
 | 1.7 | **Stats report**: loopback `GET /ro3emu/stats` (real online/DAU/WAU, level histogram, job spread, Zeny/Crystal minted vs sunk, event participation), and a weekly post to `#staff-chat` from `solro3-auto` | `Http`, a SQLite read model | M |
 | 1.8 | **Bot taper**: the bot runner keeps `max(0, target − real online)` bots in the world | `Ro3Emu.AiBots` | S |
 | 1.9 | Phase 1 cap set on live (≥ the top real player from 0.1); the cap schedule is published | config | S |
-| 1.10 | **Bring upstream `main` into the live line** (16 commits: Rift Crisis, Seven-Day Goal, Codex monster unlocks, profile likes, pet hatchery fixes, MVP summons, Guild League elites, award boxes). Expect conflicts where both lines built Growth Classroom. Release them as the Phase 2 and 3 content drops. | merge into `v1.0.0-fixes` on a `feat/` branch | M |
+| 1.10 | **Upstream sync**: upstream `aethai/ro3emu-server` is 186 commits ahead of the live branch (talent and passive execution, boss special skills, pet guardian skills, Rift Crisis, Seven-Day Goal, Codex unlocks, voice, external security-audit fixes, 20–21 Oct client support) and renamed fields codebase-wide. Branch from upstream `main`, re-apply the live fixes on top (dropping the ones upstream fixed its own way), run the full data-backed suite, replay a copy of the realm, then switch. **Port the security-audit fixes first, on their own.** Release the new content as the Phase 2 and 3 content drops. See [fix priorities](fix-priorities.md#the-one-strategic-item-catch-up-with-upstream) | upstream `main` → new live branch | L |
 | 1.11 | **Party access for a small realm**: a house rule for the minimum party size of dungeons (e.g. 3 instead of 5; the `!dungeonsolo` test aid shows the path), monster HP scaled to the party if needed; AI players may fill a short dungeon party | `ServerOptions`, `DungeonService`, `Ro3Emu.AiBots` | M |
 | 1.12 | **Stall and trade-center sales tax** (a few %, removed from the economy) as the first Zeny sink | `StallsService`, trade center | S–M |
 | 1.13 | **🚀 Phase 2 launch: cap 80** (≈ Fri 27 Nov), with a Bonus Weekend via 1.4 and the first content drop from 1.10 | config + event | S |
@@ -108,6 +109,25 @@ guilds active in guild content each week.
 | 4.4 | **Recruitment push** before the official RO3 launch (expected 2027): RateMyServer and top-list listings, a "why play here" page (free, fair, community-run, no pay-to-win), and outreach to players from the closed official services (RO Brazil, Prime EU). Target **EU players**: the official RO3 excludes them, and Reddit commenters say they'll go private because of it. On r/RagnarokOnline, post as a person, not an ad: threads that read as ads or AI text get dismissed. Server lists that track non-predatory servers are worth submitting to | S–M |
 
 ---
+
+## Features still missing
+
+The emulator's own "Not yet" list (upstream README, 22 Oct 2026), placed on this roadmap. Some may already be closer after
+the upstream sync (1.10); re-check the README then.
+
+| Feature | What's missing | Why it matters here | When | Effort |
+|---|---|---|---|---|
+| **Boss script mechanics** | Special skills are in, but mechanics that lived only in the original server's scripts (bubbles, bells, rhythm stages) are plain area attacks, and knockback does not move players | The top dungeon complaint ("bosses have 0 mechanics"). MVPs are the social events of the strategy (§4.5) | Phase 2 (after the sync), boss by boss, starting with the most-run dungeons | L |
+| **Guild extras: merging, impeachment, group mail** | Not implemented | Critical for a small realm: merging lets two half-empty guilds become one that can play Guild League; impeachment rescues a guild whose leader quit; group mail is how officers organise war nights | **Phase 1–2**: impeachment and group mail first, then merging | M |
+| **Titles** | Not implemented | The season rewards, hall of fame and monthly ladders (events plan) need a title system to give out | **Phase 2**, before the Season 1 finale (3.1) | M |
+| **Paragon (Astral Level)** | Not implemented | Post-99 progression: what capped players do after Phase 4 without raising the cap (4.3) | Phase 3–4 | L |
+| **Survivor Battle extras: follow, spectate, shop, Kafra adventure** | Not implemented | Spectating keeps eliminated players watching (good for small matches); the shop gives Survivor points a use | Phase 2, with Arena Night | M |
+| **Mock Battle extras** | The arena's monsters and the 40-player team frame | Mock Battle needs 40 players; on a small realm, pair it with the small-population sizes (1.6) | Phase 3 | M |
+| **War of Emperium extras: commander tools, siege weapons, vehicles** | Not implemented | WoE is the bright spot players praise in RO3; the Territory Wars cadence (3.2) benefits | Phase 3 | L |
+| **Shop gifting** | Not implemented | Lets players gift cosmetics (Lunar New Year red envelopes, gift-exchange week) | Phase 2, before Lutie Lights | S–M |
+| **Story dungeon stages still simplified** | Some stages are reconstructions | Story quality for new players and Fresh Start Week | Ongoing, as reported | M |
+| **Tavern (bar)** | Not implemented | A social hub (4.2) | Phase 4 | L |
+| **Guild voice** | Only party voice is implemented upstream (relay in the server, off by default, `Voice:Port` turns it on) | Voice in-game, without Discord; not in the live branch until the sync | After the sync: turn party voice on, then guild voice | M |
 
 ## Risks and how we handle them
 
