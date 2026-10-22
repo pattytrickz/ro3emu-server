@@ -172,12 +172,12 @@ public sealed class SkillService
     /// with a prerequisite is free only while that prerequisite is learned: Sight Sprout (12110, needs Sight 1) is the
     /// only one, and the skill panel's reset sends it at 0 together with Sight (inferred: client reset requests).
     /// </summary>
-    private int Initial(RoleProgress p, int group)
+    private int Initial(RoleProgress p, int group, bool requirePrerequisites = true)
     {
         if (data.Row("SkillConfig", RealId(group, 1)) is not { } row) return 0;
         int activation = (int)GameData.Int(row, "_iActivateCondition");
         if (activation > 0 && p.Level < activation) return 0;
-        return Prerequisites(row).All(r => r.Level <= 0 || p.Skills.GetValueOrDefault(r.Group) >= r.Level)
+        return !requirePrerequisites || Prerequisites(row).All(r => r.Level <= 0 || p.Skills.GetValueOrDefault(r.Group) >= r.Level)
             ? (int)GameData.Int(row, "_iInitialLevel") : 0;
     }
 
@@ -246,10 +246,14 @@ public sealed class SkillService
         skillData.SkillList.Add(tree.Select(t => t.Group).Where(g => g != atkGroup).Distinct());
         skillData.SkillList.Add(p.CardSkills.Keys.Where(g => !skillData.SkillList.Contains(g)).Order());
 
+        // One learned normal attack for GetNormalSkill, when the held one is a normal attack: a bow's Arrow Attack
+        // (1300001) is not (_iIsNormalAtk 0), and zeroing Normal Attack left a bow Archer none; the bar's Normal Attack
+        // was shown 0/1 and could not be dragged back (Juicy, 22 Oct).
+        bool heldIsNormal = IsNormalAttackGroup(atkGroup);
         var plan = new SkillPlan { IsUnlock = true };
         foreach (int group in skillData.SkillList)
             plan.SkillAssigns[group] = new SkillData { SkillId = group,
-                SkillLevel = group == atkGroup ? 1 : IsNormalAttackGroup(group) ? 0 : Level(p, group) }; // one attack for GetNormalSkill
+                SkillLevel = group == atkGroup ? 1 : heldIsNormal && IsNormalAttackGroup(group) ? 0 : Level(p, group) };
         plan.SkillQueue[0] = new SkillData(); // the client pairs() it unguarded
         plan.ManualLoadSkill.Add(new SkillData()); // repeated load lists are read by the client even when empty
         plan.AutoLoadSkill.Add(new SkillData());
@@ -559,7 +563,10 @@ public sealed class SkillService
             if (assignment.SkillLevel < 0 || assignment.SkillLevel > MaxLevel(group)
                 || (!tree.ContainsKey(group) && assignment.SkillLevel > 0)) return ErrorCodes.SkillNotInTree;
             if (assignment.SkillId != 0 && assignment.SkillId != group) return ErrorCodes.Parameter;
-            if (assignment.SkillLevel > Initial(progress, group)) progress.Skills[group] = assignment.SkillLevel;
+            // A free level is granted by Level() while its prerequisites hold, never stored as learned: comparing with the
+            // prerequisite-dependent level stored Sight Sprout's free 1 once Sight was dropped (mazrine, Mage tree I
+            // rebuild without Sight Sprout in the request), which then failed its own prerequisite with 333.
+            if (assignment.SkillLevel > Initial(progress, group, requirePrerequisites: false)) progress.Skills[group] = assignment.SkillLevel;
         }
         var remaining = SkillPoints(progress);
         if (remaining.Values.Any(v => v < 0)) return ErrorCodes.SkillPointsShort;

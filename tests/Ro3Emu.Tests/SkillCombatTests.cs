@@ -371,6 +371,69 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task CastSpeedFromDexShortensTheVariableCastTime()
+    {
+        // Fire Bolt Lv 1: _iChantFix 0, _iChantVar 1000. Client: varchant = -3 * cspd / (800 + cspd), cspd 2 per DEX.
+        await using var alice = await InWorld("Alice"); await using var bob = await InWorld("Bob");
+        foreach (var name in new[] { "alice", "bob" })
+        {
+            await Gm(name, "!job 2100"); await Gm(name, "!lvl 40"); await Teach(name, 12004);
+        }
+        var req = new AllocateAttrPointReq { PlanIndex = 0 };
+        req.Points[5] = 20;
+        await bob.SendGameAsync(CharacterService.AllocateAttrPoints, req);
+        Assert.Equal(0, (await Next(bob, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser)).Result);
+
+        async Task<(int Chant, long Speed)> Cast(BotClient client, string name)
+        {
+            var target = await Target(name);
+            await client.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1200401, TargetId = target.Uid });
+            var accepted = await Next(client, CombatService.UseSkill, CastSkillRsp.Parser);
+            Assert.Equal(0, accepted.Result);
+            var use = await Next(client, CombatService.UseInSkill, UseInSkillInfo.Parser, u => u.SessionId == accepted.SessionId);
+            long speed = await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session(name))[116]));
+            return (use.ChantMs, speed);
+        }
+        var (slow, slowSpeed) = await Cast(alice, "alice");
+        var (fast, fastSpeed) = await Cast(bob, "bob");
+        Assert.True(fastSpeed >= slowSpeed + 30, $"20 DEX gives about 40 Cast Speed ({slowSpeed} -> {fastSpeed})");
+        Assert.Equal((int)Math.Round(1000 * (1 - 3.0 * slowSpeed / (800 + slowSpeed))), slow);
+        Assert.Equal((int)Math.Round(1000 * (1 - 3.0 * fastSpeed / (800 + fastSpeed))), fast);
+        Assert.True(fast < slow);
+    }
+
+    [ClientDataFact]
+    public async Task JupitelThunderKnocksItsLivingTargetBackThreeMetres()
+    {
+        // Jupitel Thunder _kDescData ${4}: "knocking them back 3 m".
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 2200"); await Teach("alice", 12102);
+        var target = await Target("alice", stationary: true);
+        var session = Session("alice");
+        var start = session.Position.Clone();
+        var nav = app.Services.GetRequiredService<WorldData>().Map(session.SceneEntry)!.Nav;
+        int direction = Enumerable.Range(0, 8).Select(i => i * 45).First(angle => nav == null ||
+            nav.CanWalk(start.X, start.Y, start.Z, start.X + 6 * MathF.Sin(angle * MathF.PI / 180),
+                start.Z + 6 * MathF.Cos(angle * MathF.PI / 180)));
+        var spot = new Vec3
+        {
+            X = start.X + 2 * MathF.Sin(direction * MathF.PI / 180), Y = start.Y,
+            Z = start.Z + 2 * MathF.Cos(direction * MathF.PI / 180),
+        };
+        await Loop.InvokeAsync(() =>
+        {
+            target.Hp = 1_000_000; target.Moving = false;
+            target.X = spot.X; target.Y = spot.Y; target.Z = spot.Z;
+            return Task.CompletedTask;
+        });
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1210201, TargetId = target.Uid });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        var pushed = await Next(alice, CombatService.SkillMove, SkillStartMoveNotify.Parser, m => m.EntityID == (ulong)target.Uid);
+        Assert.InRange(MonsterService.Distance(spot.X, spot.Z, pushed.EndPos.X, pushed.EndPos.Z), 2.9f, 3.1f);
+        Assert.True(MonsterService.Distance(start.X, start.Z, pushed.EndPos.X, pushed.EndPos.Z) > 4.5f, "pushed away from the caster");
+    }
+
+    [ClientDataFact]
     public async Task HealSelectsAllyAndInsufficientSpDoesNotStartCooldown()
     {
         await using var alice = await InWorld("Alice"); await using var bob = await InWorld("Bob");

@@ -214,6 +214,10 @@ public sealed partial class CombatService
                 field.Touches = touches - 1;
                 await RepelAsync(s, action, target, (float)Numbers(row, "_kDescData").ElementAtOrDefault(4));
             }
+            // Jupitel Thunder's description ${4}: "knocking them back 3 m". Away from the caster as Fire Wall (inferred);
+            // a dead or immobile target (training dummy, siege crystal: speed 0) stays where it is.
+            if (CanApplyMoreEffects() && script == "Jupitel_Thunder" && target.Hp > 0 && target.Template.SpeedCm > 0)
+                await RepelAsync(s, action, target, (float)Numbers(row, "_kDescData").ElementAtOrDefault(3));
         }
         // Buff1 is self for hostile selectors, but actual friend recipients for ally selectors (Detoxify, Blessing).
         foreach (var recipient in friendly ? allies : new List<GameSession> { s })

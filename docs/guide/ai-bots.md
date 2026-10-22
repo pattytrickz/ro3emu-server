@@ -16,7 +16,8 @@ A separate program that keeps the world populated. Each bot logs in like a real 
 - **Parties.** A bot accepts a party invite from a real player within 10 base levels of its own (otherwise it
   declines and whispers why), then follows that player and fights next to them. It never takes the last hit on a
   monster near a player of the party or one they hit: it stops at 30% HP, or earlier when its own hits could finish
-  the monster. It leaves when the leader leaves, kicks it, is offline for five minutes, or when no real player is
+  the monster, and cancels its auto-attack on it. A bot more than 5 levels above the player only joins the player's
+  fights and starts none of its own next to them. It leaves when the leader leaves, kicks it, is offline for five minutes, or when no real player is
   left in the party.
 - **Manners.** Bots never attack a monster someone else has damaged, or one next to a real player, so they don't
   steal kills. They don't trade, sell, use the auction or post in world chat.

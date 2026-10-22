@@ -26,7 +26,7 @@ public sealed partial class ReconstructedDungeons
     /// completes (0: none). <paramref name="Goal"/> is the tracker's "(done/total)" while the step runs.
     /// </summary>
     public sealed record ScriptedStep(string Stage, int Quest, (int Done, int Total) Goal, IReadOnlyList<SceneActor> Actors,
-        long Story, IReadOnlyList<StepTrigger> Complete, IReadOnlyList<StepTrigger> Ignore, long TeleportAfter);
+        long Story, IReadOnlyList<StepTrigger> Complete, IReadOnlyList<StepTrigger> Ignore, long TeleportAfter, bool Slide = false);
 
     /// <summary>
     /// A scene. <paramref name="Unplayed"/> are DungeonQuestConfig quests of the scene that no step shows: the branch
@@ -70,7 +70,8 @@ public sealed partial class ReconstructedDungeons
         if (complete.Count == 0) throw new InvalidOperationException($"Scripted step '{s.GetProperty("stage").GetString()}' cannot complete.");
         return new ScriptedStep(s.GetProperty("stage").GetString() ?? "", s.GetProperty("quest").GetInt32(), goal, actors,
             s.TryGetProperty("story", out var story) ? story.GetInt64() : 0, complete, Triggers(s, "ignore"),
-            s.TryGetProperty("after", out var after) && after.TryGetProperty("teleport", out var to) ? to.GetInt64() : 0);
+            s.TryGetProperty("after", out var after) && after.TryGetProperty("teleport", out var to) ? to.GetInt64() : 0,
+            s.TryGetProperty("slide", out var slide) && slide.GetBoolean());
     }
 
     private static IReadOnlyList<StepTrigger> Triggers(JsonElement step, string field)

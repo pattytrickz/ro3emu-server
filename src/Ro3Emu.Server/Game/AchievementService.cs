@@ -343,8 +343,8 @@ public sealed class AchievementService : IGameTicker
             case CCardStars: // [1, stars]: one card raised to >= p2 stars
                 return s.Items.Any(i => IsCard(i.Entry) && (i.Attrs?.GetValueOrDefault((int)StarAttr) ?? 0) >= t[2]) ? r : 0;
             case CTalentLevel: // total level of the active talent plan, battle oath excluded
-                if (s.SeasonTalent is not { } talent || !talent.Plan.TryGetValue(talent.CurPlanId, out var plan)) return null;
-                return plan.TalentNodes.Where(kv => kv.Key != TalentOathNode).Sum(kv => Math.Max(0, kv.Value.CurrentLevel));
+                if (s.SeasonTalent is not { } talent || !talent.Plan.ContainsKey(talent.CurPlanId)) return null;
+                return SeasonTalentService.Levels(talent).Where(n => n.Id != TalentOathNode).Sum(n => Math.Max(0, n.Level));
             case CEmblemQuality: // [quality, n]: Soul Echoes of quality >= p1 in the active plan
                 if (!s.Emblems.Plans.TryGetValue(s.Emblems.CurrentPlan, out var emblems)) return 0;
                 return emblems.Slots.Values.Count(guid => s.Items.FirstOrDefault(i => i.Guid == guid) is { } item && Quality(item.Entry) >= t[1]);

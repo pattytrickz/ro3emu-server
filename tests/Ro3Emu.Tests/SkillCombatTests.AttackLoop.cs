@@ -90,4 +90,18 @@ public sealed partial class SkillCombatTests
         Assert.Equal(SkillEndNotify.Types.SkillEndType.Interrupted, end.Type);
         await Loop.InvokeAsync(() => { Assert.Null(Session("alice").Attack); return Task.CompletedTask; });
     }
+
+    /// <summary>
+    /// An interrupt naming no skill ends the auto-attack, with no swing after it: how an AI party member stops hitting a
+    /// monster it leaves to the players for their last hit (#40); every job attack keeps swinging until the target dies.
+    /// </summary>
+    [ClientDataFact]
+    public async Task AnInterruptWithNoSkillEndsTheAutoAttack()
+    {
+        await using var alice = await InWorld("Alice");
+        var (_, self) = await AutoAttacking(alice);
+        await alice.SendGameAsync(CombatService.SkillInterrupt, new SkillInterruptReq());
+        Assert.True((await Next(alice, CombatService.SkillInterrupt, SkillInterruptResp.Parser)).IsInterruptSucc);
+        await Loop.InvokeAsync(() => { Assert.Null(Session("alice").Attack); return Task.CompletedTask; });
+    }
 }

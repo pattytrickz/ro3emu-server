@@ -5,7 +5,6 @@ namespace Ro3Emu.Server.Game;
 
 public sealed partial class SceneService
 {
-    private const int TreasureInteraction = 4;
     private const int TreasureNpcId = 21070002;
     /// <summary>Treasure hunt NPC UIDs: 2^46 + role id, below 2^53 (the client keeps unit ids in a double array, see
     /// DungeonService.SceneActorUidBase).</summary>
@@ -56,10 +55,19 @@ public sealed partial class SceneService
 
     internal bool HasTreasureMonster(long uid) => world.AllUnits().Any(u => u.Uid == uid && u is MonsterUnit { Dead: false });
 
-    /// <summary>Only the owner's dynamic UID takes this branch; static interaction id 4 keeps its normal route.</summary>
+    /// <summary>
+    /// Only the owner's dynamic UID takes this branch. The client sends the dig spot's own interaction, NPCConfig 21070002
+    /// _iInteractID [21070002] (dig skill 7300101, status 9); ActivityConstant.TreasureHuntingInteractID 4 is the
+    /// InteractPerformance row of that status (dig animation 73001, both 1600 ms), not a request id (inferred).
+    /// </summary>
     private async Task<bool> TryTreasureInteractAsync(GameSession session, NpcInteractionReq req)
     {
-        if (session.Role == null || req.InteractionId != TreasureInteraction || req.NpcUid != TreasureUid(session)) return false;
+        if (session.Role == null || req.NpcUid != TreasureUid(session)) return false;
+        if (data.Row("NPCConfig", TreasureNpcId) is not { } npcRow || !HasInteraction(npcRow, req.InteractionId, WorldNpcKind.Npc))
+        {
+            await session.SendGameAsync(NpcInteraction, new NpcInteractionRsp { Result = ErrorCodes.NpcParameter, Req = req });
+            return true;
+        }
         var hunt = session.ActivityRuntime.AdventureTreasure;
         int result = hunt.PointId == 0 || TreasurePoint(hunt.PointId) is not { } target
             ? ErrorCodes.NpcMissing

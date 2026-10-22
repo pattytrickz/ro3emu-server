@@ -2,7 +2,8 @@ namespace Ro3Emu.AiBots;
 
 /// <summary>
 /// An AI player's manners in a real player's party (owner decision, issue #58): it joins players near its own level,
-/// leaves the kills near them to them, and leaves a party once no player is left in it, so it can be invited again.
+/// leaves the kills near them to them, starts no fights of its own next to a much weaker player, and leaves a party
+/// once no player is left in it, so it can be invited again.
 /// </summary>
 public static class PartyRules
 {
@@ -14,6 +15,16 @@ public static class PartyRules
 
     /// <summary>How close to a player of the party a monster counts as theirs: the reach of the bot's party fight.</summary>
     public const float NearPlayer = 20f;
+
+    /// <summary>A bot more than this many base levels above the player it follows is far stronger (owner direction, #40).</summary>
+    public const int StrongerBy = 5;
+
+    /// <summary>
+    /// Whether the bot may start on a fresh monster near the player, one they are not fighting: not when it is far
+    /// stronger than them (it only joins their fights then), nor when their level is unknown.
+    /// </summary>
+    public static bool StartsOwnFights(long botLevel, long playerLevel) =>
+        playerLevel > 0 && botLevel - playerLevel <= StrongerBy;
 
     /// <summary>Whether the inviter is within <see cref="LevelRange"/> base levels; an unknown level is declined.</summary>
     public static bool InLevelRange(long botLevel, long? inviterLevel) =>

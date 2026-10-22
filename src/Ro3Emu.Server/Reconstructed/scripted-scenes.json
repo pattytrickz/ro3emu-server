@@ -18,12 +18,13 @@
         "Editor sc_plot_yhcx_001_dg01: guide point 24 runs from the born point to (98.8, 82.3) at the corridor, guide point 38 from there to (99.2, 99.8) beside region 20; region 20 is a 5 m circle (regionType 2) at (100.5, 102.3), region 22 a 30 x 5 m rectangle (regionType 2, triggerType 1) at the bottom of the passage (z 624.9), region 25 the 40 x 10 m corridor in front of the vortex.",
         "NPC 5300030 is the empty model 70010 with interaction 5300030: AutoInteractWhenInRange, interaction skill 5362001 'Jump into the Cave'.",
         "Nav sc_plot_yhcx_001: the passage is one continuous walkable ramp from z 238 (y 253) to z 622 (y 31); point 21 (100.0, 235.9, 267.5) lies on it near its top; point 27 'final drop position' is below it, off the nav.",
-        "Points 29-33 are client-only Ant Eggs (monsterType 1, clientMonsterConfigKey MainStoryAntEggExploseParam, npc 5300036, not created on scene init)."
+        "Points 29-33 are client-only Ant Eggs (monsterType 1, clientMonsterConfigKey MainStoryAntEggExploseParam, npc 5300036, not created on scene init).",
+        "LC_DunGeon_Actions.SetSlideMode is callable through 30404 DungeonEventInvokeClientFunc (6); its arguments select the view mode, activation and movement speeds. The client slide controller follows the slope and accepts lateral steering."
       ],
       "guessed": [
         "Step 1 completes in region 25 (the corridor where guide 24 ends): region 25 is regionType 1, not one of the explicit server regions.",
         "Bobo (5300027) stands at point 26 (the anchor of patrol 26, which runs into the vortex) during step 1 and is gone in step 2; the run into the vortex itself is not animated.",
-        "The jump is a teleport to point 21 at the top of the passage; the original fall/slide (and its camera) is not reproduced.",
+        "The jump is a teleport to point 21 at the top of the passage. Step 3 activates the client's slide controller with free view and its default forward/lateral speeds (10/8); the original cinematic camera and exact speeds are unknown.",
         "The exploding ant eggs are not reproduced: their creation trigger is not in the client data.",
         "The original continued seamlessly into 1000301 (DungeonConfig 1000301 _iSameDupLoadingType 2 from 1000201); here the player leaves and enters 1000301 from the quest tracker (action 3000)."
       ],
@@ -53,6 +54,7 @@
         {
           "quest": 3,
           "stage": "The passage beneath the vortex: reach the end of the passage",
+          "slide": true,
           "complete": [
             { "region": 22, "why": "the server region (regionType 2, triggerType 1) at the bottom of the ramp" }
           ]

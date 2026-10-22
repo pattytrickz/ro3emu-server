@@ -871,7 +871,7 @@ public sealed class StoryWalkTests(ITestOutputHelper output) : IAsyncLifetime
         for (int round = 0; round < 400 && !TargetDone(task, index); round++)
         {
             var nodes = await OnLoop(s => s.SeasonTalent!.UnlockedNode.Where(kv => kv.Value).Select(kv => kv.Key)
-                .Select(id => (Id: id, Level: s.SeasonTalent.Plan[s.SeasonTalent.CurPlanId].TalentNodes.GetValueOrDefault(id)?.CurrentLevel ?? 0))
+                .Select(id => (Id: id, Level: SeasonTalentService.Level(s.SeasonTalent, s.SeasonTalent.Plan[s.SeasonTalent.CurPlanId], id)))
                 .ToList());
             bool any = false;
             foreach (var (id, level) in nodes)
