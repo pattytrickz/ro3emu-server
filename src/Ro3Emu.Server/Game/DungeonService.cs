@@ -577,14 +577,20 @@ public sealed partial class DungeonService
         && !a.AutoReviveAt.ContainsKey(p.Role!.Id)
         && a.RevivesUsed.GetValueOrDefault(p.Role.Id) >= ReviveLimit(a));
 
-    /// <summary>All resurrection sources obey the active dungeon's click-revive allowance.</summary>
+    // DungeonConfig NoRevive hides the ordinary self-revive button (LC_SceneCom_Revive.GetCommonReviveBtnState).
+    // Battle resurrection is separate: the same boss row still advertises _iOriginalReviveNum.
+    // Keep the existing per-participant allowance (inferred), without treating NoRevive as a ban on priest skills.
+    private static int BattleReviveLimit(Attempt a) => a.Plan.Boss is { } boss
+        ? Math.Max(0, (int)GameData.Int(boss, "_iOriginalReviveNum")) : ReviveLimit(a);
+
+    /// <summary>Skill/item resurrection uses the active boss's battle-revive allowance.</summary>
     public int ExternalReviveError(GameSession s)
     {
         if (!s.Dead) return ErrorCodes.TargetAlive;
         if (s.DungeonAttempt == null) return 0;
         var a = Active(s);
         return a == null || s.Role == null || a.Reviving.Contains(s)
-            || a.RevivesUsed.GetValueOrDefault(s.Role.Id) >= ReviveLimit(a)
+            || a.RevivesUsed.GetValueOrDefault(s.Role.Id) >= BattleReviveLimit(a)
             ? ErrorCodes.FeatureUnavailable : 0;
     }
 
@@ -810,6 +816,9 @@ public sealed partial class DungeonService
                 try
                 {
                     if (committed && goods.Count > 0) await character.ItemsChangedAsync(s, stats: false);
+                    // LC_DunGeon_PVE_10P turns 30110 into MultiDungeonBattleInfo, consumed by the MVP panel.
+                    // Publish before 30403 opens the result UI; querying statistics manually must not be required.
+                    if (a.Plan.Multi != null) await StatisticsAsync(s);
                     await s.SendGameAsync(Result, result);
                     if (success && a.Plan.Multi != null)
                     {

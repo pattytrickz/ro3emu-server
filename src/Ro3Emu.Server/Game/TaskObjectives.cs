@@ -270,6 +270,7 @@ public sealed partial class TaskService
                     {
                         TKill => ReferenceEquals(session, killer) && target.Length >= 3 && target[1..^1].Contains(monster.Template.NpcId),
                         TKillInvolved => target.Length >= 3 && target[1..^1].Contains(monster.Template.NpcId),
+                        TTenBossWin => target.Length >= 3 && target[2..].Contains(monster.Template.NpcId),
                         TMapKill => target.Length == 3 && target[1] == monster.SceneEntry,
                         TKillOnMap => ReferenceEquals(session, killer) && target.Length == 3 && target[2] == monster.SceneEntry,
                         _ => false
