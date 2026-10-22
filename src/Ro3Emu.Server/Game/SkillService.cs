@@ -246,10 +246,14 @@ public sealed class SkillService
         skillData.SkillList.Add(tree.Select(t => t.Group).Where(g => g != atkGroup).Distinct());
         skillData.SkillList.Add(p.CardSkills.Keys.Where(g => !skillData.SkillList.Contains(g)).Order());
 
+        // One learned normal attack for GetNormalSkill, when the held one is a normal attack: a bow's Arrow Attack
+        // (1300001) is not (_iIsNormalAtk 0), and zeroing Normal Attack left a bow Archer none; the bar's Normal Attack
+        // was shown 0/1 and could not be dragged back (Juicy, 22 Oct).
+        bool heldIsNormal = IsNormalAttackGroup(atkGroup);
         var plan = new SkillPlan { IsUnlock = true };
         foreach (int group in skillData.SkillList)
             plan.SkillAssigns[group] = new SkillData { SkillId = group,
-                SkillLevel = group == atkGroup ? 1 : IsNormalAttackGroup(group) ? 0 : Level(p, group) }; // one attack for GetNormalSkill
+                SkillLevel = group == atkGroup ? 1 : heldIsNormal && IsNormalAttackGroup(group) ? 0 : Level(p, group) };
         plan.SkillQueue[0] = new SkillData(); // the client pairs() it unguarded
         plan.ManualLoadSkill.Add(new SkillData()); // repeated load lists are read by the client even when empty
         plan.AutoLoadSkill.Add(new SkillData());
