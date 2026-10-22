@@ -384,8 +384,9 @@ public sealed class AiBot
     /// <summary>
     /// In a real player's party: be where they are and help. The party sync (SceneView.Member) says where the leader
     /// is even out of sight, so the bot travels to their map, switches to their line and walks to them. Next to them it
-    /// heals (a healer), fights what attacks the leader and what the leader is fighting, and takes fresh monsters nearby.
-    /// It never takes the last hit on a monster near a player of the party or one they hit (LeaveToPlayers). The bot
+    /// heals (a healer), fights what attacks the leader and what the leader is fighting, and takes fresh monsters nearby
+    /// unless it is far stronger than the leader (PartyRules.StartsOwnFights). It never takes the last hit on a monster
+    /// near a player of the party or one they hit (LeaveToPlayers), and stops its auto-attack on one. The bot
     /// stays until the leader leaves, kicks it, or is offline for five minutes.
     /// </summary>
     private async Task PartyAsync()
@@ -402,6 +403,7 @@ public sealed class AiBot
         _leaderSeen = now;
         _cantFollowMap = 0;
         _activity = $"in a party with {leader.Name}, following them";
+        if (_view.Find(_locked) is { } hitting && LeaveToPlayers(hitting)) await StopHittingAsync();
         if (await HealAsync(leader, member, now)) return;
         float toLeader = Dist(leader.X, leader.Z);
         if (PartyTarget(leader) is { } fight && toLeader < 20) { await EngageAsync(fight); return; }
@@ -413,7 +415,9 @@ public sealed class AiBot
             return;
         }
         if (_healSkill == 0 && await RestAsync()) return;
-        var target = toLeader < 12 ? PickTarget(leader.X, leader.Z, 10, long.MaxValue, leaderId) : null;
+        // Far stronger than the leader: only their fights, never a fresh monster they could have taken (owner, #40).
+        var target = toLeader < 12 && PartyRules.StartsOwnFights(_view.Level, leader.Level)
+            ? PickTarget(leader.X, leader.Z, 10, long.MaxValue, leaderId) : null;
         if (target != null) { await EngageAsync(target); return; }
         _target = 0;
         if (toLeader > 4 && (_path == null || now - _pathAt > TimeSpan.FromSeconds(1.5)))
@@ -651,6 +655,7 @@ public sealed class AiBot
         var now = DateTime.UtcNow;
         if (LeaveToPlayers(target))
         {
+            if (_locked == target.Uid) await StopHittingAsync();
             _target = 0;
             _activity = "leaving the last hit to my party";
             return;
@@ -710,6 +715,17 @@ public sealed class AiBot
             _avoid[target.Uid] = now.AddMinutes(1);
             _target = _locked = 0;
         }
+    }
+
+    /// <summary>
+    /// Ends the server's auto-attack on the locked monster. Every job attack (JobAttackConfig) has _iIfAutoAtk 2: one
+    /// cast keeps the normal attack swinging until the monster dies, so a bot that only stopped casting still took the
+    /// players' last hit (#40). 31124 with no skill id interrupts whatever runs (CombatService.InterruptAsync).
+    /// </summary>
+    private async Task StopHittingAsync()
+    {
+        _target = _locked = 0;
+        await SendAsync(() => _bot.SendGameAsync(CombatService.SkillInterrupt, new SkillInterruptReq()));
     }
 
     // ---------------------------------------------------------------- movement
