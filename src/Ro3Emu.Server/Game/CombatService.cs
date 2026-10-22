@@ -534,6 +534,7 @@ public sealed partial class CombatService : IGameTicker
             if (!m.Viewers.Contains(p)) await p.SendGameAsync(SkillHit, hit);
             await character.SetHpSpAsync(p, null, null); // publish the reserved/current HP; never undo a later hit
             foreach (var handler in TakenAsync) await handler(m, p, damage);
+            if (hp > 0 && damage > 0) await ShieldReflectAsync(m, p, row);
             await FightingAsync(p);
             await FightingAsync(m);
             if (hp == 0) await PlayerDiesAsync(p);
@@ -604,11 +605,11 @@ public sealed partial class CombatService : IGameTicker
         return element is >= 1 and <= 10 ? (int)element : 1;
     }
 
-    private (long Damage, DamageHitResult Result) Damage(Fighter a, Fighter b, JsonElement skill, int branch = 0)
+    private (long Damage, DamageHitResult Result) Damage(Fighter a, Fighter b, JsonElement skill, int branch = 0, double ratioBonus = 0)
     {
         // A skill that never misses (_iSkillHit 10000) draws no hit roll, as before.
         if (GameData.Int(skill, "_iSkillHit") < 10000 && Rolls.Hit() >= HitRate(a, b, skill)) return (0, DamageHitResult.Miss);
-        double dmg = BaseDamage(a, b, skill, branch, out bool magic);
+        double dmg = BaseDamage(a, b, skill, branch, out bool magic, ratioBonus);
         dmg *= 0.97 + Rolls.DamageFloat() * 0.06; // DamageFloat [9700, 10300]
         var result = DamageHitResult.Normal;
         if (!magic && Rolls.Crit() < CritRate(a, b, skill))
@@ -627,12 +628,12 @@ public sealed partial class CombatService : IGameTicker
         Math.Max(0, a.Cri - b.ResCri) / 10000.0 * GameData.Int(skill, "_iSkillCri") / 10000.0;
 
     /// <summary>The roll-free part of a hit: skill ratio and flat, defense and element.</summary>
-    private double BaseDamage(Fighter a, Fighter b, JsonElement skill, int branch, out bool magic)
+    private double BaseDamage(Fighter a, Fighter b, JsonElement skill, int branch, out bool magic, double ratioBonus = 0)
     {
         magic = GameData.Int(skill, "_iDmgType") == 2;
         var ratios = Numbers(skill, "_kDamageParam1");
         var flats = Numbers(skill, "_kDamageParam2");
-        double p1 = ratios.Length > branch ? ratios[branch] : 10000, p2 = flats.Length > branch ? flats[branch] : 0;
+        double p1 = (ratios.Length > branch ? ratios[branch] : 10000) + ratioBonus, p2 = flats.Length > branch ? flats[branch] : 0;
         double dmg = (magic ? a.Matk : a.Atk) * p1 / 10000 + p2;
         // Defense: def / (def + ParDef 20 × the defender's level), the shape of the client's damage-reduction tooltip.
         double def = magic ? b.Mdef : b.Def;
@@ -641,6 +642,21 @@ public sealed partial class CombatService : IGameTicker
         int element = (int)GameData.Int(skill, "_iEleType") is var se and > 1 ? se : a.Element;
         return dmg * Math.Clamp(1 + ElementFactor(element, b.Element) / 10000.0, 0.1, 10);
     }
+
+    /// <summary>
+    /// Aura Blade (11201): "increasing the percentage damage multiplier of Normal Attack skills by ${1}%" while its buff
+    /// lasts. The buff of each level is 11201NN, the same id as that level's SkillConfig row, whose _kDescData[0] is the
+    /// percentage (6 at Lv 1 to 15 at Lv 10); it adds to _kDamageParam1 (per ten thousand).
+    /// </summary>
+    internal double AuraBladeBonus(GameSession s, JsonElement row)
+    {
+        if (s.Progress == null || !skills.IsNormalAttack(s.Progress.Career, (int)GameData.Int(row, "_iID"))) return 0;
+        foreach (var buff in s.Buffs)
+            if (buff.ConfigId / 100 == AuraBladeGroup && buff.ExpireMs > Now && data.Row("SkillConfig", buff.ConfigId) is { } aura)
+                return Numbers(aura, "_kDescData").FirstOrDefault() * 100;
+        return 0;
+    }
+    private const int AuraBladeGroup = 11201;
 
     /// <summary>The expected damage of one hit (hit rate, mean float, crit share) from the same formula.</summary>
     private double ExpectedDamage(Fighter a, Fighter b, JsonElement skill)
