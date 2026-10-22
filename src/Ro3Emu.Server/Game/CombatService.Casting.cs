@@ -132,7 +132,7 @@ public sealed partial class CombatService
         if (GameData.Int(row!.Value, "_iIfAutoAtk") == 2 && owned == null && target != null && CanHitMonster(s, target))
         {
             s.Attack = new AttackLoop { Target = target, SkillId = loopSkill,
-                NextSwingMs = Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
+                NextSwingMs = Now + SkillMs(s, row.Value) + ChantMs(s, row.Value) + 1,
                 StartX = s.Position.X, StartZ = s.Position.Z };
         }
         else if (!keepsAttack && s.Attack is { } replaced)
@@ -142,7 +142,7 @@ public sealed partial class CombatService
         }
         if (GameData.Int(row.Value, "_iIfAutoAtk") == 2 && owned == null && playerTarget != null)
             eventAttacks[s] = new EventAttack(playerTarget, loopSkill,
-                Now + SkillMs(s, row.Value) + Math.Max(0, GameData.Int(row.Value, "_iChantFix") + GameData.Int(row.Value, "_iChantVar")) + 1,
+                Now + SkillMs(s, row.Value) + ChantMs(s, row.Value) + 1,
                 s.Position.X, s.Position.Z);
         await StartCooldownAsync(s, row.Value);
         await StartCastAsync(s, row.Value, req, id, owned);
@@ -407,7 +407,7 @@ public sealed partial class CombatService
         {
             Id = id, OwnerId = s.Role!.Id, WorldScene = s.WorldScene, SceneGeneration = s.SceneGeneration,
             Attachment = s.Attachment, Request = req, Row = row, Origin = origin, StartedWalking = actor == null && s.Walking,
-            StartMs = Now, ChantMs = (int)Math.Max(0, GameData.Int(row, "_iChantFix") + GameData.Int(row, "_iChantVar")), ActionMs = SkillMs(s, row), Operator = actor,
+            StartMs = Now, ChantMs = ChantMs(s, row), ActionMs = SkillMs(s, row), Operator = actor,
             Automatic = automatic,
         };
         s.SkillCast = action;
@@ -453,6 +453,28 @@ public sealed partial class CombatService
     private static bool Live(GameSession s, ActiveSkillCast action) => !action.Cancelled && ReferenceEquals(s.SkillCast, action)
         && !s.Dead && !s.SceneLoading && s.Role?.Id == action.OwnerId && s.WorldScene == action.WorldScene
         && (action.Operator == null || !action.Operator.Removing && action.Operator.ExpiresMs > Now);
+
+    /// <summary>
+    /// Cast time: _iChantFix plus _iChantVar shortened by Cast Speed, as the client's stat panel computes it
+    /// (LC_DAL_PlayerInfo.GetRealPropertyValue for PreVarChant, LC_PlayerInfoHelper._doFormulaCastTime):
+    /// varchant = per_varchant (202, /10000) - A * cspd / (B + C * cspd), PublicParamConfig VariableChantPerParamA/B/C
+    /// 3/800/1, with Cast Speed (116, 2 per DEX) capped at FinalAtkSpdThdAndCastSpdThd[1] 400, where the variable part
+    /// is gone. Cast Speed above the cap (OverflowCastSpd2MagicDmgR's magic damage) is not applied.
+    /// </summary>
+    private int ChantMs(GameSession s, JsonElement row)
+    {
+        long fix = GameData.Int(row, "_iChantFix"), variable = GameData.Int(row, "_iChantVar");
+        if (variable <= 0) return (int)Math.Max(0, fix + variable);
+        var stats = character.Stats(s);
+        double cap = data.Table("PublicParamConfig").TryGetValue("FinalAtkSpdThdAndCastSpdThd", out var caps)
+            && caps.ValueKind == JsonValueKind.Array && caps.GetArrayLength() > 1 && GameData.Number(caps[1]) is { } c and > 0 ? c : 400;
+        double speed = Math.Clamp(stats[116], 0, cap);
+        double a = PublicSkill("VariableChantPerParamA") is var pa and > 0 ? pa : 3;
+        double b = PublicSkill("VariableChantPerParamB") is var pb and > 0 ? pb : 800;
+        double k = PublicSkill("VariableChantPerParamC") is var pc and > 0 ? pc : 1;
+        double factor = Math.Max(0, 1 + stats[202] / 10000.0 - a * speed / (b + k * speed));
+        return (int)Math.Max(0, Math.Round(fix + variable * factor));
+    }
 
     private int SkillMs(GameSession s, JsonElement row)
     {
