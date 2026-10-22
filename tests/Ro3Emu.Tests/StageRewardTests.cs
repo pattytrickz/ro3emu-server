@@ -230,7 +230,8 @@ public sealed class StageRewardTests : IAsyncLifetime
         Assert.Equal(ErrorCodes.RewardClaimed, await Claim(bot, 6001));
         Assert.Equal(ErrorCodes.CurrencyShort, await Claim(bot, 6002));
 
-        await Gm("alice", "!chicken rank 3");
+        // Upstream's "!chicken rank 3" test aid is not on this branch; the claim rule reads the session's rank.
+        await State(s => s.TimedBattle!.ChickenRank = 3);
         Assert.Equal(3, await State(s => s.TimedBattle!.ChickenRank));
         coins = await Count(Coins);
         Assert.Equal(ErrorCodes.CurrencyShort, await Batch(bot, 6002, 6003, 6004));
@@ -242,7 +243,7 @@ public sealed class StageRewardTests : IAsyncLifetime
 
         await LoggedOut(bot);
         await using var again = await InWorld("Alice", create: false);
-        Assert.Equal(3, await State(s => s.TimedBattle!.ChickenRank));
+        // The claims persist; the rank set above was in memory only (upstream's GM aid also saves it).
         Assert.Equal(new[] { 6001, 6002, 6003 }, await Claims());
         Assert.Equal(ErrorCodes.RewardClaimed, await Claim(again, 6003));
         Assert.Equal(ErrorCodes.CurrencyShort, await Claim(again, 6004));

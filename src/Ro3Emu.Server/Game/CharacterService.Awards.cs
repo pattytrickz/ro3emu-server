@@ -64,13 +64,16 @@ public sealed partial class CharacterService
         var before = JsonSerializer.Deserialize<DailyActivityService.DailyState>(previousDaily);
         var after = JsonSerializer.Deserialize<DailyActivityService.DailyState>(nextDaily);
         if (before?.Claims == null || after?.Claims == null || before.DailyEpoch != after.DailyEpoch ||
-            after.Claims.Except(before.Claims).ToArray() is not [int stage] ||
+            after.Claims.Except(before.Claims).Order().ToArray() is not { Length: > 0 } stages ||
             before.Claims.Except(after.Claims).Any() || questExp < 0 ||
             goods.Any(g => g.Count <= 0 || data.Row("ItemConfig", g.Entry) == null)) return false;
         var plan = new AwardPlan(0, 0, goods.Select(g => new AwardGrant(g.Entry, g.Count, g.Bind)));
+        // One stage (31178) or a batch (31175): the batch's source names all of its stages (upstream 733835d).
+        object outcome = stages is [int stage]
+            ? new { Version = 1, Stage = stage, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp }
+            : new { Version = 1, Stages = stages, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp };
         var source = new OwnedAwardSource("cd13e/daily-stage",
-            $"daily-stage/{session.Role!.Id}/{after.DailyEpoch}/{stage}",
-            new { Version = 1, Stage = stage, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp });
+            $"daily-stage/{session.Role!.Id}/{after.DailyEpoch}/{string.Join(",", stages)}", outcome);
         try
         {
             return await ApplyAwardAsync(session, plan, taskBaseExp: questExp,
@@ -114,7 +117,9 @@ public sealed partial class CharacterService
         context.BindPresentation(session);
         var attachment = session.Attachment;
         if (taskBaseExp < 0) throw new ArgumentOutOfRangeException(nameof(taskBaseExp));
-        if (manifestType is < 1 or > 19 or 15 or 18) throw new ArgumentOutOfRangeException(nameof(manifestType));
+        // 18 ManifestTypeRunRing is the wheel's notice: LC_DAL_Reward reads its rewardIndexes, so it needs them.
+        if (manifestType is < 1 or > 19 or 15 || manifestType == 18 && rewardIndexes is not { Count: > 0 })
+            throw new ArgumentOutOfRangeException(nameof(manifestType));
         if ((expectedDaily == null) != (nextDaily == null)) throw new ArgumentException("Daily award requires before and after state");
         if (expectedTasks != null && deliveredTaskState == null) throw new ArgumentException("Task comparison requires next task state");
         if (expectedDaily != null && (session.Daily == null
