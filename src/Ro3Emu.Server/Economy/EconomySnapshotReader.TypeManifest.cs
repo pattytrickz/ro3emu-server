@@ -67,7 +67,10 @@ public static partial class EconomySnapshotReader
     // casual_battle_obligation.payout is CasualBattleService.Payout: a frozen match result (rating delta, record,
     // numbers) and the DropPool ids its payment rolls. No goods: they are granted by the role's event/casual-battle
     // receipt that also writes the timed_battle state and marks the row delivered.
-    public const string ExpectedFormatManifestHash = "C30B966932EA711BC056382F73CF7189C57E143F7C7A15351BEC6D13ECDCB91F";
+    // Sol RO3 (live line, kept by the upstream sync): TaskRuntimeState.GrowthRanksClaimed is the legacy list of claimed
+    // Growth Classroom ranks. No balance: GrowthClassService.MigrateLiveClaims copies it once into role.growth_class
+    // (the claimed markers above) and nothing writes it any more.
+    public const string ExpectedFormatManifestHash = "0C78C27DC636FBAB60EF6A7D5382F9CDDAD9312189446BF30FB84887BFE03991";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State

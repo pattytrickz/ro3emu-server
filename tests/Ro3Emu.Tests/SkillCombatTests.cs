@@ -220,7 +220,7 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         Assert.Equal(target.Uid, use.TargetId);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, p => p.SessionId == reply.SessionId);
         Assert.Equal(1100101, hit.ShowPoint); // master's skill-specific EffectData entry for Bash
-        Assert.Equal(0, hit.Split); // no _kShowDmg: one number
+        Assert.Equal(1, hit.Split); // no _kShowDmg: one number (upstream HitSplit: at least 1)
         Assert.True(Assert.Single(hit.Dsts).Damage > 0);
         Assert.True(target.Hp < before);
         var statistics = await Next(alice, CombatService.DamageStatistics, DamageStatisticsNotify.Parser,

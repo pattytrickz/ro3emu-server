@@ -64,6 +64,13 @@ Ro3Emu.Server.Accounts.DungeonRewardObligation/<RoleId>k__BackingField
 Ro3Emu.Server.Accounts.DungeonRewardObligation/<RoomId>k__BackingField
 Ro3Emu.Server.Accounts.DungeonRewardObligation/<SceneEntry>k__BackingField
 Ro3Emu.Server.Accounts.DungeonRewardObligation/<Success>k__BackingField
+Ro3Emu.Server.Accounts.Persistence.AccountCreatePlan/_createdUtc
+Ro3Emu.Server.Accounts.Persistence.AccountCreatePlan/_hash
+Ro3Emu.Server.Accounts.Persistence.AccountCreatePlan/_name
+Ro3Emu.Server.Accounts.Persistence.AccountCreatePlan/_salt
+Ro3Emu.Server.Accounts.Persistence.AccountPasswordPlan/_hash
+Ro3Emu.Server.Accounts.Persistence.AccountPasswordPlan/_name
+Ro3Emu.Server.Accounts.Persistence.AccountPasswordPlan/_salt
 Ro3Emu.Server.Accounts.Persistence.AccountRegisterPlan/_createdUtc
 Ro3Emu.Server.Accounts.Persistence.AccountRegisterPlan/_hash
 Ro3Emu.Server.Accounts.Persistence.AccountRegisterPlan/_name
@@ -344,6 +351,8 @@ Ro3Emu.Server.Accounts.Persistence.PronteraDefenseStationPlan/<map>P
 Ro3Emu.Server.Accounts.Persistence.PronteraDefenseStationPlan/<open>P
 Ro3Emu.Server.Accounts.Persistence.RealmStatePlan/_kind
 Ro3Emu.Server.Accounts.Persistence.RealmStatePlan/_state
+Ro3Emu.Server.Accounts.Persistence.ReceiptCompactionPlan/<batch>P
+Ro3Emu.Server.Accounts.Persistence.ReceiptCompactionPlan/<cutoffUtcMs>P
 Ro3Emu.Server.Accounts.Persistence.RoleAwardStatePlan/_checkTasks
 Ro3Emu.Server.Accounts.Persistence.RoleAwardStatePlan/_daily
 Ro3Emu.Server.Accounts.Persistence.RoleAwardStatePlan/_expectedDaily

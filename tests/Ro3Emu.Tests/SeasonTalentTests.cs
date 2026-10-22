@@ -545,7 +545,7 @@ public sealed class SeasonTalentTests
         var picked = fixture.Session.SeasonTalent!.Plan[0].TalentNodes;
         Assert.Equal([1, 1, 1], new[] { Gate, SonicOption, SonicChoice }.Select(n => picked[n].CurrentLevel));
         Assert.True(fixture.Session.SeasonTalent.UnlockedNode[After]);
-        Assert.Equal(ErrorCodes.SkillMaxLevel, await Upgrade(player, SonicChoice));
+        Assert.Equal(0, await Upgrade(player, SonicChoice)); // choosing the same path again changes nothing
         Assert.Equal([SonicOptionBuff, SonicChoiceBuff],
             session.TalentProcBuffs.Select(b => (int)b.Buff).Order());
         // The passives reach casts: Sonic Blow's (15102) damage parameters carry the option's and the choice's modifiers.
@@ -687,7 +687,7 @@ public sealed class SeasonTalentTests
     public async Task JobTalentPicksCountTowardTheNextTreesTotal()
     {
         // #bug-reports "Job II-1 Talent Tree unable to allocate points": trees I and II hold 40 + 80 ordinary levels,
-        // II+-1 (10103) needs 126 and a rank-4 job. Two picked job talents (gate, option, choice: 3 levels each)
+        // II+-1 (10103) needs 126 and a rank-4 job. Three picked job talents (option and choice: 2 levels each)
         // complete it, as the client counts them.
         const int TreeTwoPlus = 10103, Start = 10103001;
         await using var fixture = new ServerFixture();
@@ -708,10 +708,13 @@ public sealed class SeasonTalentTests
             return Task.CompletedTask;
         });
 
-        Assert.Equal(0, await Upgrade(player, 10102107)); // gate 10102003: 3 levels, 123
+        // The client's grade leaves the SkillPoint gates out (UI_Sys_Skill_SeasonTalentPanelCtrl._buildGradeNodeIDs):
+        // a pick is its option and choice, 2 levels.
+        Assert.Equal(0, await Upgrade(player, 10102107)); // gate 10102003: 122
+        Assert.Equal(0, await Upgrade(player, 10102119)); // gate 10102006: 124
         Assert.False(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
         Assert.False(session.SeasonTalent.UnlockedNode[Start]);
-        Assert.Equal(0, await Upgrade(player, 10102119)); // gate 10102006: 126
+        Assert.Equal(0, await Upgrade(player, 10102126)); // gate 10102010: 126
         Assert.True(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
         Assert.True(session.SeasonTalent.UnlockedNode[Start]);
     }
@@ -749,7 +752,9 @@ public sealed class SeasonTalentTests
 
         Assert.Equal(0, await Upgrade(player, QuickHands)); // its option Cold-Blooded comes with it
         var picked = await Sheet();
-        Assert.Equal(16, picked.Agi - before.Agi); // +8 per learned mastery
+        // "Learning [Katar Mastery] and [Dual-Wield Mastery] grants an Extra 8 AGI": once (upstream's reading of its
+        // two ops, one per mastery).
+        Assert.Equal(8, picked.Agi - before.Agi);
         Assert.True(picked.Patk - before.Patk >= 15, $"Cold-Blooded: {before.Patk} -> {picked.Patk}");
 
         Assert.Equal(0, await Upgrade(player, WeaponMasteryChoice)); // its option Weapon Mastery comes with it
@@ -763,8 +768,13 @@ public sealed class SeasonTalentTests
         });
         var held = await Sheet();
         Assert.True(held.Patk - bare.Patk >= 20, $"Weapon Mastery: {bare.Patk} -> {held.Patk}"); // plus the dagger's own PATK
-        await fixture.Loop.InvokeAsync(() => { session.Progress!.Skills.Remove(15107); return Task.CompletedTask; });
-        Assert.True(held.Agi - (await Sheet()).Agi >= 8); // Quick Hands' 8, plus whatever the mastery gives itself
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            session.Progress!.Skills.Remove(15107);
+            session.Progress.Skills.Remove(15101);
+            return Task.CompletedTask;
+        });
+        Assert.True(held.Agi - (await Sheet()).Agi >= 8); // Quick Hands' 8, plus whatever the masteries give themselves
     }
 
     private static string RepoRoot()

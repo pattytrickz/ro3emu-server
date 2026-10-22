@@ -16,11 +16,8 @@ public sealed class AwardPlan(long groupId, long awardId, IEnumerable<AwardGrant
     public IReadOnlyList<AwardGrant> Grants { get; } = new ReadOnlyCollection<AwardGrant>(grants.ToArray());
 }
 
-/// <summary>An award that cannot be resolved. <see cref="LevelTooLow"/>: the recipient is outside a _kCondition level range.</summary>
-public sealed class AwardResolutionException(string message, bool levelTooLow = false) : InvalidOperationException(message)
-{
-    public bool LevelTooLow { get; } = levelTooLow;
-}
+/// <summary>An award that cannot be resolved (an item award's unmet _kCondition is <see cref="AwardConditionException"/>).</summary>
+public sealed class AwardResolutionException(string message) : InvalidOperationException(message);
 
 /// <summary>
 /// Resolves MultiverseGroupConfig type 0 to AwardConfig, including fixed tuples and actual DropPool terminals.
@@ -70,7 +67,10 @@ public sealed class AwardService(GameData data)
             throw Fail($"AwardConfig {awardId} has multiple open-day rows; authoritative selector unresolved");
         var row = rows.GetArrayLength() == 1 ? rows[0] : OpenDayRow(rows, serverOpenDay!.Value, awardId);
         long baseExp = BaseExp(row, awardId);
-        CheckCondition(row, progress, awardId);
+        // An item award (a box: serverOpenDay given) refuses an unmet level as AwardConditionException, which
+        // ItemBoxService answers with ErrLevelNeed; every other award as before (live: the growth classroom's rank 2).
+        if (serverOpenDay != null && HasValues(row, "_kCondition")) CheckLevelCondition(row, progress, awardId);
+        else CheckCondition(row, progress, awardId);
         if (data.Table("AwardRestricConfig").Values.Any(r => GameData.Int(r, "_iRewardID") == awardId))
             throw Fail($"AwardConfig {awardId} has unresolved restriction/replacement policy");
 
@@ -234,7 +234,7 @@ public sealed class AwardService(GameData data)
             long min = ExactLong(condition[1], "level"), max = ExactLong(condition[2], "level");
             if (progress == null) throw Fail($"AwardConfig {awardId} requires a recipient");
             if (progress.Level < min || progress.Level > max)
-                throw new AwardResolutionException($"AwardConfig {awardId} needs base level {min}-{max}", levelTooLow: true);
+                throw new AwardResolutionException($"AwardConfig {awardId} needs base level {min}-{max}");
         }
     }
 

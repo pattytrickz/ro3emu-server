@@ -254,8 +254,9 @@ public sealed partial class TaskService
         return t[0] switch
         {
             TBaseLevel => p.Level,
-            TJoinGuild => s.Guild is { GuildId: not 0 } ? 1 : 0,
-            TFriends => _friends.Friends(s.Role!.Id).Count,
+            // Guild membership and the friend list load after the quests at login: keep the stored value until then.
+            TJoinGuild => s.Guild == null ? -1 : s.Guild.GuildId != 0 ? 1 : 0,
+            TFriends => FriendCount(s),
             // 500130 [106901,3600] displays whole consumed minutes. Reading the committed
             // daily counter also repairs a disconnect between 5035 persistence and the quest sync (inferred).
             TAfkSeconds => s.WildAfk is { } afk && s.Daily?.DailyEpoch == afk.DailyEpoch ? afk.ConsumedTodaySeconds : 0,
@@ -411,7 +412,6 @@ public sealed partial class TaskService
                     {
                         TKill => ReferenceEquals(session, killer) && target.Length >= 3 && target[1..^1].Contains(monster.Template.NpcId),
                         TKillInvolved => target.Length >= 3 && target[1..^1].Contains(monster.Template.NpcId),
-                        TTenBossWin => target.Length >= 3 && target[2..].Contains(monster.Template.NpcId),
                         TMapKill => target.Length == 3 && target[1] == monster.SceneEntry,
                         TKillOnMap => ReferenceEquals(session, killer) && target.Length == 3 && target[2] == monster.SceneEntry,
                         _ => false
@@ -481,7 +481,6 @@ public sealed partial class TaskService
             {
                 TKill when s == killer && t.Length >= 3 && t[1..^1].Contains(monster.Template.NpcId) => 1,
                 TKillInvolved when t.Length >= 3 && t[1..^1].Contains(monster.Template.NpcId) => 1,
-                TTenBossWin when t.Length >= 3 && t[2..].Contains(monster.Template.NpcId) => 1,
                 TMapKill when t.Length == 3 && t[1] == monster.SceneEntry => 1,
                 TKillOnMap when s == killer && t.Length == 3 && t[2] == monster.SceneEntry => 1,
                 _ => 0,

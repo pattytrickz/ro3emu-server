@@ -138,7 +138,8 @@ public sealed class ProfessionTalentEffectTests : IAsyncDisposable
             Session.Tasks ??= new DBTaskInfo();
             Session.Tasks.CompleteTaskNum[10101170] = 1;
             Session.Tasks.CompleteTaskNum[10103160] = 1;
-            Session.SeasonTalent!.Plan[0].TalentNodes[1].CurrentLevel = 1;
+            // Sol RO3: a bought level is shared by every plan (the global node).
+            Session.SeasonTalent!.TalentNodes[1] = new DBSeasonTalentNode { TalentId = 1, CurrentLevel = 1 };
             await _host.Service<SeasonTalentService>().SyncAsync(Session);
             return 0;
         });

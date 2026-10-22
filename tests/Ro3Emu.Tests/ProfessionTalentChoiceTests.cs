@@ -64,7 +64,8 @@ public sealed class ProfessionTalentChoiceTests
             Session.Tasks ??= new DBTaskInfo();
             Session.Tasks.CompleteTaskNum[10101170] = 1;
             Session.Tasks.CompleteTaskNum[10103160] = 1;
-            Session.SeasonTalent!.Plan[0].TalentNodes[1].CurrentLevel = parentPurchased ? 1 : 0;
+            // Sol RO3: a bought level is shared by every plan (the global node).
+            Session.SeasonTalent!.TalentNodes[1] = new DBSeasonTalentNode { TalentId = 1, CurrentLevel = parentPurchased ? 1 : 0 };
             await Talents.SyncAsync(Session);
         });
 

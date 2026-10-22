@@ -607,10 +607,14 @@ public sealed class GuardianPetTests
         });
     }
 
+    /// <summary>
+    /// Sol RO3 keeps the live rule (player report, 5bacd8c): every Cast Speed shortens the variable chant as the stat
+    /// panel's Variable CT shows, a guardian's as well as any other buff's; the fixed part stays.
+    /// </summary>
     [Theory]
-    [InlineData(false, 3500)]
-    [InlineData(true, 2500)]
-    public async Task OnlyAGuardiansCastSpeedShortensTheVariableChant(bool guardian, int expectedMs)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CastSpeedFromAGuardianOrAnyBuffShortensTheVariableChant(bool guardian)
     {
         await using var f = new Fixture();
         await f.Start();
@@ -619,9 +623,12 @@ public sealed class GuardianPetTests
         var row = JsonSerializer.SerializeToElement(new { _iID = 1, _iChantFix = 500, _iChantVar = 3000 });
         await f.Loop.InvokeAsync(async () =>
         {
+            int before = f.Combat.ChantMs(f.Session, row);
             if (guardian) await buffs.AddGuardianAsync(f.Session, CastSpeedBuff, 5000, f.Session.Role!.Id);
             else await buffs.AddAsync(f.Session, CastSpeedBuff, 5000, f.Session.Role!.Id);
-            Assert.Equal(expectedMs, f.Combat.ChantMs(f.Session, row));
+            int after = f.Combat.ChantMs(f.Session, row);
+            Assert.True(after < before, $"{before} -> {after}");
+            Assert.True(after >= 500); // the fixed part
         });
     }
 }

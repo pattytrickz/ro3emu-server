@@ -22,12 +22,13 @@ public sealed partial class SkillCombatTests
         await Loop.InvokeAsync(async () =>
         {
             var s = Session(name);
-            var plan = s.SeasonTalent!.Plan[s.SeasonTalent.CurPlanId];
+            // Sol RO3: bought levels are shared by every plan (SeasonTalentService), so they are the global nodes.
+            var bought = s.SeasonTalent!.TalentNodes;
             foreach (var row in data.Table("SeasonTalentConfig").Values)
             {
                 long tree = GameData.Int(row, "_iTalentTreeID");
                 if ((tree == 10101 || tree >= 10102 && tree <= optionTree && GameData.Int(row, "_iType") == 1)
-                    && plan.TalentNodes.TryGetValue(GameData.Int(row, "_iId"), out var node))
+                    && bought.TryGetValue(GameData.Int(row, "_iId"), out var node))
                     node.CurrentLevel = (int)GameData.Int(row, "_iMaxLevel");
             }
             await _app.Services.GetRequiredService<SeasonTalentService>().SyncAsync(s);

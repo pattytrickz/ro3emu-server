@@ -49,7 +49,6 @@ public sealed partial class TaskService
     private readonly SkillService _skills;
     private readonly FunctionService _functions;
     private readonly RoleStore _roles;
-    private readonly FriendStore _friends;
     private readonly WorldData _worldData;
     private readonly GameLoop _loop;
     private readonly AwardService _awards;
@@ -71,9 +70,8 @@ public sealed partial class TaskService
     public TaskService(GameData data, CharacterService character, SkillService skills, FunctionService functions, CombatService combat,
         RoleStore roles, WorldData worldData, GameLoop loop, AwardService awards, SessionRegistry sessions,
         EquipmentService equipment, CardService cards, SeasonTalentService talents, SceneService scene, MountService mounts, TimeProvider clock,
-        ILogger<TaskService> log, FriendStore friends)
+        ILogger<TaskService> log)
     {
-        this._friends = friends;
         this._data = data;
         this._character = character;
         this._skills = skills;

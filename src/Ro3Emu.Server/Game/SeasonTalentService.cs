@@ -235,8 +235,8 @@ public sealed partial class SeasonTalentService
         // table no longer has are dropped as the old clear did.
         var nodes = Nodes();
         var plans = state.Plan.Values.ToArray(); // once, not two map views and enumerators per node
-        // A job-talent option opens with its gate and a choice with its option, so parents are published first.
-        // (inferred) They stay open after a choice: UI_Sys_Skill_SeasonTalent_SelectPanel reopens on a chosen gate.
+        // A job-talent branch opens once its gate is picked and an option once its branch is (their parents maxed, as
+        // every node); parents are published first. SelectProfessionAsync only needs the gate open.
         foreach (var node in nodes) if (node.Type is not (ProfessionBranchType or ProfessionOptionType)) Publish(node);
         foreach (var node in nodes) if (node.Type == ProfessionBranchType) Publish(node);
         foreach (var node in nodes) if (node.Type == ProfessionOptionType) Publish(node);
@@ -251,9 +251,7 @@ public sealed partial class SeasonTalentService
             bool pvp = node.Type == PvpNodeType;
             bool activated = state.UnlockedTrees.GetValueOrDefault(tree) && (pvp
                 ? state.BattleOathMaxLevel > 0 : total >= node.NeedLevel
-                    && (node.Type is ProfessionBranchType or ProfessionOptionType
-                        ? Parents(id, tree).Any(p => state.UnlockedNode.GetValueOrDefault(p))
-                        : node.Start || ParentMaxed(state, active, id, tree)));
+                    && (node.Start || ParentMaxed(state, active, id, tree)));
             state.UnlockedNode[id] = activated;
             // A bought level is global. (inferred) A pick node's global entry shows its highest level over the plans;
             // every plan carries its own entry over it.
