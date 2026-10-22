@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Bot;
 using Ro3Emu.Server;
@@ -299,5 +300,43 @@ public sealed class EmojiTests : IAsyncLifetime
         var deadline = DateTime.UtcNow + Wait;
         while (await Progress() < 1 && DateTime.UtcNow < deadline) await Task.Delay(50);
         Assert.Equal(1, await Progress());
+    }
+
+    /// <summary>
+    /// ServerOptions.SitRegenMultiplier (house rule, 1 by default): sitting (Meditate or Sit, once playing) multiplies
+    /// the out-of-combat HP/SP regeneration of each 5 s cycle; standing and the default leave it unchanged.
+    /// </summary>
+    [ClientDataFact]
+    public async Task SittingMultipliesRegenerationByTheHouseRule()
+    {
+        await using var alice = await InWorld("Alice");
+        await LoadedAsync("Alice");
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        var registry = _app.Services.GetRequiredService<SessionRegistry>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
+        var character = _app.Services.GetRequiredService<CharacterService>();
+        var options = _app.Services.GetRequiredService<IOptions<ServerOptions>>().Value;
+        Task<(long Hp, long Sp)> Regen() => loop.InvokeAsync(() =>
+        {
+            var s = registry.All().Single(x => x.Role?.Name == "Alice");
+            return Task.FromResult(combat.RegenAmount(s, character.Stats(s)));
+        });
+
+        var standing = await Regen();
+        Assert.True(standing.Hp > 0 && standing.Sp > 0, $"standing regen {standing}");
+        options.SitRegenMultiplier = 3;
+        Assert.Equal(standing, await Regen()); // standing: unchanged
+        await PlayAsync(alice, Meditate);
+        Assert.Equal((standing.Hp * 3, standing.Sp * 3), await Regen());
+        options.SitRegenMultiplier = 1;
+        Assert.Equal(standing, await Regen()); // the default changes nothing
+
+        options.SitRegenMultiplier = 3;
+        await alice.SendGameAsync(EmojiService.StopPlay, new EmojiStopPlayReq());
+        await State(alice, Id(alice), ObjectState.EObjectStateSmidle);
+        Assert.Equal(standing, await Regen()); // stood up
+        await Task.Delay(600); // PerformanceConfig._iPerformanceCD 500 ms
+        await PlayAsync(alice, Sit);
+        Assert.Equal((standing.Hp * 3, standing.Sp * 3), await Regen());
     }
 }

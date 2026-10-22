@@ -56,6 +56,7 @@ public sealed partial class CombatService : IGameTicker
     private readonly GameData data;
     private readonly GameLoop loop;
     private readonly ILogger<CombatService> log;
+    private readonly ServerOptions? options;
     /// <summary>The combat dice (hit, damage float, crit, effect procs). Tests whose subject is not chance swap in
     /// fixed rolls, so a prepared lethal basic attack cannot randomly miss (the "first swing missed" flaky class).</summary>
     internal CombatRolls Rolls { get; set; } = new();
@@ -269,6 +270,7 @@ public sealed partial class CombatService : IGameTicker
         this.data = data;
         this.loop = loop;
         this.log = log;
+        this.options = options?.Value;
         monsters.Attack = MonsterAttackAsync;
         buffs.ImmuneDeathDeclined = PlayerDiesAsync;
         scene.Leaving.Add(ClearSkillsAsync);
@@ -938,9 +940,20 @@ public sealed partial class CombatService : IGameTicker
         if (s.CurrentHp == null && s.CurrentSp == null) return; // unset = full (CharacterService.Stats): nothing to restore
         var st = character.Stats(s);
         if (st[2000] >= st[101] && st[2001] >= st[102]) return;
-        long rehp = st[107] + st[101] * st.Data.GetValueOrDefault(1071) / 10000;
-        long resp = st[108] + st[102] * st.Data.GetValueOrDefault(1081) / 10000;
-        await character.SetHpSpAsync(s, st[2000] + Math.Max(1, rehp), st[2001] + Math.Max(1, resp));
+        var (rehp, resp) = RegenAmount(s, st);
+        await character.SetHpSpAsync(s, st[2000] + rehp, st[2001] + resp);
+    }
+
+    /// <summary>
+    /// One regeneration cycle's HP and SP (at least 1 each). Sitting multiplies it by the house rule
+    /// <see cref="ServerOptions.SitRegenMultiplier"/> (1 = the original, which gives sitting nothing of its own).
+    /// </summary>
+    internal (long Hp, long Sp) RegenAmount(GameSession s, StatSheet st)
+    {
+        long rehp = Math.Max(1, st[107] + st[101] * st.Data.GetValueOrDefault(1071) / 10000);
+        long resp = Math.Max(1, st[108] + st[102] * st.Data.GetValueOrDefault(1081) / 10000);
+        double sit = EmojiService.Sitting(s) ? options?.SitRegenMultiplier ?? 1 : 1;
+        return (Math.Max(1, (long)Math.Round(rehp * sit)), Math.Max(1, (long)Math.Round(resp * sit)));
     }
 
     private async Task ToPlayerAndViewersAsync(GameSession p, uint msgId, IMessage body)
