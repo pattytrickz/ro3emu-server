@@ -20,7 +20,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 5100");
         await Gm("alice", $"!item {Dagger} 1");
-        var combat = app.Services.GetRequiredService<CombatService>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
         var target = await Target("alice", stationary: true);
         int hits = 0;
         Func<GameSession, MonsterUnit, System.Text.Json.JsonElement, long, Task> count = (s, m, row, amount) =>
@@ -77,7 +77,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 5200");
         await Gm("alice", $"!item {Katar} 1");
-        var combat = app.Services.GetRequiredService<CombatService>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
         var target = await Target("alice", stationary: true);
         int hits = 0;
         Func<GameSession, MonsterUnit, System.Text.Json.JsonElement, long, Task> count = (s, m, row, amount) =>

@@ -16,8 +16,8 @@ public sealed partial class SkillCombatTests
         const int SonicBlow = 1510205, Supersonic = 15103;
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 5200");
-        var combat = app.Services.GetRequiredService<CombatService>();
-        var data = app.Services.GetRequiredService<GameData>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
+        var data = _app.Services.GetRequiredService<GameData>();
         var target = await Target("alice", stationary: true);
         await Loop.InvokeAsync(() =>
         {

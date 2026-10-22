@@ -122,12 +122,15 @@ public sealed class LoadTestLineTests
         var registry = new SessionRegistry(NullLogger<SessionRegistry>.Instance);
         foreach (var (id, line, instance) in new[] { (1, 1, 0L), (2, 2, 0L), (3, 1, 90001L), (4, 1, 90002L) })
         {
-            var s = new GameSession(null!, null!) { Account = id.ToString(), SceneEntry = 10100, LineNumber = line,
-                InstanceId = instance, Role = new Role(id, id.ToString(), 1, $"role{id}", 1, 1000, 1, 1, 0, 0, 10100, 0, 0, 0, 0) };
+            var s = new GameSession(null!, null!)
+            {
+                Account = id.ToString(), SceneEntry = 10100, LineNumber = line,
+                InstanceId = instance, Role = new Role(id, id.ToString(), 1, $"role{id}", 1, 1000, 1, 1, 0, 0, 10100, 0, 0, 0, 0)
+            };
             await registry.RegisterAsync(s);
         }
         using var metrics = new ServerMetrics(false);
-        var snapshot = JsonSerializer.SerializeToElement(metrics.Snapshot(registry));
+        var snapshot = JsonSerializer.SerializeToElement(metrics.Snapshot(SessionCensus.Take(registry)));
         var maps = snapshot.GetProperty("sessions").GetProperty("byMap").EnumerateArray().ToArray();
         Assert.Equal(4, maps.Length);
         Assert.Contains(maps, x => x.GetProperty("kind").GetString() == "PublicLine" && x.GetProperty("line").GetInt32() == 2 &&
@@ -177,5 +180,5 @@ public sealed class LoadTestLineTests
     };
 
     private static ReducerSnapshot Ready() => new(0, 0, 149, 1, 1, [], [], [], [])
-        { Location = new(10100, 10100, 1, true) };
+    { Location = new(10100, 10100, 1, true) };
 }

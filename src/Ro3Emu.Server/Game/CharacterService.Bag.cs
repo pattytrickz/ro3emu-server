@@ -55,8 +55,7 @@ public sealed partial class CharacterService
             if (reply) await session.SendGameAsync(ItemUse, new ItemUseResp { Result = ErrorCodes.FeatureUnavailable, ItemGuid = req.ItemGuid });
             return ErrorCodes.FeatureUnavailable;
         }
-        using var ownerScope = session.Owners is { } owners
-            ? await owners.EnterAsync("character item use", Ownership.ReservationKey.Role(session.Role.Id)) : null;
+        using var ownerScope = await EnterItemUseAsync(session, req);
         using var activityGate = await LockTreasureUseAsync(session, req);
         using var _ = await LockAsync(session);
         var item = session.Items.FirstOrDefault(i => i.Guid == req.ItemGuid && i.Grid == 0);
@@ -69,14 +68,16 @@ public sealed partial class CharacterService
             : item == null || EmblemService.IsEmblem(data, item.Entry) || EmblemService.IsReserved(session, item) || TotemService.IsReserved(session, item) ? ErrorCodes.ItemMissing
             : item.Stack < count ? ErrorCodes.ItemsShort : row == null ? ErrorCodes.ItemNoConfig
             : count > 1 && GameData.Int(row.Value, "_iGroupUse") == 0
-                && !(LifeItemUse != null && HandlesLifeItem(row.Value)) && ChoiceBox(row.Value) == 0 ? ErrorCodes.Parameter
-            : req.ItemParam.Count > 0 && WingDestination(row.Value, req) == null && GiftBox(row.Value) == 0
-                && ChoiceBox(row.Value) == 0 ? ErrorCodes.FeatureUnavailable
+                && !(LifeItemUse != null && HandlesLifeItem(row.Value)) && !IsChoiceBox(row.Value) ? ErrorCodes.Parameter
+            : req.ItemParam.Count > 0 && WingDestination(row.Value, req) == null && !CarriesPetChoice(row.Value, req)
+                && !CarriesBoxParam(row.Value, req)
+                && !AcceptsItemActionParam(row.Value, req) ? ErrorCodes.FeatureUnavailable
             : item.BindExpire > 0 && item.BindExpire <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() ? ErrorCodes.ItemMissing
             : session.Dead ? ErrorCodes.UseWhileDead
             : IsItemUseForbidden?.Invoke(session) == true ? ErrorCodes.ItemUseForbidden
             : session.ItemCds.GetValueOrDefault(item.Entry) > now || group > 0 && session.ItemGroupCds.GetValueOrDefault(group) > now ? ErrItemInCd
             : 0;
+        if (result == 0) result = ItemRuleError(session, row!.Value, item!.Entry, count);
         if (result != 0)
         {
             if (reply) await session.SendGameAsync(ItemUse, new ItemUseResp { Result = result, ItemGuid = req.ItemGuid });
@@ -88,6 +89,7 @@ public sealed partial class CharacterService
         long shareCd = group > 0 && row.Value.TryGetProperty("_kCDGroup", out var g2) && g2.GetArrayLength() > 1 && GameData.Number(g2[1]) is { } share and > 0
             ? now + (long)share : 0;
         var stored = session.BagState.Info.Clone();
+        int useTimes = StageUseTimes(stored, row.Value, entry, count);
         if (itemCd > 0 || shareCd > 0)
         {
             stored.ItemCds ??= new CdData();
@@ -108,8 +110,8 @@ public sealed partial class CharacterService
         if (SpecialItemUse.Count > 0 || LifeItemUse != null)
         {
             var lifeUse = new LifeItemExchangeScope(session, PersistCooldown, PublishCooldown);
-            var previous = lifeItemExchange.Value;
-            lifeItemExchange.Value = lifeUse;
+            var previous = LifeItemExchange.Value;
+            LifeItemExchange.Value = lifeUse;
             try
             {
                 foreach (var handler in SpecialItemUse)
@@ -120,15 +122,11 @@ public sealed partial class CharacterService
                 if (specialized == null && LifeItemUse != null)
                     specialized = await LifeItemUse(session, item, row.Value, count);
             }
-            finally { lifeUse.Active = false; lifeItemExchange.Value = previous; }
+            finally { lifeUse.Active = false; LifeItemExchange.Value = previous; }
         }
         if (specialized == null && IsTreasureMapUse(row.Value))
             specialized = StartTreasureMap == null ? ErrorCodes.FeatureUnavailable
                 : await StartTreasureMap(session, req, PersistCooldown, PublishCooldown);
-        if (specialized == null && GiftBox(row.Value) is var box and > 0)
-            specialized = await OpenGiftBoxAsync(session, entry, box, count, PersistCooldown, PublishCooldown);
-        if (specialized == null && ChoiceBox(row.Value) is var choiceBox and > 0)
-            specialized = await OpenChoiceBoxAsync(session, req, entry, choiceBox, count, PersistCooldown, PublishCooldown);
         result = specialized ?? (CanApplyUseEffects(row.Value) ? WingError(session, row.Value, req) : ErrorCodes.FeatureUnavailable);
         if (result != 0)
         {
@@ -146,7 +144,7 @@ public sealed partial class CharacterService
                 blobs: new Dictionary<string, byte[]> { ["bag_state"] = cooldownBytes },
                 apply: PublishCooldown, costs: [(entry, count)]);
         }
-        if (reply) await session.SendGameAsync(ItemUse, new ItemUseResp { Result = 0, ItemGuid = item.Guid, ItemCount = count, ItemId = entry, ItemCd = itemCd, ShareCd = shareCd });
+        if (reply) await session.SendGameAsync(ItemUse, new ItemUseResp { Result = 0, ItemGuid = item.Guid, ItemCount = count, ItemId = entry, ItemCd = itemCd, ShareCd = shareCd, ItemTimes = useTimes });
         await SyncItemsAsync(session);
         if (itemCd > 0 || shareCd > 0)
         {
@@ -155,6 +153,7 @@ public sealed partial class CharacterService
             await session.SendGameAsync(ItemsCdNotify, notify);
         }
         if (specialized == null) await ApplyUseEffectsAsync(session, row.Value, count, req);
+        else await AfterItemActionAsync(session);
         foreach (var handler in ItemUsed) handler(session, entry, count);
         foreach (var handler in StateChanged) handler(session);
         return 0;
@@ -165,8 +164,10 @@ public sealed partial class CharacterService
     /// <summary>Shortcut/quick-use eligibility recognizes each effect owner; actual use rechecks their runtime limits.</summary>
     private bool CanUseItemEffects(JsonElement row) => CanApplyUseEffects(row)
         || SpecialItemUse.Count > 0 && HandlesCollectionItem(row)
+        || HandlesItemAction(row)
         || LifeItemUse != null && HandlesLifeItem(row)
-        || StartTreasureMap != null && IsTreasureMapUse(row);
+        || StartTreasureMap != null && IsTreasureMapUse(row)
+        || SpecialItemUse.Count > 0 && IsAwardBox(row);
 
     private static bool HandlesCollectionItem(JsonElement row)
     {
@@ -183,72 +184,6 @@ public sealed partial class CharacterService
         var effect = effects[0];
         long Arg(int n) => effect.GetArrayLength() > n ? (long)(GameData.Number(effect[n]) ?? 0) : 0;
         return Arg(0) == 607 || Arg(0) == 315 && Arg(1) == LifeJobService.VigorId;
-    }
-
-    /// <summary>
-    /// A gift box's MultiverseGroupConfig award (ItemConfig _iAward), or 0. The client sends a plain 31323 for these
-    /// (LC_ItemHelper._useItemForBox: the "isFirstHeartBox" param when _kAwardperformance is set). SmallGift 301 and
-    /// RandRewards 302 open on the server; SelfChooseGift 303 (<see cref="ChoiceBox"/>) and SelfChoosePet 912 go through
-    /// UI_Com_RewardSelectPanel and send their choice.
-    /// </summary>
-    private static long GiftBox(JsonElement row) =>
-        GameData.Int(row, "_iType") == 3 && GameData.Int(row, "_iIsUse") == 1 && GameData.Int(row, "_iSubType") is not (303 or 912)
-            && GameData.Int(row, "_iAward") is var award and > 0 ? award : 0;
-
-    /// <summary>
-    /// A SelfChooseGift 303 box's MultiverseGroupConfig award (ItemConfig _iAward), or 0: the selection chests (Blue Card
-    /// Selection Chest, the Growth T3 equipment chests). The client sends selfChooseGift.chooseGift {option from 1: units},
-    /// whose units add up to the count (UI_Com_RewardSelectWidgetCtrl.BuildUseParam); the options are the award's _kAward
-    /// tuples in order (Lua_CFG_AwardConfig.GetAwardList), as upstream ItemBoxService reads them.
-    /// </summary>
-    private static long ChoiceBox(JsonElement row) =>
-        GameData.Int(row, "_iType") == 3 && GameData.Int(row, "_iIsUse") == 1 && GameData.Int(row, "_iSubType") == 303
-            && GameData.Int(row, "_iAward") is var award and > 0 ? award : 0;
-
-    private const int ErrUseParam = 155; // ErrorCodeConfig 155 "Invalid item use parameters"
-
-    /// <summary>Opens <paramref name="count"/> selection chests: the chosen options, the boxes and the grants in one commit.</summary>
-    private async Task<int> OpenChoiceBoxAsync(GameSession session, ItemUseReq req, int entry, long award, int count,
-        Action<RoleItemPlanBuilder> persist, Action publish)
-    {
-        if (req.ItemParam.Count != 1 || req.ItemParam[0].VarCase != ItemUseParamInfo.VarOneofCase.SelfChooseGift)
-            return ErrUseParam;
-        List<AwardGrant> options;
-        try { options = awards.Resolve(session, award).Grants.Where(g => g.Entry is not (100 or 101)).ToList(); }
-        catch (AwardResolutionException e)
-        {
-            log.LogWarning("Selection chest {Entry} award {Award} not opened: {Reason}", entry, award, e.Message);
-            return e.LevelTooLow ? ErrorCodes.PlayerLevelLow : ErrorCodes.FeatureUnavailable;
-        }
-        var picks = req.ItemParam[0].SelfChooseGift.ChooseGift;
-        if (options.Count == 0) return ErrorCodes.RewardMissing;
-        if (picks.Count == 0 || picks.Any(p => p.Key < 1 || p.Key > options.Count || p.Value <= 0)
-            || picks.Values.Sum(v => (long)v) != count) return ErrUseParam;
-        var grants = picks.OrderBy(p => p.Key)
-            .Select(p => options[p.Key - 1] with { Count = checked(options[p.Key - 1].Count * p.Value) }).ToList();
-        bool done = await ApplyAwardAsync(session, new AwardPlan(award, 0, grants), costs: [(entry, count)],
-            persist: persist, stateLockHeld: true, committed: publish);
-        return done ? 0 : ErrorCodes.ItemsShort;
-    }
-
-    /// <summary>Opens <paramref name="count"/> boxes: one award roll each, the boxes and the grants in one commit.</summary>
-    private async Task<int> OpenGiftBoxAsync(GameSession session, int entry, long award, int count,
-        Action<RoleItemPlanBuilder> persist, Action publish)
-    {
-        var grants = new List<AwardGrant>();
-        try
-        {
-            for (int i = 0; i < count; i++) grants.AddRange(awards.Resolve(session, award).Grants);
-        }
-        catch (AwardResolutionException e)
-        {
-            log.LogWarning("Gift box {Entry} award {Award} not opened: {Reason}", entry, award, e.Message);
-            return ErrorCodes.FeatureUnavailable;
-        }
-        if (grants.Count == 0) return ErrorCodes.RewardMissing;
-        bool done = await ApplyAwardAsync(session, new AwardPlan(award, 0, grants), costs: [(entry, count)],
-            persist: persist, stateLockHeld: true, committed: publish);
-        return done ? 0 : ErrorCodes.ItemsShort;
     }
 
     private bool CanApplyUseEffects(JsonElement row)
@@ -268,6 +203,10 @@ public sealed partial class CharacterService
     }
 
     private const int JumpSameMap = 101, JumpOtherMap = 102;
+
+    /// <summary>A 204 SelfChoosePet box sends its pick as selfChoosePet; PetService.TryUseSelfChooseAsync owns the use.</summary>
+    private static bool CarriesPetChoice(JsonElement row, ItemUseReq req) => UseActions(row).Contains(PetService.SelfChoosePetAction)
+        && req.ItemParam.Count == 1 && req.ItemParam[0].VarCase == ItemUseParamInfo.VarOneofCase.SelfChoosePet;
 
     /// <summary>Moves the player for a wing: a destination scene (the current one for a Fly Wing). WorldCoreService.</summary>
     public Func<GameSession, long, Task<bool>>? WingJump { get; set; }

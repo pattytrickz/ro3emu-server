@@ -15,11 +15,20 @@ public sealed class CoreMessages(RoleSessionService roleSessions, ChatService ch
 
     public void Map(Messaging.MessageRoutes routes)
     {
+        // What the client sends before its role is in the world; anything else is refused until then.
+        // NW_NetworkManager pings with HEARTBEAT from the moment it connects, before the account signs in.
+        routes.AllowFrom(Messaging.SessionStage.Connected, id => id == MsgId.Heartbeat);
+        // LC_LoginManager on the role screen: LOGIN_ROLE_CREATE, LOGIN_ROLE_SELECT, and UPLOAD_CLIENT_SDK_INFO in
+        // OnChooseRoleLoginCallback, the answer to the selection.
+        routes.AllowFrom(Messaging.SessionStage.RoleScreen,
+            id => id is MsgId.LoginRoleCreate or MsgId.LoginRoleSelect or MsgId.UploadClientSdkInfo);
         routes.AdmitRuntime(id => id is MsgId.SceneLoaded or MsgId.PreSwitchRole or MsgId.LoginRoleSelect or MsgId.Logout
             or MsgId.Heartbeat, "dispatcher/owned continuation");
         // Role creation writes only its new role (the unique name index decides between accounts).
         routes.AdmitAccount(id => id == MsgId.LoginRoleCreate);
-        routes.AdmitRole(id => id is MsgId.Walk or MsgId.SaveSetting or MsgId.ClientEnterMainUi or MsgId.UploadClientSdkInfo);
+        routes.AdmitRole(id => id is MsgId.Walk or MsgId.SaveSetting or MsgId.ClientEnterMainUi);
+        // The SDK info report is not kept: its empty handler reserves nothing, also on the role screen.
+        routes.AdmitRuntime(id => id == MsgId.UploadClientSdkInfo, "dispatcher/ignored report");
         routes.AdmitRole(id => id is FeedbackService.SubmitMsg); // reads the sender, appends to its own report file
 
         routes.Map(GuildChallengeService.Notify, "handler", async (session, msgId, body) =>
@@ -28,13 +37,19 @@ public sealed class CoreMessages(RoleSessionService roleSessions, ChatService ch
         routes.Map(2001, "handler", async (session, msgId, body) =>
         {
             var order = CreateOrderReq.Parser.ParseFrom(body.Span);
-            await session.SendGameAsync(2001, new CreateOrderResp { Result = ErrorCodes.FeatureUnavailable,
-                ChargeId = order.ChargeId, ChargeType = order.ChargeType });
+            await session.SendGameAsync(2001, new CreateOrderResp
+            {
+                Result = ErrorCodes.FeatureUnavailable,
+                ChargeId = order.ChargeId, ChargeType = order.ChargeType
+            });
         });
         routes.Map(2002, "handler", async (session, msgId, body) =>
         {
-            await session.SendGameAsync(2002, new PayResultResp { Result = ErrorCodes.FeatureUnavailable,
-                OrderId = PayResultReq.Parser.ParseFrom(body.Span).OrderId });
+            await session.SendGameAsync(2002, new PayResultResp
+            {
+                Result = ErrorCodes.FeatureUnavailable,
+                OrderId = PayResultReq.Parser.ParseFrom(body.Span).OrderId
+            });
         });
         routes.Map(2003, "handler", async (session, msgId, body) =>
         {
@@ -128,8 +143,11 @@ public sealed class CoreMessages(RoleSessionService roleSessions, ChatService ch
             // Equipment ranking in tooltips (UI_Com_ItemTips_Equip_HeadWidgetCtrl._requestRankData, board 1401): both ids
             // echoed (an empty reply caches item 0), 0 when the instance is not on the board.
             var rank = QueryEquipRankReq.Parser.ParseFrom(body.Span);
-            await session.SendGameAsync(EquipGetRank, new QueryEquipRankRes { Rankid = rank.Rankid, Itemuid = rank.Itemuid,
-                Rank = await ranks.EquipRankAsync(rank.Rankid, rank.Itemuid) });
+            await session.SendGameAsync(EquipGetRank, new QueryEquipRankRes
+            {
+                Rankid = rank.Rankid, Itemuid = rank.Itemuid,
+                Rank = await ranks.EquipRankAsync(rank.Rankid, rank.Itemuid)
+            });
         });
         routes.Map(AuctionService.Sync, "handler", async (session, msgId, body) =>
         {
@@ -235,10 +253,6 @@ public sealed class CoreMessages(RoleSessionService roleSessions, ChatService ch
         routes.Map(TaskService.TaskDelivery, "tasks", async (session, msgId, body) =>
         {
             await tasks.DeliverAsync(session, TaskDeliveryReq.Parser.ParseFrom(body.Span));
-        });
-        routes.Map(TaskService.GrowthClassRankReward, "tasks", async (session, msgId, body) =>
-        {
-            await tasks.ClaimGrowthRankAsync(session, GrowthClassGetRankRewardReq.Parser.ParseFrom(body.Span));
         });
         routes.Map(TaskService.TaskGiveUp, "tasks", async (session, msgId, body) =>
         {

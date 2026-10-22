@@ -3,7 +3,9 @@ using System.Text.Json;
 using Google.Protobuf;
 using Romsg;
 using Tencent.IM;
+using Microsoft.Extensions.Options;
 using Ro3Emu.Server.Accounts;
+using Ro3Emu.Server.Data;
 
 namespace Ro3Emu.Server.Game;
 
@@ -14,10 +16,28 @@ namespace Ro3Emu.Server.Game;
 /// ("4_&lt;sceneId&gt;" map chat, "@TGS#_1_&lt;cluster&gt;" world, ...), joined through romsg 77002; whispers address
 /// a role id.
 /// </summary>
-public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildStore guilds, FriendStore friends, ILogger<ChatService> log)
+public sealed partial class ChatService
 {
+    private readonly GmCommands _gm;
+    private readonly FeedbackService _feedback;
+    private readonly GuildStore _guilds;
+    private readonly FriendStore _friends;
+    private readonly CharacterService _character;
+    private readonly GameData _data;
+    private readonly SessionRegistry _sessions;
+    private readonly IOptions<ServerOptions> _options;
+    private readonly ILogger<ChatService> _log;
+
+    public ChatService(GmCommands gm, FeedbackService feedback, GuildStore guilds, FriendStore friends, CharacterService character,
+        GameData data, SessionRegistry sessions, IOptions<ServerOptions> options, ILogger<ChatService> log)
+    {
+        this._gm = gm; this._feedback = feedback; this._guilds = guilds; this._friends = friends; this._character = character; this._data = data;
+        this._sessions = sessions; this._options = options; this._log = log;
+        character.RegisterItemAction(SoundTransmissionAction, UseHornAsync, takesParam: true);
+    }
+
     /// <summary>Bug reports: "/bug" lines here and the client hook's message (GameMessageHandler routes it through this).</summary>
-    public FeedbackService Feedback => feedback;
+    public FeedbackService Feedback => _feedback;
 
     /// <summary>Player chat commands ("/pass week"): the first word, any case, and the rest of the line. Never shown to others.</summary>
     public Dictionary<string, Func<GameSession, string, Task>> PlayerCommands { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -157,12 +177,12 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
     {
         if (group.StartsWith("5_", StringComparison.Ordinal))
             return long.TryParse(group.AsSpan(2), out long groupId) && groupId > 0 && group == $"5_{groupId}"
-                && session.Role != null && friends.Group(groupId.ToString()) is { } chatGroup
+                && session.Role != null && _friends.Group(groupId.ToString()) is { } chatGroup
                 && chatGroup.Members.Any(m => m.Role == session.Role.Id);
         if (!GuildChannel(group)) return true;
         // Canonical spelling is required so leaving 2_<id> always removes the exact joined group.
         return long.TryParse(group.AsSpan(2), out long guildId) && guildId > 0
-            && group == $"2_{guildId}" && session.Role != null && guilds.ForRole(session.Role.Id)?.Id == guildId;
+            && group == $"2_{guildId}" && session.Role != null && _guilds.ForRole(session.Role.Id)?.Id == guildId;
     }
 
     public void GuildMembershipChanged(GameSession session, long formerGuildId) => Leave(session, $"2_{formerGuildId}");
@@ -244,7 +264,7 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
 
             default:
                 // Join via IM (unused), voice messages, translation...: chat_result false (field absent = false).
-                log.LogDebug("chat cmd {Cmd} from {Name} refused", (uint)cmd, session.Role.Name);
+                _log.LogDebug("chat cmd {Cmd} from {Name} refused", (uint)cmd, session.Role.Name);
                 await DownRawAsync(session, (uint)cmd, 0, []);
                 break;
         }
@@ -271,7 +291,7 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
         {
             // Bug report: acknowledged like a GM line and shown to nobody; the answer comes on the marquee.
             await DownAsync(sender, Cmd.SendText, new SendTextChatMessageResponse { ChatResult = true, Msg = message });
-            await feedback.SubmitAsync(sender, report, "chat");
+            await _feedback.SubmitAsync(sender, report, "chat");
             return;
         }
 
@@ -282,11 +302,11 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
             return;
         }
 
-        if (gm.IsCommand(req.Content))
+        if (_gm.IsCommand(req.Content))
         {
             // GM command: acknowledge the send (the client waits for it) but show the line to nobody.
             await DownAsync(sender, Cmd.SendText, new SendTextChatMessageResponse { ChatResult = true, Msg = message });
-            await gm.RunAsync(sender, req.Content.Trim());
+            await _gm.RunAsync(sender, req.Content.Trim());
             return;
         }
 
@@ -323,7 +343,7 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
             recipients = recipients.Where(p => GuildAllowed(p, req.ReceiveId)).ToList();
         }
         if (req.ChatType != ChatTypePrivate) Remember(message, sender);
-        log.LogInformation("Chat {Name} -> {Target} ({Count} recipient(s)): {Text}", sender.Role.Name, req.ReceiveId, recipients.Count, req.Content);
+        _log.LogInformation("Chat {Name} -> {Target} ({Count} recipient(s)): {Text}", sender.Role.Name, req.ReceiveId, recipients.Count, req.Content);
 
         await DownAsync(sender, Cmd.SendText, new SendTextChatMessageResponse { ChatResult = true, Msg = message });
         // Every recipient gets the push, the sender included: the send response alone does not add the line.
@@ -380,6 +400,32 @@ public sealed class ChatService(GmCommands gm, FeedbackService feedback, GuildSt
                 try { await DownAsync(target, Cmd.NotifyNewText, new NotifyNewTextChatMessage { Msg = message }); }
                 catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or ObjectDisposedException) { }
         }
+    }
+
+    /// <summary>
+    /// The Guild League elite team card in the guild channel "2_&lt;guild&gt;": extra_param templateId 102 GuildTeam with
+    /// commonData guildId/teamId/playerId (LC_ChatMessageHandler.lua:850-870; the client shows text 170138 and the
+    /// LC_LinkHelper GuildTeam link, whose tap sends 42014 for teamId).
+    /// </summary>
+    public async Task PublishGuildTeamAsync(GameSession sender, long guildId, long teamId, string content)
+    {
+        string group = $"2_{guildId}";
+        GameSession[] recipients;
+        lock (_sync) recipients = _groups.TryGetValue(group, out var members) ? members.ToArray() : [];
+        var message = new TextChatMessage
+        {
+            MessageId = Interlocked.Increment(ref _nextMessageId).ToString(), SenderId = sender.Role!.Id.ToString(),
+            ReceiveId = group, SendTime = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds(), Content = content,
+            ExtraParam = JsonSerializer.Serialize(new
+            {
+                templateId = 102,
+                commonData = JsonSerializer.Serialize(new { guildId, teamId = teamId.ToString(), playerId = sender.Role.Id.ToString() }),
+            }),
+        };
+        Remember(message);
+        foreach (var to in recipients.Where(r => GuildAllowed(r, group)))
+            try { await DownAsync(to, Cmd.NotifyNewText, new NotifyNewTextChatMessage { Msg = message }); }
+            catch (Exception e) when (e is IOException or System.Net.Sockets.SocketException or ObjectDisposedException) { }
     }
 
     private bool Join(GameSession session, string group)

@@ -18,45 +18,39 @@ namespace Ro3Emu.Tests;
 [Collection("Market server")]
 public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly string directory = Path.Combine(Path.GetTempPath(), "ro3-market-owner-" + Guid.NewGuid().ToString("N"));
-    private WebApplication app = null!;
-    private string url = "";
-    private GameLoop Loop => app.Services.GetRequiredService<GameLoop>();
-    private OwnerRegistry Owners => app.Services.GetRequiredService<OwnerRegistry>();
-    private AccountStore Accounts => app.Services.GetRequiredService<AccountStore>();
-    private RoleStore Roles => app.Services.GetRequiredService<RoleStore>();
-    private MarketStore Market => app.Services.GetRequiredService<MarketStore>();
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "ro3-market-owner-" + Guid.NewGuid().ToString("N"));
+    private WebApplication _app = null!;
+    private string _url = "";
+    private GameLoop Loop => _app.Services.GetRequiredService<GameLoop>();
+    private OwnerRegistry Owners => _app.Services.GetRequiredService<OwnerRegistry>();
+    private AccountStore Accounts => _app.Services.GetRequiredService<AccountStore>();
+    private RoleStore Roles => _app.Services.GetRequiredService<RoleStore>();
+    private MarketStore Market => _app.Services.GetRequiredService<MarketStore>();
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     public async Task InitializeAsync()
     {
         var (http, micro, game) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = directory; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.DataDir = _directory; o.GameDataDir = SyntheticData.Dir;
             o.HttpPort = http; o.MicroGatePort = micro; o.GameGatePort = game;
         });
-        await app.StartAsync(); url = $"http://127.0.0.1:{http}";
+        await _app.StartAsync(); _url = $"http://127.0.0.1:{http}";
     }
     public async Task DisposeAsync()
     {
         Accounts.BeforeOwnedCommitForTest = null; Accounts.BeforeOwnedApplyForTest = null;
         Accounts.AfterWriterCommitForTest = null;
-        await app.StopAsync(); await app.DisposeAsync();
-        Directory.Delete(directory, true);
-    }
-    private static string RepoRoot()
-    {
-        for (var path = new DirectoryInfo(AppContext.BaseDirectory); path != null; path = path.Parent)
-            if (File.Exists(Path.Combine(path.FullName, "Ro3Emu.slnx"))) return path.FullName;
-        throw new InvalidOperationException("repository root");
+        await _app.StopAsync(); await _app.DisposeAsync();
+        Directory.Delete(_directory, true);
     }
     private async Task<(BotClient Bot, GameSession Session)> Login(string name)
     {
-        var bot = new BotClient(url, File.ReadAllText(Path.Combine(directory, "gate_rsa_public.pem")));
+        var bot = new BotClient(_url, File.ReadAllText(Path.Combine(_directory, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw"); await bot.EnterGateAsync();
         long id = (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id;
         await bot.EnterWorldAsync(id);
-        var session = await Loop.InvokeAsync(() => Task.FromResult(app.Services.GetRequiredService<SessionRegistry>()
+        var session = await Loop.InvokeAsync(() => Task.FromResult(_app.Services.GetRequiredService<SessionRegistry>()
             .All().Single(s => s.Role?.Id == id)));
         return (bot, session);
     }
@@ -77,7 +71,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
         return 0;
     }
 
-    [ClientDataFact]
+    [Fact]
     public async Task MultiSellerCommitAndSlowNoticeFenceOnlyParticipantsAndPublishAllTogether()
     {
         var (buyerBot, buyer) = await Login("Ownerbuyer"); await using var b = buyerBot;
@@ -151,7 +145,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
         }
     }
 
-    [ClientDataFact]
+    [Fact]
     public async Task MarketDeliveryRestagesMailboxAfterWaitingForEarlierDelivery()
     {
         var (bot, session) = await Login("Restagemail"); await using var client = bot;
@@ -163,7 +157,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
             committing.TrySetResult(); return release.Task;
         };
         Owners.DeferredForTest = origin => { if (origin == "market") deferred.TrySetResult(); };
-        var raw = app.Services.GetRequiredService<MailService>().SendRawAsync(role, "first", "body");
+        var raw = _app.Services.GetRequiredService<MailService>().SendRawAsync(role, "first", "body");
         Task<int>? market = null;
         int captures = 0;
         string finalMail = "";
@@ -191,7 +185,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Single(box.Letters, letter => letter.Id == finalMail && letter.Currency[1] == 7);
     }
 
-    [ClientDataTheory]
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MarketPurchaseWaitsForCommittedParticipantApplyThenUsesNewBalances(bool speculativeRefusal)
@@ -298,7 +292,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
             [ReservationKey.Role(role)], async () =>
             {
                 using var state = await CharacterService.Lock(session);
-                await app.Services.GetRequiredService<CharacterService>().ExchangeLockedAsync(session, [], [],
+                await _app.Services.GetRequiredService<CharacterService>().ExchangeLockedAsync(session, [], [],
                     popup: false, sync: false, currencyGoods: new Dictionary<int, long> { [1] = 7 }, asyncCommit: true,
                     appliedBeforeNotify: () => throw new InvalidOperationException("injected publication failure"));
             })));
@@ -314,7 +308,7 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
         });
     }
 
-    [ClientDataFact]
+    [Fact]
     public async Task SqlConflictRollsBackEveryParticipantAndRetryHasOneOutcome()
     {
         var (bot, buyer) = await Login("Conflictbuyer"); await using var client = bot;
@@ -333,12 +327,12 @@ public sealed class MarketOwnerTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Single(JsonSerializer.Deserialize<MailService.Mailbox>(Roles.LoadMailbox(seller)!)!.Letters);
     }
 
-    [ClientDataFact]
+    [Fact]
     public async Task MailClaimKeepsLiveStateUnchangedUntilReceiptAndAllowsUnrelatedProgress()
     {
         var (bot, owner) = await Login("Claimowner"); await using var client = bot;
         long role = owner.Role!.Id;
-        string mail = await app.Services.GetRequiredService<MailService>().SendRawAsync(role, "claim", "owner", [new(1, 7)]);
+        string mail = await _app.Services.GetRequiredService<MailService>().SendRawAsync(role, "claim", "owner", [new(1, 7)]);
         long before = owner.Progress!.Currency[1];
         long other = Roles.Create("other", 1, "ClaimOther", 1, 1000, 1)!.Id;
         var entered = Signal(); var release = Signal();

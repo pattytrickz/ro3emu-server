@@ -56,7 +56,7 @@ public sealed partial class SkillCombatTests
         await Loop.InvokeAsync(async () =>
         {
             var s = Session("alice");
-            await app.Services.GetRequiredService<BuffService>().RemoveAsync(s, Assert.Single(s.Buffs, b => b.ConfigId == 1120701));
+            await _app.Services.GetRequiredService<BuffService>().RemoveAsync(s, Assert.Single(s.Buffs, b => b.ConfigId == 1120701));
             await Character.SetHpSpAsync(s, 1, null);
         });
         await Task.Delay(2200);
@@ -69,7 +69,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 1100");
         await Gm("alice", "!lvl 40");
-        var combat = app.Services.GetRequiredService<CombatService>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
         long plain = await Loop.InvokeAsync(() => Task.FromResult(combat.RegenAmount(Session("alice"), Character.Stats(Session("alice"))).Hp));
         await Teach("alice", 11006);
         long boosted = await Loop.InvokeAsync(() =>

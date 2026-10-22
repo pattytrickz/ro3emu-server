@@ -33,7 +33,7 @@ public sealed partial class DungeonTests
         {
             var template = Service<MonsterService>().Template(npc);
             Assert.NotNull(template); // a client NPCConfig monster: the client can show it
-            // Story templates have no normal attack in the client; each borrows one (except a passive Pupa).
+            // Story templates swing their own normal attacks (MainStory_*NormalAttack, the rows the airship crew list).
             if (npc / 100000 == 53) Assert.NotEqual(0, template.NormalSkill);
         }
     }
@@ -108,7 +108,7 @@ public sealed partial class DungeonTests
         var notices = alice.Inbox.Snapshot().Where(e => e.IsGame(DungeonService.ReviveInfo))
             .Select(e => SyncClientPlayerReviveInfoNtf.Parser.ParseFrom(e.Body)).Where(n => n.BDead).ToArray();
         var notice = Assert.Single(notices);
-        long now = clock.GetUtcNow().ToUnixTimeSeconds(); // the fixture's manual clock
+        long now = _clock.GetUtcNow().ToUnixTimeSeconds(); // the fixture's manual clock
         Assert.InRange(notice.ReviveTime, now, now + 6); // Culvert's OnClickRevive [[2,5]], not the generic 30 s
     }
 

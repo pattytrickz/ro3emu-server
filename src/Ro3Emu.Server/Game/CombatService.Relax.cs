@@ -26,10 +26,10 @@ public sealed partial class CombatService
             if (s.Role != role || s.Role == null || s.Dead || s.SceneLoading || s.SceneRecoveryRequired
                 || !ReferenceEquals(s.Attachment, attachment) || attachment?.Cancelled == true
                 || !s.Buffs.Any(b => b.Guid == buff.Guid && b.ExpireMs > MonsterService.NowMs)) return;
-            var stats = character.Stats(s);
+            var stats = _character.Stats(s);
             long actual = Math.Min(amount, Math.Max(0, stats[101] - stats[2000]));
             if (actual == 0) return;
-            await character.SetHpSpAsync(s, stats[2000] + actual, null);
+            await _character.SetHpSpAsync(s, stats[2000] + actual, null);
             foreach (var handler in Healed) handler(s, actual);
             foreach (var handler in HealedAsync) await handler(s, actual);
             await RecordDamageStatisticAsync(s, new DamageStatistics
@@ -48,6 +48,6 @@ public sealed partial class CombatService
         // five-second buff without racing its expiry. Removal/refresh/death cancels the old pulses.
         await HealAsync();
         for (int tick = 1; tick < ticks; tick++)
-            loop.ScheduleRuntime(TimeSpan.FromSeconds(tick), HealAsync);
+            _loop.ScheduleRuntime(TimeSpan.FromSeconds(tick), HealAsync);
     }
 }

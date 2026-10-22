@@ -16,18 +16,18 @@ namespace Ro3Emu.Tests;
 /// <summary>Spirit Tower's wire contract and authoritative lifecycle; no original client is run.</summary>
 public sealed class TowerTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-tower-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-tower-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
-    private WebApplication app = null!;
-    private string http = "";
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private WebApplication _app = null!;
+    private string _http = "";
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
 
     public async Task InitializeAsync()
     {
         var (httpPort, microPort, gamePort) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir;
+            o.DataDir = _dataDir;
             o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = httpPort;
             o.MicroGatePort = microPort;
@@ -35,22 +35,22 @@ public sealed class TowerTests : IAsyncLifetime
         });
         // Floors belong to playbook 101; keep this fixture independent of any persisted server playbook.
         SetPlayBook(101);
-        SureHitRolls.Install(app); // lethal hits are prepared; a FLEE miss would only be noise
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{httpPort}";
+        SureHitRolls.Install(_app); // lethal hits are prepared; a FLEE miss would only be noise
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{httpPort}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync();
-        await app.DisposeAsync();
+        await _app.StopAsync();
+        await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name, bool create = true, int cleared = 0)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw");
         await bot.EnterGateAsync();
         long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
@@ -69,7 +69,7 @@ public sealed class TowerTests : IAsyncLifetime
     private async Task Gm(string account, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
 
     private async Task Eligible(BotClient bot, int level = 99)
@@ -186,6 +186,41 @@ public sealed class TowerTests : IAsyncLifetime
         });
         Assert.Equal(225, CombatService.ScaleMonsterDamage(250, 9000));
         Assert.Equal(0, CombatService.ScaleMonsterDamage(0, 9000));
+        await alice.SendGameAsync(TowerService.LeaveDungeon, new LeaveDungeonReq());
+        Assert.Equal(0, (await Next(alice, TowerService.LeaveDungeon, LeaveDungeonRsp.Parser)).Result);
+    }
+
+    [ClientDataFact]
+    public async Task ATeamBelowTheRecommendedPowerMeetsASuppressedFloor()
+    {
+        // PowerSuppressConfig: a power under 80% of floor 1's 6000 puts 5000001 (215/216 -10%) on its monsters.
+        await using var alice = await InWorld("Alice");
+        await Eligible(alice);
+        var entered = await EnterFloor(alice, 1);
+        Assert.Equal(2, entered.Monsters.Length);
+        Assert.All(entered.Monsters, m => Assert.Equal(1200, m.Property.Single(p => p.Idx == 101).Data));
+        var tower = Service<TowerService>();
+        var buffs = Service<BuffService>();
+        MonsterUnit[] floor = [];
+        for (var until = DateTime.UtcNow + Wait; ; await Task.Delay(50))
+        {
+            bool ready = false;
+            await OnLoop(() =>
+            {
+                floor = Service<World>().AllUnits().OfType<MonsterUnit>().Where(m => m.InstanceId == entered.Scene.SceneID).ToArray();
+                ready = floor.Length == 2 && floor.All(m => buffs.UnitAttributes(m).Any(a => a.Id == 215));
+                return Task.CompletedTask;
+            });
+            if (ready) break;
+            Assert.True(DateTime.UtcNow < until, "suppression buff not applied");
+        }
+        Assert.Equal(new TowerService.Suppression(5000001, -1000, -1000), Session(alice).TowerAttempt!.Suppressed);
+        Assert.All(floor, m =>
+        {
+            Assert.Equal(10000, m.DamageRatio);
+            Assert.Equal(900, tower.SuppressDealt(m, 1000));
+            Assert.Equal(1100, tower.SuppressTaken(m, 1000));
+        });
         await alice.SendGameAsync(TowerService.LeaveDungeon, new LeaveDungeonReq());
         Assert.Equal(0, (await Next(alice, TowerService.LeaveDungeon, LeaveDungeonRsp.Parser)).Result);
     }
@@ -526,6 +561,8 @@ public sealed class TowerTests : IAsyncLifetime
             };
             var hooks = Service<CombatService>().BeforeKilled;
             hooks.Insert(hooks.FindIndex(h => h.Target is RewardService), failApply);
+            // Held from here on: the fault closes the connection, after which the registry may already have dropped it.
+            var session = Session(alice);
             try
             {
                 await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = position, BStop = true, SpeedRate = 1 });
@@ -535,8 +572,8 @@ public sealed class TowerTests : IAsyncLifetime
                 await staged.Task.WaitAsync(Wait);
                 await faulted.Task.WaitAsync(Wait);
                 // The child reward permit aborts first; the parent cast then finalizes the paid death.
-                for (int i = 0; i < 100 && (!Session(alice).Channel.PeerClosed || !final.Dead); i++) await Task.Delay(20);
-                Assert.True(Session(alice).Channel.PeerClosed);
+                for (int i = 0; i < 100 && (!session.Channel.PeerClosed || !final.Dead); i++) await Task.Delay(20);
+                Assert.True(session.Channel.PeerClosed);
             }
             finally { hooks.Remove(failApply); }
             Assert.Equal(1, applyFaults);
@@ -545,14 +582,14 @@ public sealed class TowerTests : IAsyncLifetime
             Assert.True(await Service<CharacterService>().RewardSourceCommittedAsync(final.RewardSettlement.SourceKey));
             Assert.True(attempt.ClearCommitted);
             Assert.DoesNotContain(final.Uid, attempt.Killed);
-            Assert.Equal(RoleOwnerState.RecoveryRequired, Session(alice).Owner!.State);
+            Assert.Equal(RoleOwnerState.RecoveryRequired, session.Owner!.State);
             Assert.Equal(1, DBClimTower.Parser.ParseFrom(Service<RoleStore>().LoadTower(role)!).LayerConfID);
             Assert.Equal(5, Count(alice, 1250709));
             Assert.Equal(9, Count(alice, 1250701));
             Assert.DoesNotContain(alice.Inbox.Snapshot(), packet => packet.IsGame(TowerService.End));
         }
-        await app.StopAsync();
-        await app.DisposeAsync();
+        await _app.StopAsync();
+        await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         await InitializeAsync();
         await using var recovered = await InWorld("Alice", create: false);
@@ -723,4 +760,35 @@ public sealed class TowerTests : IAsyncLifetime
         throw new DirectoryNotFoundException("repository root");
     }
 
+    /// <summary>
+    /// 101007 CheckFinishPetFloor and 101010 CheckWinPetFloor count settled floor attempts and won ones; 104008
+    /// CheckPetFloor reads the highest cleared floor. The counts survive a relogin.
+    /// </summary>
+    [ClientDataFact]
+    public async Task FloorAttemptsAndWinsMoveTheTowerQuests()
+    {
+        long role;
+        await using (var alice = await InWorld("Alice"))
+        {
+            role = (long)alice.Self!.Uuid;
+            await Eligible(alice);
+            await QuestProbe.AcceptAsync(_app, _http, "alice", 306040); // [101007,1] "Complete Pet Tower once"
+            await QuestProbe.AcceptAsync(_app, _http, "alice", 110005); // [101010,10] "Win Pet Tower a total of 10 times"
+            await QuestProbe.AcceptAsync(_app, _http, "alice", 100025); // [104008,3] "Clear Floor 3 of the Pet Tower"
+            await QuestProbe.AtAsync(_app, "alice", 100025, 0);
+            var entered = await EnterFloor(alice, 1);
+            foreach (var monster in entered.Monsters) await Kill(alice, monster.Uuid);
+            Assert.True((await Next(alice, TowerService.End, ClimTowerEndNotify.Parser)).ClimTowerResult);
+            await QuestProbe.DoneAsync(_app, "alice", 306040);
+            await QuestProbe.AtAsync(_app, "alice", 110005, 1);
+            await QuestProbe.AtAsync(_app, "alice", 100025, 1);
+            await alice.SendGameAsync(TowerService.LeaveDungeon, new LeaveDungeonReq());
+            Assert.Equal(0, (await Next(alice, TowerService.LeaveDungeon, LeaveDungeonRsp.Parser)).Result);
+        }
+        await WaitOffline(role);
+        await using var relog = await InWorld("Alice", create: false);
+        await QuestProbe.DoneAsync(_app, "alice", 306040);
+        await QuestProbe.AtAsync(_app, "alice", 110005, 1);
+        await QuestProbe.AtAsync(_app, "alice", 100025, 1);
+    }
 }

@@ -63,9 +63,12 @@ public sealed class EventEconomyMutation
         this.outcome = (byte[])outcome.Clone();
         if (this.outcome.Length is 0 or > 262144) throw new ArgumentException("Event result exceeds receipt bound.");
         RequestFingerprint = Convert.ToHexString(SHA256.HashData(this.outcome));
-        payload = JsonSerializer.SerializeToUtf8Bytes(new { Version = 1, OperationId, ActorAccount, ActorRoleId,
+        payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            Version = 1, OperationId, ActorAccount, ActorRoleId,
             CommandKind, RequestFingerprint, SourceKey, EffectiveUtcMs, CatalogVersion = Catalog.DenominationsVersion,
-            Costs, Goods, OwnerDeltas, SourceReason, SinkReason, TransferReason, ChildPlanHash, Outcome = Convert.ToBase64String(this.outcome) });
+            Costs, Goods, OwnerDeltas, SourceReason, SinkReason, TransferReason, ChildPlanHash, Outcome = Convert.ToBase64String(this.outcome)
+        });
         if (payload.Length > 1048576) throw new ArgumentException("Event intent exceeds receipt bound.");
         IntentHash = Convert.ToHexString(SHA256.HashData(payload));
     }
@@ -80,8 +83,8 @@ public sealed class EventEconomyMutation
 /// <summary>Family-local semantic capture; EXP is result progression rather than a spendable ItemConfig purse.</summary>
 public static class EventEconomy
 {
-    private static readonly ConditionalWeakTable<GameData, EconomyCatalog> catalogs = new();
-    public static EconomyCatalog Catalog(GameData data) => catalogs.GetValue(data, value =>
+    private static readonly ConditionalWeakTable<GameData, EconomyCatalog> Catalogs = new();
+    public static EconomyCatalog Catalog(GameData data) => Catalogs.GetValue(data, value =>
         new EconomyCatalog(value.Table("ItemConfig").ToDictionary(row => long.Parse(row.Key, CultureInfo.InvariantCulture),
             row => GameData.Int(row.Value, "_iType") == 1 ? EconomyAssetKind.Currency : EconomyAssetKind.Item),
             value.Table("PublicParamConfig").TryGetValue("AUCTION_CURRENCY", out var bonus) ? bonus.GetInt64() : 1));

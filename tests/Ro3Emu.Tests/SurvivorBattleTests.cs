@@ -19,45 +19,47 @@ namespace Ro3Emu.Tests;
 /// </summary>
 public sealed class SurvivorBattleTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-survivor-" + Guid.NewGuid().ToString("N"));
-    private readonly ManualClock clock = new(new DateTimeOffset(2026, 11, 10, 16, 5, 0, TimeSpan.Zero)); // Tuesday, window 114
-    private WebApplication app = null!;
-    private string http = "";
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-survivor-" + Guid.NewGuid().ToString("N"));
+    private readonly ManualClock _clock = new(DateTimeOffset.UnixEpoch);
+    private WebApplication _app = null!;
+    private string _http = "";
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
     private Task OnLoop(Func<Task> work) => Service<GameLoop>().InvokeAsync(work);
 
     public Task InitializeAsync() => Task.CompletedTask;
 
     private async Task HostAsync(int players, int teamSize)
     {
+        // Five minutes into the exported weekly window of activity 114, past the realm's opening weeks.
+        _clock.Set(ScheduleRows.Weekly(114, new DateTime(2026, 11, 10), _clock.LocalTimeZone).Start + 300);
         var (port, micro, game) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = port; o.MicroGatePort = micro; o.GameGatePort = game;
             o.SeasonStart = "2026-10-05";
             o.ChickenTestPlayers = players; o.ChickenTestTeamSize = teamSize; // test aid
-        }, clock);
-        SureHitRolls.Install(app);
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{port}";
+        }, _clock);
+        SureHitRolls.Install(_app);
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{port}";
     }
 
     public async Task DisposeAsync()
     {
-        if (app == null) return;
-        await app.StopAsync(); await app.DisposeAsync();
+        if (_app == null) return;
+        await _app.StopAsync(); await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw"); await bot.EnterGateAsync();
         await bot.EnterWorldAsync((await bot.CreateRoleAsync(name)).RoleBaseInfo.Id);
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={bot.Account}", new StringContent("!lvl 99"))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={bot.Account}", new StringContent("!lvl 99"))).EnsureSuccessStatusCode();
         return bot;
     }
 
@@ -75,7 +77,7 @@ public sealed class SurvivorBattleTests : IAsyncLifetime
 
     private async Task Tick(long unixSeconds)
     {
-        clock.Set(unixSeconds);
+        _clock.Set(unixSeconds);
         await OnLoop(() => { Battles.Tick(default); return Task.CompletedTask; });
     }
 
@@ -146,6 +148,52 @@ public sealed class SurvivorBattleTests : IAsyncLifetime
         s.Position = new Vec3 { X = x, Y = s.Position.Y, Z = z };
         return Task.CompletedTask;
     });
+
+    /// <summary>A refused or lapsed ready check fails the match for everyone with 82643, naming who did not confirm.</summary>
+    [ClientDataFact]
+    public async Task RefusedOrLapsedReadyCheckFailsTheMatchNamingThePlayer()
+    {
+        await HostAsync(2, 1);
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        var players = new[] { alice, bob };
+        async Task QueueAndBobReadyAsync()
+        {
+            foreach (var player in players)
+            {
+                await player.SendGameAsync(TimedBattleService.StartMatch, new StartMatchReq { MatchEntryId = 2 });
+                Assert.Equal(0, (await Next(player, TimedBattleService.StartMatch, StartMatchResp.Parser)).Result);
+            }
+            foreach (var player in players)
+                await Next(player, TimedBattleService.ReadyNotify, MatchReadyNotify.Parser,
+                    n => n.ReadyInfos.All(i => i.Status == MatchReadyStatus.None));
+            await bob.SendGameAsync(TimedBattleService.Ready, new MatchReadyReq { MatchEntryId = 2, PlayerId = Id(bob), IsReady = true });
+            Assert.Equal(0, (await Next(bob, TimedBattleService.Ready, MatchReadyResp.Parser)).Result);
+        }
+        async Task FailedAsync()
+        {
+            foreach (var player in players)
+            {
+                var fail = await Next(player, DungeonMatchService.FailNotify, FailMatchNtf.Parser);
+                Assert.Equal(2, fail.MatchEntryId);
+                Assert.Equal(ErrorCodes.DungeonDeclined, fail.Result);
+                Assert.Equal(Id(alice), fail.PenaltyMemberGuid);
+                Assert.Equal(Id(alice), fail.FailPlayer);
+                Assert.Equal(0, fail.PenaltyMemberUnlockTs);
+            }
+        }
+
+        await QueueAndBobReadyAsync();
+        await alice.SendGameAsync(TimedBattleService.Ready, new MatchReadyReq { MatchEntryId = 2, PlayerId = Id(alice), IsReady = false });
+        Assert.Equal(ErrorCodes.DungeonDeclined, (await Next(alice, TimedBattleService.Ready, MatchReadyResp.Parser)).Result);
+        await FailedAsync();
+
+        await QueueAndBobReadyAsync();
+        await Tick(_clock.GetUtcNow().ToUnixTimeSeconds() + 31);
+        await FailedAsync();
+        Assert.False(Battles.IsMatching(Session(alice)));
+        Assert.False(Battles.IsMatching(Session(bob)));
+    }
 
     [ClientDataFact]
     public async Task StagesCareersAndLandingFollowTheDungeonScript()
@@ -270,7 +318,7 @@ public sealed class SurvivorBattleTests : IAsyncLifetime
             // Out-of-combat regeneration (1 HP per 5 s with the career build) may add a point meanwhile.
             Assert.InRange(Service<CharacterService>().Stats(Session(winner))[2000], 1000 + 15400 * 1500 / 10000, 1000 + 15400 * 1500 / 10000 + 2);
             Assert.Equal(1, Round(winner).PackInfos.Values.Single(i => i.ItemEntry == 10003).Stack);
-            Assert.True(Round(winner).ItemCdExpireTime[10003] > clock.GetUtcNow().ToUnixTimeMilliseconds());
+            Assert.True(Round(winner).ItemCdExpireTime[10003] > _clock.GetUtcNow().ToUnixTimeMilliseconds());
             return Task.CompletedTask;
         });
         await winner.SendGameAsync(TimedBattleService.UseItem, new UseChickenItemReq { ItemGuid = Guid(10003), Count = 1 });
@@ -398,7 +446,7 @@ public sealed class SurvivorBattleTests : IAsyncLifetime
         var channel = await Next(bob, TimedBattleService.RevivingNotify, ChickenOtherRevivingNotify.Parser);
         Assert.Equal((Id(alice), false, 20_000L), (channel.Reviver, channel.Interrupted, channel.ReviveDuration));
         Assert.Equal(Id(bob), channel.BeReviveIds.Single());
-        await Tick(clock.GetUtcNow().ToUnixTimeSeconds() + 21);
+        await Tick(_clock.GetUtcNow().ToUnixTimeSeconds() + 21);
         Assert.True((await Next(bob, TimedBattleService.RelifeNotify, ChickenRelifeNotify.Parser, n => n.RelifeEndTime > 0)).RelifeEndTime > 0);
         await bob.SendGameAsync(TimedBattleService.Relife, new ChickenRelifeReq { PositionX = 430, PositionY = 402 });
         Assert.Equal(0, (await Next(bob, TimedBattleService.Relife, ChickenRelifeResp.Parser)).Result);
@@ -458,10 +506,10 @@ public sealed class SurvivorBattleTests : IAsyncLifetime
 
     private sealed class ManualClock(DateTimeOffset now) : TimeProvider
     {
-        private long seconds = now.ToUnixTimeSeconds();
-        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref seconds));
+        private long _seconds = now.ToUnixTimeSeconds();
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref _seconds));
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.FindSystemTimeZoneById("Central European Standard Time");
-        public void Set(long value) => Interlocked.Exchange(ref seconds, value);
+        public void Set(long value) => Interlocked.Exchange(ref _seconds, value);
     }
 
     private static string RepoRoot()

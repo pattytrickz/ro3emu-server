@@ -18,7 +18,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 5100");
         await Gm("alice", $"!item {Dagger} 1");
-        var skills = app.Services.GetRequiredService<SkillService>();
+        var skills = _app.Services.GetRequiredService<SkillService>();
         long guid = await Loop.InvokeAsync(() =>
         {
             var dagger = Session("alice").Items.Single(i => i.Entry == Dagger);

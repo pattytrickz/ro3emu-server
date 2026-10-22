@@ -9,18 +9,11 @@ namespace Ro3Emu.Server.Game;
 public sealed record AwardGrant(int Entry, int Count, int BindType = 0, long ExpireTimeStamp = 0);
 
 /// <summary>A resolved and validated AwardConfig grant. Source services own eligibility and once-only claims.</summary>
-public sealed class AwardPlan
+public sealed class AwardPlan(long groupId, long awardId, IEnumerable<AwardGrant> grants)
 {
-    public long GroupId { get; }
-    public long AwardId { get; }
-    public IReadOnlyList<AwardGrant> Grants { get; }
-
-    public AwardPlan(long groupId, long awardId, IEnumerable<AwardGrant> grants)
-    {
-        GroupId = groupId;
-        AwardId = awardId;
-        Grants = new ReadOnlyCollection<AwardGrant>(grants.ToArray());
-    }
+    public long GroupId { get; } = groupId;
+    public long AwardId { get; } = awardId;
+    public IReadOnlyList<AwardGrant> Grants { get; } = new ReadOnlyCollection<AwardGrant>(grants.ToArray());
 }
 
 /// <summary>An award that cannot be resolved. <see cref="LevelTooLow"/>: the recipient is outside a _kCondition level range.</summary>
@@ -43,7 +36,15 @@ public sealed class AwardService(GameData data)
     public AwardPlan ResolveForProgress(RoleProgress progress, long multiverseGroupId, int? playBookId = null)
         => ResolveGroup(progress, multiverseGroupId, playBookId);
 
-    private AwardPlan ResolveGroup(RoleProgress? progress, long multiverseGroupId, int? playBookId)
+    /// <summary>
+    /// An item's _iAward (box use). Rows with _kServerOpenDay pick the first inclusive range holding the server's open
+    /// day, past the last range the latest started one (inferred); a [2, minLevel, maxLevel] _kCondition is the level
+    /// range UI_Com_RewardSelectWidgetCtrl.BuildOptionList checks, unmet it throws <see cref="AwardConditionException"/>.
+    /// </summary>
+    public AwardPlan ResolveItemAward(GameSession session, long multiverseGroupId, int? playBookId, int serverOpenDay)
+        => ResolveGroup(session?.Progress, multiverseGroupId, playBookId, serverOpenDay);
+
+    private AwardPlan ResolveGroup(RoleProgress? progress, long multiverseGroupId, int? playBookId, int? serverOpenDay = null)
     {
         if (multiverseGroupId == 0) return new AwardPlan(0, 0, []);
         var group = data.Row("MultiverseGroupConfig", multiverseGroupId)
@@ -55,19 +56,19 @@ public sealed class AwardService(GameData data)
             ? GameData.Int(group, $"_iValue_{playBookId}") is var selected and > 0 ? selected : GameData.Int(group, "_iValue_default")
             : GameData.Int(group, "_iValue_default");
         if (awardId <= 0) throw Fail($"group {multiverseGroupId} has no configured award value");
-        return ResolveAward(progress, multiverseGroupId, awardId);
+        return ResolveAward(progress, multiverseGroupId, awardId, serverOpenDay);
     }
 
     /// <summary>Resolve a direct AwardConfig ID, used only where BattlePassRewardConfig 9201 names awards directly.</summary>
     public AwardPlan ResolveDirect(GameSession session, long awardId) => ResolveAward(session?.Progress, 0, awardId);
 
-    private AwardPlan ResolveAward(RoleProgress? progress, long multiverseGroupId, long awardId)
+    private AwardPlan ResolveAward(RoleProgress? progress, long multiverseGroupId, long awardId, int? serverOpenDay = null)
     {
         if (data.Row("AwardConfig", awardId) is not { ValueKind: JsonValueKind.Array } rows || rows.GetArrayLength() == 0)
             throw Fail($"missing AwardConfig {awardId}");
-        if (rows.GetArrayLength() != 1)
+        if (rows.GetArrayLength() != 1 && serverOpenDay == null)
             throw Fail($"AwardConfig {awardId} has multiple open-day rows; authoritative selector unresolved");
-        var row = rows[0];
+        var row = rows.GetArrayLength() == 1 ? rows[0] : OpenDayRow(rows, serverOpenDay!.Value, awardId);
         long baseExp = BaseExp(row, awardId);
         CheckCondition(row, progress, awardId);
         if (data.Table("AwardRestricConfig").Values.Any(r => GameData.Int(r, "_iRewardID") == awardId))
@@ -161,8 +162,10 @@ public sealed class AwardService(GameData data)
                 && !jobs.EnumerateArray().Any(j => GameData.Number(j) == progress.Career)) continue;
             if (row.TryGetProperty("_iJobLimit", out jobs) && jobs.ValueKind == JsonValueKind.Object && jobs.EnumerateObject().Any())
                 throw Fail($"DropGroupConfig {groupId} has unresolved job filter");
+            // DropAttenuationConfig scales by the player/monster level gap; an award has no slain monster, so a row
+            // with _iAttenuationPlanID drops in full (DropAttenuation, inferred).
             if (GameData.Int(row, "_iQuestLimit") != 0 || GameData.Int(row, "_iActivityid") != 0
-                || GameData.Int(row, "_iAttenuationPlanID") != 0 || GameData.Int(row, "_kCoefficient") != 0
+                || GameData.Int(row, "_kCoefficient") != 0
                 || GameData.Int(row, "_iBind") != 0 || HasValues(row, "_kServerLevel"))
                 throw Fail($"DropGroupConfig {groupId} has unresolved eligibility or bind policy");
             int bind = PoolBindType(row, groupId);
@@ -248,4 +251,33 @@ public sealed class AwardService(GameData data)
     private static long ExactLong(JsonElement value, string field) => GameData.Number(value) is { } n && n >= 0 && n <= long.MaxValue && Math.Truncate(n) == n
         ? (long)n : throw Fail($"invalid {field} in award tuple");
     private static AwardResolutionException Fail(string reason) => new(reason);
+
+    private static JsonElement OpenDayRow(JsonElement rows, int openDay, long awardId)
+    {
+        (long From, long To) Range(JsonElement row) => row.TryGetProperty("_kServerOpenDay", out var days)
+            && days.ValueKind == JsonValueKind.Array && days.GetArrayLength() >= 2
+            ? ((long)(GameData.Number(days[0]) ?? 1), (long)(GameData.Number(days[1]) ?? long.MaxValue))
+            : throw Fail($"AwardConfig {awardId} has a row without an open-day range");
+        var all = rows.EnumerateArray().ToArray();
+        foreach (var row in all)
+            if (Range(row) is var (from, to) && openDay >= from && openDay <= to) return row;
+        return all.Where(r => Range(r).From <= openDay).OrderBy(r => Range(r).From).LastOrDefault() is { ValueKind: JsonValueKind.Object } latest
+            ? latest : throw Fail($"AwardConfig {awardId} has no row for open day {openDay}");
+    }
+
+    private static void CheckLevelCondition(JsonElement row, RoleProgress? progress, long awardId)
+    {
+        var conditions = row.GetProperty("_kCondition");
+        if (conditions.ValueKind != JsonValueKind.Array || progress == null) throw Fail($"AwardConfig {awardId} has unresolved condition policy");
+        foreach (var c in conditions.EnumerateArray())
+        {
+            if (c.ValueKind != JsonValueKind.Array || c.GetArrayLength() != 3 || GameData.Number(c[0]) != 2)
+                throw Fail($"AwardConfig {awardId} has unresolved condition policy");
+            if (progress.Level < (GameData.Number(c[1]) ?? 0) || progress.Level > (GameData.Number(c[2]) ?? int.MaxValue))
+                throw new AwardConditionException($"AwardConfig {awardId} needs level {c[1]}..{c[2]}");
+        }
+    }
 }
+
+/// <summary>The recipient does not meet an AwardConfig _kCondition the source may refuse on.</summary>
+public sealed class AwardConditionException(string message) : InvalidOperationException(message);

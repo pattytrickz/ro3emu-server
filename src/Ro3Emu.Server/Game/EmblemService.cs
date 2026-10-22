@@ -26,6 +26,8 @@ public sealed partial class EmblemService
         public Dictionary<int, Plan> Plans { get; set; } = new();
         public int CurrentPlan { get; set; }
         public long HistorySeasonPower { get; set; }
+        /// <summary>The role's published and best power total (PowerService); null before its first publish.</summary>
+        public PowerService.Record? Power { get; set; }
     }
 
     public sealed class Plan
@@ -34,29 +36,36 @@ public sealed partial class EmblemService
         public string Name { get; set; } = "";
     }
 
-    private readonly GameData data;
-    private readonly CharacterService character;
-    private readonly FunctionService functions;
-    private readonly SeasonService seasons;
-    private readonly RoleStore roles;
-    private readonly ILogger<EmblemService> log;
+    private readonly GameData _data;
+    private readonly CharacterService _character;
+    private readonly FunctionService _functions;
+    private readonly SeasonService _seasons;
+    private readonly RoleStore _roles;
+    private readonly ILogger<EmblemService> _log;
+
+    /// <summary>After a committed 82424 upgrade: the levels it gained (quest target 317002). Listeners post their work.</summary>
+    public List<Action<GameSession, int>> Upgraded { get; } = new();
 
     public EmblemService(GameData data, CharacterService character, FunctionService functions, SeasonService seasons,
         RoleStore roles, ILogger<EmblemService> log)
     {
-        this.data = data;
-        this.character = character;
-        this.functions = functions;
-        this.seasons = seasons;
-        this.roles = roles;
-        this.log = log;
+        this._data = data;
+        this._character = character;
+        this._functions = functions;
+        this._seasons = seasons;
+        this._roles = roles;
+        this._log = log;
         character.EmblemAttrFactory = GenerateAttrs;
+        character.ExtraAttributes.Add(ResonanceAttributes);
     }
+
+    /// <summary>Set by PowerService: publish 31502/31503/5066 after a Soul Echo change (the caller holds the lock).</summary>
+    internal Func<GameSession, Task>? PublishPower { get; set; }
 
     /// <summary>Load before 5009 and ENTITYSELF; roll missing old instance attrs and repair stale active refs (inferred).</summary>
     public async Task LoadAsync(GameSession session)
     {
-        var saved = roles.LoadEmblems(session.Role!.Id);
+        var saved = _roles.LoadEmblems(session.Role!.Id);
         var next = saved == null ? new EmblemState() : JsonSerializer.Deserialize<EmblemState>(saved) ?? new EmblemState();
         var beforeItems = session.Items.Select(i => i.Clone()).ToArray();
         var afterItems = beforeItems.Select(i => i.Clone()).ToList();
@@ -70,7 +79,7 @@ public sealed partial class EmblemService
             next.CurrentPlan = next.Plans.ContainsKey(0) ? 0 : next.Plans.Keys.Min();
             changed = true;
         }
-        foreach (var item in afterItems.Where(i => IsEmblem(data, i.Entry)))
+        foreach (var item in afterItems.Where(i => IsEmblem(_data, i.Entry)))
         {
             // Pre-feature grants followed ItemConfig._iBagTab=1. The client resolves Soul Echo instances in pack 5.
             if (item.Grid == 0 && (item.Pack != 5 || item.Sort <= 0))
@@ -91,13 +100,13 @@ public sealed partial class EmblemService
         foreach (var (slot, guid) in active.Slots.OrderBy(p => p.Key).ToList())
         {
             if (slot is < FirstSlot or > LastSlot || !seen.Add(guid)
-                || !afterItems.Any(i => i.Guid == guid && i.Grid == 0 && IsEmblem(data, i.Entry)))
+                || !afterItems.Any(i => i.Guid == guid && i.Grid == 0 && IsEmblem(_data, i.Entry)))
             {
                 active.Slots.Remove(slot);
                 changed = true;
             }
         }
-        foreach (var item in afterItems.Where(i => IsEmblem(data, i.Entry)))
+        foreach (var item in afterItems.Where(i => IsEmblem(_data, i.Entry)))
         {
             int slot = active.Slots.FirstOrDefault(p => p.Value == item.Guid).Key;
             item.Attrs ??= new();
@@ -111,12 +120,12 @@ public sealed partial class EmblemService
         if (current > next.HistorySeasonPower) { next.HistorySeasonPower = current; changed = true; }
         if (changed)
         {
-            var builder = roles.NewTransaction();
+            var builder = _roles.NewTransaction();
             builder.ItemDelta(session.Role.Id, beforeItems, afterItems);
             builder.RoleBlob(session.Role.Id, "emblems", JsonSerializer.SerializeToUtf8Bytes(next));
-            builder.WithEconomy(character.FamilyEconomy(session, "cd13b/emblem-login-reconcile", [], [],
+            builder.WithEconomy(_character.FamilyEconomy(session, "cd13b/emblem-login-reconcile", [], [],
                 new { CurrentPlan = next.CurrentPlan, Power = current }));
-            await roles.CommitAsync(builder, "emblem/login-reconcile", _ =>
+            await _roles.CommitAsync(builder, "emblem/login-reconcile", _ =>
             {
                 PublishItems(session, afterItems);
                 session.Emblems = next;
@@ -132,10 +141,11 @@ public sealed partial class EmblemService
         }
     }
 
+    /// <summary>5005 only: PowerService publishes the power once every power owner is loaded (RoleSystems).</summary>
     public async Task LoginAsync(GameSession session)
     {
+        session.EmblemPower = PlanPower(session, Active(session)).SeasonPower;
         await SyncAsync(session);
-        await PowerAsync(session, 0);
     }
 
     private static Plan Active(GameSession session) => session.Emblems.Plans[session.Emblems.CurrentPlan];
@@ -159,11 +169,15 @@ public sealed partial class EmblemService
         }
     }
 
-    private long PlanPower(IReadOnlyList<InvItem> inventory, Plan plan) => plan.Slots.Values.Distinct()
-        .Sum(guid => inventory.FirstOrDefault(i => i.Guid == guid) is { } item ? Score(item) : 0);
+    /// <summary>The plan's item scores plus its reached Echo Resonance stages' season power (StagePower).</summary>
+    private long PlanPower(IReadOnlyList<InvItem> inventory, Plan plan)
+    {
+        var worn = plan.Slots.Values.Distinct().Select(guid => inventory.FirstOrDefault(i => i.Guid == guid)).OfType<InvItem>().ToList();
+        return worn.Sum(Score) + StagePower(worn, _data);
+    }
 
     /// <summary>
-    /// <see cref="CurrentPower"/> of a role from its committed "emblems" blob and item rows, for roles that are not
+    /// The Soul Echo plan power of a role from its committed "emblems" blob and item rows, for roles that are not
     /// online (leaderboards). Slots that do not resolve to an owned instance count 0, as in <see cref="PlanPower"/>.
     /// </summary>
     internal long StoredPower(byte[]? emblems, IReadOnlyList<InvItem> inventory)
@@ -185,11 +199,11 @@ public sealed partial class EmblemService
         IReadOnlyList<(int Entry, long Count)> costs, object outcome, Action? applied = null)
     {
         long newPower = StageHistory(next, afterItems);
-        var builder = roles.NewTransaction();
+        var builder = _roles.NewTransaction();
         builder.ItemDelta(session.Role!.Id, beforeItems, afterItems);
         builder.RoleBlob(session.Role.Id, "emblems", JsonSerializer.SerializeToUtf8Bytes(next));
-        builder.WithEconomy(character.FamilyEconomy(session, "cd13b/" + label, costs, [], outcome));
-        await roles.CommitAsync(builder, "emblem/" + label, _ =>
+        builder.WithEconomy(_character.FamilyEconomy(session, "cd13b/" + label, costs, [], outcome));
+        await _roles.CommitAsync(builder, "emblem/" + label, _ =>
         {
             PublishItems(session, afterItems);
             session.Emblems = next;
@@ -207,7 +221,7 @@ public sealed partial class EmblemService
         {
             if (slot is < FirstSlot or > LastSlot || !distinct.Add(guid)) return ErrorCodes.Parameter;
             var item = session.Items.FirstOrDefault(i => i.Guid == guid && i.Grid == 0);
-            if (item == null || !IsEmblem(data, item.Entry)) return ErrorCodes.ItemMissing;
+            if (item == null || !IsEmblem(_data, item.Entry)) return ErrorCodes.ItemMissing;
             if (!SeasonValid(item.Entry)) return ErrorCodes.FeatureUnavailable;
         }
         state.CurrentPlan = index;
@@ -229,6 +243,40 @@ public sealed partial class EmblemService
         if (!session.Emblems.Plans.TryGetValue(session.Emblems.CurrentPlan, out var plan)) yield break;
         foreach (var guid in plan.Slots.Values.Distinct())
             if (session.Items.FirstOrDefault(i => i.Guid == guid && i.Grid == 0) is { } item) yield return item;
+    }
+
+    /// <summary>
+    /// Echo Resonance (残响共鸣): lit marks (itemInfos 1021+, up to the entry's _kInitialMark count) of the worn echoes,
+    /// counted per mark id (LC_EmblemHelper.GetAllMarkEquipedNum, LC_ItemProtoParse.lua:1055-1100), reach the
+    /// EmblemMarkConfig stage whose _iMarkNum they meet (3/6/10, LC_SoulHelper.GetLevelByMarkNum). Mark id → stage.
+    /// </summary>
+    internal static Dictionary<long, long> Resonances(GameSession session, GameData data) => Resonances(Worn(session), data);
+
+    internal static Dictionary<long, long> Resonances(IEnumerable<InvItem> worn, GameData data)
+    {
+        var marks = MarkCounts(worn, data);
+        var stages = new Dictionary<long, long>();
+        foreach (var row in data.Table("EmblemMarkConfig").Values)
+        {
+            long mark = GameData.Int(row, "_iEmblemMarkID"), stage = GameData.Int(row, "_iMarkStage");
+            if (stage > 0 && marks.GetValueOrDefault(mark) >= GameData.Int(row, "_iMarkNum") && stage > stages.GetValueOrDefault(mark))
+                stages[mark] = stage;
+        }
+        return stages;
+    }
+
+    /// <summary>Lit marks per mark id over the given echoes (LC_EmblemHelper.GetAllMarkEquipedNum).</summary>
+    private static Dictionary<long, int> MarkCounts(IEnumerable<InvItem> worn, GameData data)
+    {
+        var marks = new Dictionary<long, int>();
+        foreach (var item in worn)
+        {
+            int lit = data.Row("EmblemConfig", item.Entry) is { } row && row.TryGetProperty("_kInitialMark", out var initial)
+                && initial.ValueKind == JsonValueKind.Array ? initial.GetArrayLength() : 0;
+            for (int i = 0; i < lit && item.Attrs?.TryGetValue(1021 + i, out long mark) == true; i++)
+                marks[mark] = marks.GetValueOrDefault(mark) + 1;
+        }
+        return marks;
     }
 
     public static bool IsReserved(GameSession session, InvItem item) =>
@@ -264,68 +312,42 @@ public sealed partial class EmblemService
 
     private Task SyncAsync(GameSession session) => CharacterService.SyncAsync(session, PlanSync, Build(session));
 
-    public static PowerUnit CurrentPower(GameSession session)
-    {
-        // Filled by instance Score below through the owning service at sync; 5066 uses this cached value.
-        return new PowerUnit { SeasonPower = session.EmblemPower };
-    }
-
-    public static PowerUnit HistoryPower(GameSession session) => new() { SeasonPower = session.Emblems.HistorySeasonPower };
-
-    private PowerUnit PlanPower(GameSession session, Plan plan) => new()
-    {
-        SeasonPower = plan.Slots.Values.Distinct().Sum(guid => session.Items.FirstOrDefault(i => i.Guid == guid) is { } item ? Score(item) : 0),
-    };
+    private PowerUnit PlanPower(GameSession session, Plan plan) => new() { SeasonPower = PlanPower(session.Items, plan) };
 
     private long Score(InvItem item)
     {
-        long score = data.Row("EmblemConfig", item.Entry) is { } config ? GameData.Int(config, "_iSeasonPower") : 0;
+        long score = _data.Row("EmblemConfig", item.Entry) is { } config ? GameData.Int(config, "_iSeasonPower") : 0;
         int quality = Quality(item.Entry), level = (int)(item.Attrs?.GetValueOrDefault(Level) ?? 0);
         score += LevelRow(quality, level) is { } row ? GameData.Int(row, "_iSeasonPower") : 0;
         for (int i = 0; i < 20 && item.Attrs?.TryGetValue(1051 + i, out long rowId) == true
             && item.Attrs.TryGetValue(1071 + i, out _); i++)
-            if (data.Row("EmblemSubAttriGroupConfig", rowId) is { } sub) score += GameData.Int(sub, "_iSeasonPower");
+            if (_data.Row("EmblemSubAttriGroupConfig", rowId) is { } sub) score += GameData.Int(sub, "_iSeasonPower");
         for (int i = 0; i < 10 && item.Attrs?.TryGetValue(1091 + i, out long specialId) == true; i++)
-            if (data.Row("SpecialEffectConfig", specialId) is { } special) score += GameData.Int(special, "_iPower");
+            if (_data.Row("SpecialEffectConfig", specialId) is { } special) score += GameData.Int(special, "_iPower");
         // Item score sums the configured base, level, subrow, special power (LC_EmblemHelper.GetEmblemScore).
-        // The plan uses the sum of item scores (inferred); no mark-stage score is added. No _kSpecialAttribute generation
+        // The plan adds its reached mark stages on top (PlanPower, StagePower). No _kSpecialAttribute generation
         // pool exists here; preexisting specials can score but their combat evaluator is outside this slice.
         return score;
     }
 
+    /// <summary>The Soul Echo part changed: PowerService republishes the whole package (31502, 31503, 5066).</summary>
     private async Task PowerAsync(GameSession session, long previous)
     {
-        long current = PlanPower(session, Active(session)).SeasonPower;
-        session.EmblemPower = current;
-        var unit = CurrentPower(session);
-        var history = HistoryPower(session);
-        // Other category scores are outside this system; zero baseline is current emulator behavior (inferred aggregate).
-        var package = new PlayerPowerPackage
-        {
-            LevelUpAddPointScore = new(), SkillAddPointScore = new(), TitleScore = new(), EquipRankScore = new(),
-            EquipRefineScore = new(), EquipStrengthenScore = new(), CardSuitScore = new(), CardFillInEquipScore = new(),
-            TotemScore = new(), EmblemScore = unit.Clone(),
-        };
-        await session.SendGameAsync(31502, new PlayerChangePowerNtf
-        {
-            CurPower = unit.Clone(), ChangePower = new PowerUnit { SeasonPower = current - previous },
-            MaxHistoryPower = history, PowerPackage = package.Clone(),
-        });
-        await session.SendGameAsync(31503, new PlayerPowerPackageNtf { PowerPackage = package });
-        await character.SyncBaseInfoAsync(session);
+        session.EmblemPower = PlanPower(session, Active(session)).SeasonPower;
+        if (PublishPower != null) await PublishPower(session);
     }
 
     /// <summary>One accepted change: 5009, 5005, final properties/AOI, power, then 5066 (packet order inferred).</summary>
     private async Task ChangedAsync(GameSession session, long previous, bool inventory)
     {
-        if (inventory) await character.ItemsChangedAsync(session, stats: false);
+        if (inventory) await _character.ItemsChangedAsync(session, stats: false);
         await SyncAsync(session);
-        await character.RefreshStatsAsync(session);
+        await _character.RefreshStatsAsync(session);
         await PowerAsync(session, previous);
     }
 
-    private int Gate(GameSession session) => session.Tasks != null && data.Row("FunctionConfig", 55) != null
-        && TaskService.IsDelivered(session, 10103040) && functions.IsOpen(session, 55) ? 0 : ErrorCodes.FunctionLocked;
+    private int Gate(GameSession session) => session.Tasks != null && _data.Row("FunctionConfig", 55) != null
+        && TaskService.IsDelivered(session, 10103040) && _functions.IsOpen(session, 55) ? 0 : ErrorCodes.FunctionLocked;
 
     /// <summary>82422: validate slot, owned generated item, current season, and active-plan uniqueness first.</summary>
     public async Task SetUpAsync(GameSession session, SetUpEmblemReq req)
@@ -335,7 +357,7 @@ public sealed partial class EmblemService
         var item = session.Items.FirstOrDefault(i => i.Guid == req.EmblemGuid && i.Grid == 0);
         int code = Gate(session);
         if (code == 0) code = req.EmblemPos is < FirstSlot or > LastSlot ? ErrorCodes.EmblemSlot
-            : item == null || !IsEmblem(data, item.Entry) ? ErrorCodes.EmblemInvalid
+            : item == null || !IsEmblem(_data, item.Entry) ? ErrorCodes.EmblemInvalid
             : !SeasonValid(item.Entry) ? ErrorCodes.EmblemOtherSeason
             : plan.Slots.Values.Contains(req.EmblemGuid) ? ErrorCodes.EmblemAlreadyDeployed : 0;
         long oldGuid = code == 0 ? plan.Slots.GetValueOrDefault(req.EmblemPos) : 0;
@@ -358,7 +380,7 @@ public sealed partial class EmblemService
             await ChangedAsync(session, previous, inventory: true);
         }
         await session.SendGameAsync(SetUp, new SetUpEmblemResp { Result = code, EmblemPos = req.EmblemPos, EmblemGuid = req.EmblemGuid, OldEmblemGuid = oldGuid });
-        log.LogInformation("{Name} deploys Soul Echo {Guid} in {Slot}: {Code}", session.Role!.Name, req.EmblemGuid, req.EmblemPos, code);
+        _log.LogInformation("{Name} deploys Soul Echo {Guid} in {Slot}: {Code}", session.Role!.Name, req.EmblemGuid, req.EmblemPos, code);
     }
 
     /// <summary>82423: remove the selected slot and clear the item's matching setup attributes.</summary>
@@ -394,11 +416,11 @@ public sealed partial class EmblemService
         using var _ = await CharacterService.Lock(session);
         int code = Gate(session);
         var target = session.Items.FirstOrDefault(i => i.Guid == req.EmblemGuid && i.Grid == 0);
-        if (code == 0) code = target == null || !IsEmblem(data, target.Entry) ? ErrorCodes.EmblemInvalid
+        if (code == 0) code = target == null || !IsEmblem(_data, target.Entry) ? ErrorCodes.EmblemInvalid
             : !SeasonValid(target.Entry) ? ErrorCodes.EmblemOtherSeason : 0;
         int quality = target == null ? 0 : Quality(target.Entry);
         int level = (int)(target?.Attrs?.GetValueOrDefault(Level) ?? 0);
-        int cap = data.Table("EmblemLvConfig").Values.Where(r => GameData.Int(r, "_iQuality") == quality).Select(r => (int)GameData.Int(r, "_iLv")).DefaultIfEmpty(0).Max();
+        int cap = _data.Table("EmblemLvConfig").Values.Where(r => GameData.Int(r, "_iQuality") == quality).Select(r => (int)GameData.Int(r, "_iLv")).DefaultIfEmpty(0).Max();
         if (code == 0 && (cap == 0 || level >= cap)) code = ErrorCodes.EmblemCannotLevel;
         var ids = req.ConsumeEmblemGuids.ToList();
         if (code == 0 && (ids.Count != ids.Distinct().Count() || ids.Contains(req.EmblemGuid))) code = ErrorCodes.EmblemInvalid;
@@ -407,7 +429,7 @@ public sealed partial class EmblemService
             foreach (var guid in ids)
             {
                 var item = session.Items.FirstOrDefault(i => i.Guid == guid && i.Grid == 0);
-                if (item == null || !IsEmblem(data, item.Entry) || IsReserved(session, item) || !SeasonValid(item.Entry))
+                if (item == null || !IsEmblem(_data, item.Entry) || IsReserved(session, item) || !SeasonValid(item.Entry))
                 { code = ErrorCodes.EmblemInvalid; break; }
                 feed.Add(item);
             }
@@ -423,7 +445,7 @@ public sealed partial class EmblemService
                 }
             }
             catch (OverflowException) { code = ErrorCodes.Parameter; }
-            if (code == 0 && req.ConsumeItems.Any(p => character.CountOf(session, p.Key) < p.Value)) code = ErrorCodes.ItemsShort;
+            if (code == 0 && req.ConsumeItems.Any(p => _character.CountOf(session, p.Key) < p.Value)) code = ErrorCodes.ItemsShort;
         }
         if (code == 0)
         {
@@ -499,36 +521,43 @@ public sealed partial class EmblemService
                 var next = CopyState(session.Emblems);
                 long previous = session.EmblemPower;
                 await CommitEmblemsAsync(session, "emblem-upgrade", next, beforeItems, afterItems, costs,
-                    new { req.EmblemGuid, Materials = req.ConsumeItems.OrderBy(p => p.Key).ToArray(),
+                    new
+                    {
+                        req.EmblemGuid, Materials = req.ConsumeItems.OrderBy(p => p.Key).ToArray(),
                         Feeds = feed.Select(i => new { i.Guid, i.Entry }).OrderBy(i => i.Guid).ToArray(),
-                        AddedExperience = xp, Attributes = upgradedAttrs });
+                        AddedExperience = xp, Attributes = upgradedAttrs
+                    });
                 await ChangedAsync(session, previous, inventory: true);
+                int gained = (int)upgradedAttrs!.GetValueOrDefault(Level) - level;
+                foreach (var handler in Upgraded)
+                    try { handler(session, gained); }
+                    catch (Exception e) { _log.LogError(e, "Soul Echo upgrade hook failed for {Role}", session.Role?.Id); }
             }
         }
         // No excess-XP refund, so gainItems is empty (inferred).
         await session.SendGameAsync(Upgrade, new UpgradeEmblemResp { Result = code, EmblemGuid = req.EmblemGuid });
     }
 
-    private int Quality(int entry) => data.Row("ItemConfig", entry) is { } row ? (int)GameData.Int(row, "_iQuality") : 0;
+    private int Quality(int entry) => _data.Row("ItemConfig", entry) is { } row ? (int)GameData.Int(row, "_iQuality") : 0;
 
     private JsonElement? LevelRow(int quality, int level)
     {
-        var row = data.Table("EmblemLvConfig").Values
+        var row = _data.Table("EmblemLvConfig").Values
             .FirstOrDefault(r => GameData.Int(r, "_iQuality") == quality && GameData.Int(r, "_iLv") == level);
         return row.ValueKind == JsonValueKind.Object ? row : null;
     }
 
     private bool SeasonValid(int entry)
     {
-        if (data.Row("ItemConfig", entry) is not { } row || !row.TryGetProperty("_kMultiverseArray", out var list) || list.ValueKind != JsonValueKind.Array) return true;
+        if (_data.Row("ItemConfig", entry) is not { } row || !row.TryGetProperty("_kMultiverseArray", out var list) || list.ValueKind != JsonValueKind.Array) return true;
         var values = list.EnumerateArray().Select(v => (long)(GameData.Number(v) ?? 0)).ToArray();
-        return values.Length == 0 || values.Contains(0) || values.Length == 2 && values[1] == -1 && seasons.PlayBook >= values[0] || values.Contains(seasons.PlayBook);
+        return values.Length == 0 || values.Contains(0) || values.Length == 2 && values[1] == -1 && _seasons.PlayBook >= values[0] || values.Contains(_seasons.PlayBook);
     }
 
     /// <summary>Initial rolls use configured inclusive ranges; weighted unique-attribute subrow selection is inferred.</summary>
     private Dictionary<int, long>? GenerateAttrs(int entry)
     {
-        if (!IsEmblem(data, entry) || data.Row("EmblemConfig", entry) is not { } row) return null;
+        if (!IsEmblem(_data, entry) || _data.Row("EmblemConfig", entry) is not { } row) return null;
         var attrs = new Dictionary<int, long> { [Level] = 0, [Exp] = 0, [TotalExp] = 0 };
         if (row.TryGetProperty("_kPrimaryAttribute", out var primary) && primary.ValueKind == JsonValueKind.Array)
         {
@@ -555,7 +584,7 @@ public sealed partial class EmblemService
     /// <summary>Roll every _kPrimaryAttributeLvUp range once per reached level (inferred frequency).</summary>
     private void AddPrimaryLevel(Dictionary<int, long> attrs, int entry)
     {
-        if (data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kPrimaryAttributeLvUp", out var list) || list.ValueKind != JsonValueKind.Array) return;
+        if (_data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kPrimaryAttributeLvUp", out var list) || list.ValueKind != JsonValueKind.Array) return;
         int slot = 0;
         foreach (var pair in list.EnumerateArray())
         {
@@ -567,7 +596,7 @@ public sealed partial class EmblemService
 
     private void AddMarks(Dictionary<int, long> attrs, int entry, int level)
     {
-        if (data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kInitialMark", out var list) || list.ValueKind != JsonValueKind.Array) return;
+        if (_data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kInitialMark", out var list) || list.ValueKind != JsonValueKind.Array) return;
         int slot = 0;
         foreach (var pair in list.EnumerateArray())
         {
@@ -581,7 +610,7 @@ public sealed partial class EmblemService
     /// <summary>Positive-weight rows selected without replacement by actual attribute ID (inferred selection).</summary>
     private void AddSubattrs(Dictionary<int, long> attrs, int entry, int level)
     {
-        if (data.Row("EmblemConfig", entry) is not { } config || !config.TryGetProperty("_kSubAttributeNum", out var list) || list.ValueKind != JsonValueKind.Array) return;
+        if (_data.Row("EmblemConfig", entry) is not { } config || !config.TryGetProperty("_kSubAttributeNum", out var list) || list.ValueKind != JsonValueKind.Array) return;
         int wanted = 0;
         foreach (var pair in list.EnumerateArray())
             if (pair.ValueKind == JsonValueKind.Array && pair.GetArrayLength() >= 2 && (long)(GameData.Number(pair[0]) ?? 0) <= level)
@@ -589,11 +618,11 @@ public sealed partial class EmblemService
         long group = GameData.Int(config, "_iSubAttributeGroup");
         if (group == 0) return; // config has no pool/slot directive; do not fill from another group.
         int existing = Enumerable.Range(0, 20).TakeWhile(i => attrs.ContainsKey(1051 + i) && attrs.ContainsKey(1071 + i)).Count();
-        var usedIds = Enumerable.Range(0, existing).Select(i => data.Row("EmblemSubAttriGroupConfig", attrs[1051 + i]))
+        var usedIds = Enumerable.Range(0, existing).Select(i => _data.Row("EmblemSubAttriGroupConfig", attrs[1051 + i]))
             .Where(r => r != null).Select(r => GameData.Int(r!.Value, "_iSubAttriID")).ToHashSet();
         while (existing < Math.Min(20, wanted))
         {
-            var pool = data.Table("EmblemSubAttriGroupConfig").Values
+            var pool = _data.Table("EmblemSubAttriGroupConfig").Values
                 .Where(r => GameData.Int(r, "_iGroup") == group && GameData.Int(r, "_iWeight") > 0
                     && !usedIds.Contains(GameData.Int(r, "_iSubAttriID")) && SeasonRowsValid(r))
                 .ToList();
@@ -619,6 +648,6 @@ public sealed partial class EmblemService
     {
         if (!row.TryGetProperty("_kMultiverseArray", out var list) || list.ValueKind != JsonValueKind.Array) return true;
         var values = list.EnumerateArray().Select(v => (long)(GameData.Number(v) ?? 0)).ToArray();
-        return values.Length == 0 || values.Contains(0) || values.Length == 2 && values[1] == -1 && seasons.PlayBook >= values[0] || values.Contains(seasons.PlayBook);
+        return values.Length == 0 || values.Contains(0) || values.Length == 2 && values[1] == -1 && _seasons.PlayBook >= values[0] || values.Contains(_seasons.PlayBook);
     }
 }

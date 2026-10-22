@@ -20,7 +20,7 @@ public sealed partial class SkillCombatTests
     [InlineData(5100, 0, 0, 1500001)]  // Thief, bare hands: the {} row
     public void TheNormalAttackFollowsTheWeaponsHeld(int career, int mainType, int offType, int expected)
     {
-        var skills = app.Services.GetRequiredService<SkillService>();
+        var skills = _app.Services.GetRequiredService<SkillService>();
         Assert.Equal(expected, skills.NormalAttack(career, mainType, offType));
         Assert.True(skills.IsNormalAttack(career, expected));
     }

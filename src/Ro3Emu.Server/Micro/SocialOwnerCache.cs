@@ -55,7 +55,8 @@ public sealed class SocialOwnerCache(AccountStore accounts, OwnerRegistry owners
     {
         AssertLoop();
         return _profiles.TryGetValue(role, out var value) && Current(value.Vector,
-            RevisionStore.Identity, RevisionStore.Progress, "wardrobe", "guild_info", RevisionStore.GuildMembership)
+            RevisionStore.Identity, RevisionStore.Progress, "wardrobe", "guild_info", "personal", "personal_upvote", "popularity",
+            "social_outfit", RevisionStore.GuildMembership)
             ? value : null;
     }
 
@@ -72,7 +73,7 @@ public sealed class SocialOwnerCache(AccountStore accounts, OwnerRegistry owners
             {
                 var owner = owners.GetOrRegister(snapshot.Vector);
                 if (!Matches(owner, snapshot.Vector, RevisionStore.Identity, RevisionStore.Progress,
-                    "wardrobe", "guild_info", RevisionStore.GuildMembership))
+                    "wardrobe", "guild_info", "personal", "personal_upvote", "popularity", "social_outfit", RevisionStore.GuildMembership))
                     throw new OwnerRevisionConflictException();
             }
             foreach (var (id, snapshot) in loaded)
@@ -110,8 +111,11 @@ public sealed class SocialOwnerCache(AccountStore accounts, OwnerRegistry owners
             {
                 Vector = before.Vector.WithRevision(RevisionStore.FriendRelation,
                     owners.Get(id).Revisions[RevisionStore.FriendRelation]),
-                Friends = value.Friends, Applicants = value.Applicants, Blacklist = value.Blacklist,
-                BlacklistedBy = value.BlacklistedBy, Intimacy = value.Intimacy,
+                Friends = value.Friends,
+                Applicants = value.Applicants,
+                Blacklist = value.Blacklist,
+                BlacklistedBy = value.BlacklistedBy,
+                Intimacy = value.Intimacy,
             };
         }
         foreach (var (id, value) in updated) _social[id] = value;

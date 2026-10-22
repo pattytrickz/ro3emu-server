@@ -9,6 +9,6 @@
     <ProjectReference Include="../Ro3Emu.Bot/Ro3Emu.Bot.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.58.0" />
+    <PackageReference Include="Anthropic" />
   </ItemGroup>
 </Project>

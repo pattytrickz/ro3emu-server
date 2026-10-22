@@ -178,7 +178,7 @@ public sealed partial class CharacterService
         context.AssertRole(session.Role!.Id);
         context.BindPresentation(session);
         var attachment = session.Attachment;
-        var lifeUse = lifeItemExchange.Value;
+        var lifeUse = LifeItemExchange.Value;
         if (lifeUse is null || !lifeUse.Active || !ReferenceEquals(lifeUse.Session, session) || lifeUse.Committed) lifeUse = null;
         if (baseExp < 0 || jobExp < 0) throw new ArgumentOutOfRangeException(nameof(baseExp));
         var nextProgress = CloneProgress(session.Progress!);
@@ -298,7 +298,8 @@ public sealed partial class CharacterService
             builder.Progress(session.Role.Id, stagedProgress);
             persist?.Invoke(builder);
             lifeUse?.Persist(builder);
-            cardSight = StageFirstCardSight?.Invoke(session, postCommitHooks.Select(g => g.Entry).ToList());
+            cardSight = StageFirstCardSight?.Invoke(session, postCommitHooks.Select(g => g.Entry).ToList(),
+                rewardSettlement?.LibraryMonster ?? 0);
             cardSight?.Persist(builder);
             if (builder.HasCharacterFamilyEconomy && (prunedPlans = PrunedEquipmentPlans(session, stagedItems)) != null)
                 builder.RoleBlob(session.Role.Id, "equip_plans", prunedPlans.ToByteArray());
@@ -505,7 +506,7 @@ public sealed partial class CharacterService
                 Entry = grant.Entry, Stack = count, Pack = pack, Sort = NextSort(session, pack),
                 BindType = grant.BindType, BindExpire = grant.BindExpire,
                 Attrs = grant.CardType == 0 ? null : new Dictionary<int, long>
-                    { [501] = 0, [502] = 0, [530] = grant.CardType },
+                { [501] = 0, [502] = 0, [530] = grant.CardType },
             };
             if (persist) itemStore.Insert(session.Role!.Id, item);
             session.Items.Add(item);

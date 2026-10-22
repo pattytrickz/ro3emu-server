@@ -25,6 +25,32 @@ public sealed partial class CharacterService
         session.Speed = stats[Speed];
     }
 
+    /// <summary>
+    /// romsg.RoleDetailInfo (MG_PublicServer.proto): a role's public card, its worn equipment (5007's shape) and its full
+    /// property list, as LC_DAL_RolePublic.ParseRolePublicBaseInfo / _parseEquipInfo / _parseAllProperty read them. Used for
+    /// snapshots other players see later (the Realm of the Gods hall of fame).
+    /// </summary>
+    internal RoleDetailInfo DetailInfo(GameSession session)
+    {
+        var role = session.Role!;
+        var p = session.Progress!;
+        var stats = Stats(session);
+        var info = new RoleDetailInfo
+        {
+            Rolebase = new RolePublicBaseInfo
+            {
+                Roleid = role.Id, Name = role.Name, Career = p.Career, BaseLevel = p.Level,
+                JobLevel = p.JobLevel, Gender = role.Sex
+            },
+            EquipInfo = BuildEquip(session),
+            Selfproperty = new AllProperty { EntityID = role.Id },
+        };
+        info.Rolebase.Appearances.Add(session.Wardrobe?.CurUseAppearances.ToDictionary(a => a.Key, a => a.Value) ?? RoleProto.Appearances(role));
+        foreach (var id in PropertyIds(stats))
+            info.Selfproperty.Propertys.Add(new Property { PropertyId = id, Data = stats[id], BaseData = stats.Base.GetValueOrDefault(id, stats[id]), Vd64 = stats[id] });
+        return info;
+    }
+
     /// <summary>EntityBase.equipInfo: ItemConfig ids of grids 1..7, 0 for empty.</summary>
     private static long[] EquipInfo(GameSession session)
     {
@@ -46,7 +72,8 @@ public sealed partial class CharacterService
         var raw = new Dictionary<int, double>();
         void Add(long id, double v) => raw[(int)id] = raw.GetValueOrDefault((int)id) + v;
 
-        if (MatchAttributes?.Invoke(session) is { } matchAttributes)
+        var matchAttributes = MatchAttributes?.Invoke(session);
+        if (matchAttributes != null)
         {
             // A Survivor Battle career replaces the character's own build for the match (TimedBattleService.Chicken):
             // EatChickenGameCareer._iJobAttr and the worn match equipment, plus the buffs of the match.
@@ -60,6 +87,7 @@ public sealed partial class CharacterService
         if (!raw.ContainsKey(BaseAspd)) raw[BaseAspd] = 100;
 
         var sheet = EquipmentStunts.ApplyConversions(session, raw, data);
+        if (matchAttributes == null) sheet = EmblemService.ApplyResonanceConversions(session, raw, sheet, data);
         long maxHp = sheet[MaxHp], maxSp = sheet[MaxSp];
         sheet[Hp] = Math.Clamp(session.CurrentHp ?? maxHp, 0, maxHp);
         sheet[Sp] = Math.Clamp(session.CurrentSp ?? maxSp, 0, maxSp);

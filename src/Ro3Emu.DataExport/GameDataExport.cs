@@ -8,13 +8,27 @@ namespace Ro3Emu.DataExport;
 /// Everything the server reads from the client, exported in one go from a client folder into a data folder:
 /// config/ (DataConfig, ComplexConfig and Localization_en tables), sceneeditor/, skills/, nav/, msgtable.tsv, plus
 /// loc_en.tsv (the English map for the client, see <see cref="LocMapBuilder"/>) and export.json (what was exported
-/// from which client). The new tables are written next to the old ones and swapped in at the end, so a failed or
-/// cancelled export leaves the previous one intact. Nothing in the client folder is written.
+/// from which client). Nothing in the client folder is written.
+/// - **Complete or flagged:** a table that fails to export is an error unless it is a known non-table module
+///   (<see cref="ExpectedTableFailures"/>); any other failure is listed in the stamp and makes the export incomplete,
+///   so <see cref="UpToDate"/> says no and the next start exports again (the player sees the warning).
+/// - **Manifest:** the stamp counts the files of every exported folder; <see cref="UpToDate"/> checks them, not just
+///   two files, so a damaged or half-replaced data folder is exported again.
+/// - **Swap:** the new tables are staged next to the old ones. A journal (.export/swapping) is written first; then the
+///   stamp and each old folder are renamed aside and the new ones renamed in; a failure puts the old ones back. The
+///   stamp is written last, so an export cut anywhere in between leaves no stamp. A process that dies mid-swap leaves
+///   the journal: the next export (and <see cref="UpToDate"/>) first puts the previous generation back
+///   (<see cref="RecoverInterruptedSwap"/>), and only then clears its work folder.
+/// - **Incomplete:** a table that could not even be decoded counts as failed too. An incomplete export still goes in
+///   (the server can run on what did export), but the previous generation is kept in .export-previous.
 /// </summary>
 public static class GameDataExport
 {
     /// <summary>Bumped when the export's output changes, so RO3Emu.exe exports again after an update of itself.</summary>
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
+
+    /// <summary>Client modules under the exported folders that are code, not tables: they never export, and that is fine.</summary>
+    public static readonly IReadOnlySet<string> ExpectedTableFailures = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Lua_DBManager" };
 
     public static readonly string[] Folders = ["config", "sceneeditor", "skills", "nav"];
 
@@ -27,10 +41,14 @@ public static class GameDataExport
         public Action<string>? Log { get; init; }
         /// <summary>(stage, done, total) for a progress bar; total 0 = no count.</summary>
         public Action<string, int, int>? Progress { get; init; }
+        /// <summary>Tests: called at each step of the swap ("aside:&lt;name&gt;", "in:&lt;name&gt;"); throwing fails it there.</summary>
+        internal Action<string>? SwapStepForTest { get; init; }
     }
 
+    /// <param name="FailedTables">Tables that could not be exported (beyond <see cref="ExpectedTableFailures"/>); not
+    /// empty = the export is incomplete and the server may miss content.</param>
     public sealed record Result(int ConfigTables, int SceneEditor, int Skills, int NavFiles, int Messages, int LocEntries,
-        string Fingerprint, IReadOnlyCollection<string> ClientFilesRead);
+        string Fingerprint, IReadOnlyCollection<string> ClientFilesRead, IReadOnlyList<string> FailedTables);
 
     public static string LuaPayloadDir(string clientDir) => Path.Combine(clientDir, "ro3_Data", "StreamingAssets", "Recovery", "LuaPayload");
 
@@ -101,21 +119,50 @@ public static class GameDataExport
         catch (JsonException) { return null; }
     }
 
+    /// <param name="Files">Exported files per folder (<see cref="Folders"/>) at export time; <see cref="UpToDate"/>
+    /// checks them.</param>
+    /// <param name="FailedTables">Tables that did not export (incomplete export), empty when complete.</param>
     public sealed record Stamp(int Format, string Fingerprint, string ClientDir, DateTime ExportedUtc, int Messages, int NavFiles, int ConfigTables,
-        string? Quick = null);
+        string? Quick = null, Dictionary<string, int>? Files = null, string[]? FailedTables = null);
+
+    /// <summary>The single files an export writes besides <see cref="Folders"/>.</summary>
+    public static readonly string[] TopFiles = ["msgtable.tsv", "loc_en.tsv"];
+
+    /// <summary>Client script folders (and files) whose modules become exported tables: a chunk among them that does not
+    /// decode is a missing table.</summary>
+    private static readonly string[] TableSources =
+        [@"Config\DataConfig\", @"Config\ComplexConfig\", @"Config\SceneEditor\", @"Config\Skill\", "Localization_en.", "Localization_zh_CN."];
+
+    /// <summary>The table a <see cref="LuaChunkDecoder.DecodeTree"/> error ("&lt;relative path&gt;: message") loses, or
+    /// null when the chunk is not one the export turns into a table.</summary>
+    internal static string? TableOfDecodeError(string error)
+    {
+        string rel = error.Split(": ", 2)[0].Replace('/', '\\');
+        if (!TableSources.Any(prefix => rel.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))) return null;
+        string name = rel[(rel.LastIndexOf('\\') + 1)..]; // not Path.GetFileName: on Linux it does not split on '\'
+        int dot = name.IndexOf('.');
+        return dot > 0 ? name[..dot] : name;
+    }
 
     /// <summary>
-    /// True when the data folder holds a complete export of this client's game data by this format: the quick identity
-    /// matches, or else the full fingerprint does (a copied or touched client with the same content).
+    /// True when the data folder holds a complete export of this client's game data by this format: the stamp lists no
+    /// failed table, every exported folder still has the files it had, and the quick identity of the client matches, or
+    /// else the full fingerprint does (a copied or touched client with the same content).
     /// </summary>
     public static bool UpToDate(string dataDir, string clientDir)
     {
-        if (ReadStamp(dataDir) is not { } stamp || stamp.Format != FormatVersion
-            || !File.Exists(Path.Combine(dataDir, "config", "MapResource.json")) || !File.Exists(Path.Combine(dataDir, "msgtable.tsv")))
+        if (File.Exists(SwapJournal(dataDir))) return false; // a swap was cut: the next export puts things right first
+        if (ReadStamp(dataDir) is not { } stamp || stamp.Format != FormatVersion || stamp.FailedTables is not { Length: 0 }
+            || stamp.Files is not { } files || !File.Exists(Path.Combine(dataDir, "config", "MapResource.json")))
             return false;
+        if (TopFiles.Any(name => !File.Exists(Path.Combine(dataDir, name)))) return false;
+        foreach (var folder in Folders)
+            if (!files.TryGetValue(folder, out int expected) || CountFiles(Path.Combine(dataDir, folder)) != expected) return false;
         if (stamp.Quick != null && stamp.Quick == QuickFingerprint(clientDir)) return true;
         return stamp.Fingerprint == Fingerprint(clientDir);
     }
+
+    private static int CountFiles(string dir) => Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count() : -1;
 
     /// <summary>
     /// The VFS files that hold the walk maps, relative to the client folder with '/' separators. Needs only the Lua
@@ -154,21 +201,32 @@ public static class GameDataExport
 
         Directory.CreateDirectory(dataDir);
         var work = Path.Combine(dataDir, ".export");
+        RecoverInterruptedSwap(dataDir); // before the work folder (and the previous generation in it) is cleared
         if (Directory.Exists(work)) Directory.Delete(work, recursive: true);
         var luac = Path.Combine(work, "luac");
         var staged = Path.Combine(work, "out");
         var errors = new List<string>();
+        var failedTables = new List<string>();
 
         options.Progress?.Invoke("Reading the game scripts", 0, 0);
         string fingerprint = Fingerprint(clientDir);
-        var decoded = LuaChunkDecoder.DecodeTree(LuaPayloadDir(clientDir), luac, errors.Add, (d, t) => options.Progress?.Invoke("Reading the game scripts", d, t));
+        var decoded = LuaChunkDecoder.DecodeTree(LuaPayloadDir(clientDir), luac, error =>
+        {
+            errors.Add(error);
+            if (TableOfDecodeError(error) is { } table && !ExpectedTableFailures.Contains(table)) failedTables.Add(table);
+        }, (d, t) => options.Progress?.Invoke("Reading the game scripts", d, t));
         log($"decoded {decoded.Ok} Lua chunks, failed {decoded.Failed}");
         if (decoded.Ok == 0) throw new ExportException("No game script could be read from the game folder.");
 
         (int Ok, int Failed) Tables(string stage, string outDir, params string[] dirs)
         {
             using var exporter = new LuaConfigExporter(luac);
-            var result = exporter.ExportDirs(outDir, dirs, errors.Add, (d, t) => options.Progress?.Invoke(stage, d, t));
+            var result = exporter.ExportDirs(outDir, dirs, error =>
+            {
+                errors.Add(error);
+                string module = error.Split(':', 2)[0];
+                if (!ExpectedTableFailures.Contains(module)) failedTables.Add(module);
+            }, (d, t) => options.Progress?.Invoke(stage, d, t));
             log($"{stage}: exported {result.Ok}, failed {result.Failed}");
             return result;
         }
@@ -202,25 +260,121 @@ public static class GameDataExport
             Path.Combine(staged, "loc_en.tsv"), options);
 
         foreach (var e in errors.Take(50)) log("  " + e);
+        if (failedTables.Count > 0) log($"INCOMPLETE: {failedTables.Count} game table(s) could not be exported: {string.Join(", ", failedTables.Take(20))}");
 
-        // Swap in: the old folders go away only now that the new ones are complete.
-        foreach (var folder in Folders)
-        {
-            var target = Path.Combine(dataDir, folder);
-            if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
-            var source = Path.Combine(staged, folder);
-            if (Directory.Exists(source)) Directory.Move(source, target);
-        }
-        foreach (var file in new[] { "msgtable.tsv", "loc_en.tsv" })
-            File.Move(Path.Combine(staged, file), Path.Combine(dataDir, file), overwrite: true);
+        var files = Folders.ToDictionary(folder => folder, folder => CountFiles(Path.Combine(staged, folder)));
+        SwapIn(dataDir, staged, Path.Combine(work, "old"), options.SwapStepForTest);
         var stamp = new Stamp(FormatVersion, fingerprint, Path.GetFullPath(clientDir), DateTime.UtcNow, messages, nav.Extracted, config.Ok,
-            QuickFingerprint(clientDir));
-        File.WriteAllText(Path.Combine(dataDir, "export.json"), JsonSerializer.Serialize(stamp, new JsonSerializerOptions { WriteIndented = true }));
+            QuickFingerprint(clientDir), files, failedTables.ToArray());
+        var stampPath = Path.Combine(dataDir, "export.json");
+        File.WriteAllText(stampPath + ".tmp", JsonSerializer.Serialize(stamp, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(stampPath + ".tmp", stampPath, overwrite: true);
+        var old = Path.Combine(work, "old");
+        if (failedTables.Count > 0 && Directory.Exists(old) && Directory.EnumerateFileSystemEntries(old).Any())
+        {
+            // Incomplete: keep the generation it replaced, so nothing that worked before is lost.
+            var previous = Path.Combine(dataDir, ".export-previous");
+            if (Directory.Exists(previous)) Directory.Delete(previous, recursive: true);
+            Directory.Move(old, previous);
+            log($"the previous game data is kept in {previous}");
+        }
+        File.Delete(SwapJournal(dataDir));
         Directory.Delete(work, recursive: true);
 
         var read = new SortedSet<string>(StringComparer.OrdinalIgnoreCase) { LuaPayloadDir(clientDir) };
         foreach (var f in filesRead) read.Add(f);
-        return new Result(config.Ok, scene.Ok, skills.Ok, nav.Extracted, messages, loc.Count, fingerprint, read);
+        return new Result(config.Ok, scene.Ok, skills.Ok, nav.Extracted, messages, loc.Count, fingerprint, read, failedTables);
+    }
+
+    /// <summary>
+    /// Replaces the exported folders and files of <paramref name="dataDir"/> with the staged ones. The stamp is removed
+    /// first, so until the caller writes the new one the data folder never counts as up to date. Old entries are renamed
+    /// into <paramref name="old"/> (same volume, no copy) and put back if any step fails.
+    /// </summary>
+    internal static void SwapIn(string dataDir, string staged, string old, Action<string>? stepForTest = null)
+    {
+        Directory.CreateDirectory(old);
+        // Durable before the first rename: a process that dies from here on leaves it, and RecoverInterruptedSwap then
+        // knows that old/ holds the previous generation of whatever was already replaced.
+        var journal = SwapJournal(dataDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(journal)!);
+        using (var file = new FileStream(journal, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            file.Write(System.Text.Encoding.UTF8.GetBytes(old));
+            file.Flush(flushToDisk: true);
+        }
+        var entries = SwapEntries();
+        var movedAside = new List<(string Name, bool Folder)>();
+        var movedIn = new List<(string Name, bool Folder)>();
+        try
+        {
+            foreach (var entry in entries)
+            {
+                string target = Path.Combine(dataDir, entry.Name), aside = Path.Combine(old, entry.Name), source = Path.Combine(staged, entry.Name);
+                if (entry.Folder ? Directory.Exists(target) : File.Exists(target))
+                {
+                    Move(target, aside, entry.Folder);
+                    movedAside.Add(entry);
+                }
+                stepForTest?.Invoke("aside:" + entry.Name);
+                if (entry.Folder ? Directory.Exists(source) : File.Exists(source))
+                {
+                    Move(source, target, entry.Folder);
+                    movedIn.Add(entry);
+                }
+                stepForTest?.Invoke("in:" + entry.Name);
+            }
+        }
+        catch
+        {
+            // Back to the previous export exactly: the new entries return to staging, the old ones to their place.
+            foreach (var entry in movedIn) Move(Path.Combine(dataDir, entry.Name), Path.Combine(staged, entry.Name), entry.Folder);
+            foreach (var entry in movedAside) Move(Path.Combine(old, entry.Name), Path.Combine(dataDir, entry.Name), entry.Folder);
+            File.Delete(journal);
+            throw;
+        }
+    }
+
+    /// <summary>What a swap replaces, the stamp first (renamed aside like the rest, so a recovery brings it back).</summary>
+    private static List<(string Name, bool Folder)> SwapEntries() =>
+        new[] { (Name: "export.json", Folder: false) }.Concat(Folders.Select(name => (Name: name, Folder: true)))
+            .Concat(TopFiles.Select(name => (Name: name, Folder: false))).ToList();
+
+    private static string SwapJournal(string dataDir) => Path.Combine(dataDir, ".export", "swapping");
+
+    /// <summary>
+    /// After a process died mid-swap (the journal is still there): every entry already renamed aside goes back in place
+    /// of whatever replaced it, so the data folder is the previous generation again, stamp included. Throws if that
+    /// fails, leaving the journal for the next attempt.
+    /// </summary>
+    internal static void RecoverInterruptedSwap(string dataDir)
+    {
+        var journal = SwapJournal(dataDir);
+        if (!File.Exists(journal)) return;
+        var old = File.ReadAllText(journal).Trim();
+        try
+        {
+            foreach (var (name, folder) in SwapEntries())
+            {
+                string aside = Path.Combine(old, name), target = Path.Combine(dataDir, name);
+                if (!(folder ? Directory.Exists(aside) : File.Exists(aside))) continue;
+                if (folder && Directory.Exists(target)) Directory.Delete(target, recursive: true);
+                else if (!folder && File.Exists(target)) File.Delete(target);
+                Move(aside, target, folder);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new ExportException($"An earlier game data export was cut while replacing the data and could not be put back ({e.Message}). " +
+                $"The previous data is in {old}.");
+        }
+        File.Delete(journal);
+    }
+
+    private static void Move(string from, string to, bool folder)
+    {
+        if (folder) Directory.Move(from, to);
+        else File.Move(from, to);
     }
 
     /// <summary>The client's two Localization chunks, the only input of the English map.</summary>

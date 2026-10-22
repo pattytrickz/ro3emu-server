@@ -16,7 +16,7 @@ namespace Ro3Emu.Server.Game;
 /// BaseLvConfig, JobLvConfig, BasePointConfig, EquipConfig).
 /// </summary>
 public sealed partial class CharacterService(RoleStore roles, ItemStore itemStore, GameData data, World world, ILogger<CharacterService> log,
-    Microsoft.Extensions.Options.IOptions<ServerOptions> options, AwardService awards)
+    Microsoft.Extensions.Options.IOptions<ServerOptions> options)
 {
     public const uint RoleBaseInfoSync = 5066;
     public const uint BaseAttrSync = 5067;
@@ -78,8 +78,8 @@ public sealed partial class CharacterService(RoleStore roles, ItemStore itemStor
     /// <summary>An item entered the bag: entry and the count gained (card collection first sight, achievement counters).</summary>
     public List<Action<GameSession, int, int>> ItemGained { get; } = new();
     internal sealed record FirstCardSightPlan(Action<RoleItemPlanBuilder> Persist, Action Apply);
-    /// <summary>CardService enlists first sight in owned award/exchange commits.</summary>
-    internal Func<GameSession, IReadOnlyList<int>, FirstCardSightPlan?>? StageFirstCardSight { get; set; }
+    /// <summary>CardService enlists first sight in owned award/exchange commits and, for a kill, the slain monster's Codex kill (NPC id, 0 none).</summary>
+    internal Func<GameSession, IReadOnlyList<int>, int, FirstCardSightPlan?>? StageFirstCardSight { get; set; }
 
     /// <summary>ItemConfig 407 "Vigor": the currency the award tables grant (8 AwardConfig rows).</summary>
     public const int VigorRewardItem = 407;
@@ -95,7 +95,7 @@ public sealed partial class CharacterService(RoleStore roles, ItemStore itemStor
     /// <summary>LifeJobService owns action 607/315 item transactions; null means ordinary item effects.</summary>
     internal Func<GameSession, InvItem, JsonElement, int, Task<int?>>? LifeItemUse { get; set; }
 
-    private static readonly AsyncLocal<LifeItemExchangeScope?> lifeItemExchange = new();
+    private static readonly AsyncLocal<LifeItemExchangeScope?> LifeItemExchange = new();
 
     private sealed class LifeItemExchangeScope(GameSession session, Action<RoleItemPlanBuilder> persist, Action publish)
     {
@@ -113,7 +113,7 @@ public sealed partial class CharacterService(RoleStore roles, ItemStore itemStor
     /// <summary>For CardService: item, stat and look updates after socket changes (caller holds the lock).</summary>
     internal async Task ItemsChangedAsync(GameSession session, bool stats)
     {
-        var lifeUse = lifeItemExchange.Value;
+        var lifeUse = LifeItemExchange.Value;
         if (lifeUse is { Active: true, Committed: true, PendingStateChanged: { } pending }
             && ReferenceEquals(lifeUse.Session, session))
         {

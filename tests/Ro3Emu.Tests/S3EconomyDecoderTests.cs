@@ -72,7 +72,7 @@ public sealed class S3EconomyDecoderTests
                 "auction guild_info guild_challenge pet_books daily new_activities activity_runtime timed_activity timed_battle " +
                 "training lottery tower wild_afk dungeons territory_escort lifejob life_restrict life_runtime season_talent " +
                 "season_page season_page_meta season_refine equip_levels equip_plans auto_decompose bag_state stat_plans " +
-                "world_state emblems pets mounts wardrobe totems totem_refine_epoch genre career_special heroic_spirit area_concur").Split(' '))
+                "world_state emblems pets mounts wardrobe totems totem_refine_epoch genre career_special heroic_spirit area_concur growth_class first_heart personal personal_upvote popularity social_outfit emoji_info").Split(' '))
                 Exec("ALTER TABLE role ADD COLUMN " + column + " BLOB");
         }
         internal void Exec(string sql)
@@ -86,6 +86,30 @@ public sealed class S3EconomyDecoderTests
             cmd.ExecuteNonQuery();
         }
         public void Dispose() { Db.Dispose(); File.Delete(PathName); }
+    }
+
+    [Fact]
+    public void RoleProgressionWithoutItsColumnsIsAnUnknownSchema()
+    {
+        using var f = new Fixture();
+        f.Exec("ALTER TABLE role DROP COLUMN job_exp");
+        f.Exec("DROP TABLE owner_revision; CREATE TABLE owner_revision(kind TEXT, id TEXT, part TEXT)");
+        var issues = EconomySnapshotReader.Read(f.PathName, Catalog, "realm-fixture").Issues;
+        Assert.Contains(issues, x => x.Kind == EconomyIssueKind.UnknownSchema && x.Key == "progress/schema");
+        Assert.Contains(issues, x => x.Kind == EconomyIssueKind.UnknownSchema && x.Key == "progress/revision");
+    }
+
+    [Fact]
+    public void AnUnknownJsonFieldIsAnUnknownSchemaAndAWrongValueIsCorruption()
+    {
+        using var f = new Fixture();
+        f.Insert("INSERT INTO role(id,currency,world_state) VALUES(101,'1:7',$0)",
+            B("{\"VisitedMaps\":[1],\"Extra\":1}"));
+        Assert.Contains(EconomySnapshotReader.Read(f.PathName, Catalog, "realm-fixture").Issues,
+            x => x.Kind == EconomyIssueKind.UnknownSchema && x.Key == "role/101/world_state");
+        f.Insert("UPDATE role SET world_state=$0 WHERE id=101", B("{\"VisitedMaps\":\"x\"}"));
+        Assert.Contains(EconomySnapshotReader.Read(f.PathName, Catalog, "realm-fixture").Issues,
+            x => x.Kind == EconomyIssueKind.Corruption && x.Key == "role/101/world_state");
     }
 
     [Fact]

@@ -24,18 +24,18 @@ public static class EconomyLedgerReader
         using var tx = db.BeginTransaction(deferred: true);
         string storedRealm;
         long watermark, floor;
-        try
-        {
-            // First SELECT pins the database view at the committed watermark.
-            using var meta = Command(db, tx, "SELECT realm_id,next_sequence,retained_floor FROM economy_meta WHERE singleton=1");
-            using var row = meta.ExecuteReader();
-            if (!row.Read()) throw new InvalidDataException("Missing E01 economy metadata singleton.");
-            storedRealm = row.GetString(0); watermark = row.GetInt64(1); floor = row.GetInt64(2);
-        }
-        catch (SqliteException error) when (error.SqliteErrorCode == 1 && error.Message.Contains("no such table", StringComparison.Ordinal))
+        // The first read (this schema check) pins the database view; the watermark below is read from that same view.
+        if (!EconomySchema.Has(db, tx, "economy_meta"))
         {
             issues.Add(new(EconomyIssueKind.Coverage, "ledger/schema", "E01 economy tables are absent."));
             return Empty(realmId, catalog, fromExclusive, throughInclusive, issues);
+        }
+        using (var meta = Command(db, tx,
+            "SELECT realm_id,next_sequence,retained_floor FROM economy_meta WHERE singleton=1"))
+        {
+            using var row = meta.ExecuteReader();
+            if (!row.Read()) throw new InvalidDataException("Missing E01 economy metadata singleton.");
+            storedRealm = row.GetString(0); watermark = row.GetInt64(1); floor = row.GetInt64(2);
         }
         if (realmId != "auto" && realmId != storedRealm)
             issues.Add(new(EconomyIssueKind.Corruption, "ledger/realm", "Expected realm ID differs from durable database identity."));
@@ -58,6 +58,7 @@ public static class EconomyLedgerReader
         var eventIntents = new Dictionary<string, EventEconomyMutation>(StringComparer.Ordinal);
         var eventOwnerAmounts = new Dictionary<(string Operation, EconomyOwner Owner, EconomyAsset Asset), BigInteger>();
         var commands = new Dictionary<string, string>(StringComparer.Ordinal);
+        bool obligationSchemaChecked = false;
         var e05Intent = new Dictionary<(string Operation, EconomyAsset Asset, EconomyOwner Owner,
             EconomyCompartment Compartment, EconomyLegKind Kind, EconomyReason Reason), BigInteger>();
         var e05Ledger = new Dictionary<(string Operation, EconomyAsset Asset, EconomyOwner Owner,
@@ -70,6 +71,7 @@ public static class EconomyLedgerReader
             EconomyCompartment ToPart, EconomyReason ToReason), BigInteger>();
         try
         {
+            RequireLedgerSchema(db, tx);
             using (var bounds = Command(db, tx, """
                 SELECT (SELECT COUNT(*) FROM operation_receipt WHERE commit_seq<=0 OR commit_seq>$watermark),
                        (SELECT COUNT(*) FROM economy_entry WHERE commit_seq<=0 OR commit_seq>$watermark)
@@ -206,6 +208,12 @@ public static class EconomyLedgerReader
                             var parsed = ValidateIntentPayload((byte[])row.GetValue(15), row.GetString(9),
                                 op, row.GetString(5), row.GetInt64(6), commandKind, row.GetString(8), source,
                                 row.GetInt64(14), (byte[])row.GetValue(10));
+                            bool dungeonReceipt = commandKind is "dungeon-reward" or "dungeon-obligation-earn";
+                            if (dungeonReceipt && !obligationSchemaChecked)
+                            {
+                                RequireObligationSchema(db, tx);
+                                obligationSchemaChecked = true;
+                            }
                             if (commandKind == "dungeon-reward")
                                 ValidateDungeonObligation(db, tx, source, row.GetInt64(6), parsed);
                             if (commandKind == "dungeon-obligation-earn")
@@ -224,8 +232,10 @@ public static class EconomyLedgerReader
                         issues.Add(new(EconomyIssueKind.Corruption, "receipt/" + op, "Invalid typed child result or revision evidence: " + error.Message));
                     }
                     if (seq > fromExclusive) receipts.Add(new EconomyReceipt(seq, op, count, [source])
-                    { ActorRoleId = row.GetInt64(6), CommandKind = commandKind, RewardEvidence = rewardEvidence,
-                        BeforeProgressRevision = beforeProgressRevision, AfterProgressRevision = afterProgressRevision });
+                    {
+                        ActorRoleId = row.GetInt64(6), CommandKind = commandKind, RewardEvidence = rewardEvidence,
+                        BeforeProgressRevision = beforeProgressRevision, AfterProgressRevision = afterProgressRevision
+                    });
                 }
             }
             if (expectedSequence <= throughInclusive)
@@ -439,6 +449,12 @@ public static class EconomyLedgerReader
                             "cd13e/monsterhunt-award" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
                             "cd13e/guild-award" when leg.Kind == EconomyLegKind.Source => EconomyReason.GuildReward,
                             "cd13e/guild-award" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
+                            "cd13e/growthclass-award" when leg.Kind == EconomyLegKind.Source => EconomyReason.GrowthClassReward,
+                            "cd13e/growthclass-award" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
+                            "cd13e/library-award" when leg.Kind == EconomyLegKind.Source => EconomyReason.LibraryReward,
+                            "cd13e/library-award" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
+                            "cd13e/firstheart-award" when leg.Kind == EconomyLegKind.Source => EconomyReason.FirstHeartReward,
+                            "cd13e/firstheart-award" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
                             "cd13e/daily-stage" when leg.Kind == EconomyLegKind.Source => EconomyReason.DailyReward,
                             "cd13e/daily-stage" when leg.Kind == EconomyLegKind.Sink => EconomyReason.OwnedAwardCost,
                             "cd13e/journey-victory" when leg.Kind == EconomyLegKind.Source => EconomyReason.ActivityReward,
@@ -556,8 +572,11 @@ public static class EconomyLedgerReader
                     }
                     if (transferIndexes.TryGetValue(edge.Key, out var indexes))
                         foreach (int i in indexes)
-                            legs[i] = legs[i] with { Counterparty = legs[i].LegNumber == debit.LegNumber
-                                ? credit.Location : debit.Location };
+                            legs[i] = legs[i] with
+                            {
+                                Counterparty = legs[i].LegNumber == debit.LegNumber
+                                ? credit.Location : debit.Location
+                            };
                 }
             }
             foreach (var receipt in receipts)
@@ -599,9 +618,7 @@ public static class EconomyLedgerReader
                     issues.Add(new(EconomyIssueKind.Corruption, "intent/transfer/" + key.Operation + "/" + key.Asset,
                         "E05d transfer counterpart differs from semantic authorization."));
         }
-        catch (SqliteException error) when (error.SqliteErrorCode == 1 &&
-            (error.Message.Contains("no such table", StringComparison.Ordinal) ||
-             error.Message.Contains("no such column", StringComparison.Ordinal)))
+        catch (EconomySchemaMissingException)
         {
             issues.Add(new(EconomyIssueKind.UnknownSchema, "ledger/schema", "Required economy receipt/source/entry or obligation schema is absent."));
         }
@@ -694,19 +711,19 @@ public static class EconomyLedgerReader
             internal int Target = target, Reverse = reverse;
             internal long Capacity = capacity;
         }
-        private readonly List<Edge>[] graph = Enumerable.Range(0, nodes).Select(_ => new List<Edge>()).ToArray();
+        private readonly List<Edge>[] _graph = Enumerable.Range(0, nodes).Select(_ => new List<Edge>()).ToArray();
 
         internal void Add(int from, int to, long capacity)
         {
             if (capacity <= 0) return;
-            graph[from].Add(new Edge(to, graph[to].Count, capacity));
-            graph[to].Add(new Edge(from, graph[from].Count - 1, 0));
+            _graph[from].Add(new Edge(to, _graph[to].Count, capacity));
+            _graph[to].Add(new Edge(from, _graph[from].Count - 1, 0));
         }
 
         internal long MaxFlow(int source, int sink)
         {
             long total = 0;
-            var previous = new (int Node, int Edge)[graph.Length];
+            var previous = new (int Node, int Edge)[_graph.Length];
             while (true)
             {
                 Array.Fill(previous, (-1, -1));
@@ -716,9 +733,9 @@ public static class EconomyLedgerReader
                 while (queue.Count != 0 && previous[sink].Node < 0)
                 {
                     int from = queue.Dequeue();
-                    for (int i = 0; i < graph[from].Count; i++)
+                    for (int i = 0; i < _graph[from].Count; i++)
                     {
-                        var edge = graph[from][i];
+                        var edge = _graph[from][i];
                         if (edge.Capacity <= 0 || previous[edge.Target].Node >= 0) continue;
                         previous[edge.Target] = (from, i);
                         queue.Enqueue(edge.Target);
@@ -729,14 +746,14 @@ public static class EconomyLedgerReader
                 for (int node = sink; node != source; node = previous[node].Node)
                 {
                     var (from, index) = previous[node];
-                    amount = Math.Min(amount, graph[from][index].Capacity);
+                    amount = Math.Min(amount, _graph[from][index].Capacity);
                 }
                 for (int node = sink; node != source; node = previous[node].Node)
                 {
                     var (from, index) = previous[node];
-                    var edge = graph[from][index];
+                    var edge = _graph[from][index];
                     edge.Capacity -= amount;
-                    graph[node][edge.Reverse].Capacity = checked(graph[node][edge.Reverse].Capacity + amount);
+                    _graph[node][edge.Reverse].Capacity = checked(_graph[node][edge.Reverse].Capacity + amount);
                 }
                 total = checked(total + amount);
             }
@@ -750,18 +767,18 @@ public static class EconomyLedgerReader
 
     private static (EconomyReason Cost, EconomyReason Goods) FamilyReasons(string family, string command) =>
         CharacterFamilyEconomy.IsKind(command) ? CharacterFamilyEconomy.Reasons(command) : family switch
-    {
-        "pet" => (EconomyReason.PetCost,
-            command == "cd13b/pet-rebirth" ? EconomyReason.PetRefund : EconomyReason.PetGoods),
-        "mount" => (EconomyReason.MountCost, EconomyReason.MountGoods),
-        "wardrobe" => (EconomyReason.WardrobeCost, EconomyReason.WardrobeGoods),
-        "totem" => (EconomyReason.TotemCost,
-            command == "cd13b/totem-upgrade" ? EconomyReason.TotemRefund : EconomyReason.TotemGoods),
-        "emblem" => (EconomyReason.EmblemCost, EconomyReason.EmblemGoods),
-        "genre" => (EconomyReason.GenreCost, EconomyReason.GenreGoods),
-        "valhalla" => (EconomyReason.ValhallaCost, EconomyReason.ValhallaCost),
-        _ => throw new InvalidDataException("Unknown family reason namespace.")
-    };
+        {
+            "pet" => (EconomyReason.PetCost,
+                command == "cd13b/pet-rebirth" ? EconomyReason.PetRefund : EconomyReason.PetGoods),
+            "mount" => (EconomyReason.MountCost, EconomyReason.MountGoods),
+            "wardrobe" => (EconomyReason.WardrobeCost, EconomyReason.WardrobeGoods),
+            "totem" => (EconomyReason.TotemCost,
+                command == "cd13b/totem-upgrade" ? EconomyReason.TotemRefund : EconomyReason.TotemGoods),
+            "emblem" => (EconomyReason.EmblemCost, EconomyReason.EmblemGoods),
+            "genre" => (EconomyReason.GenreCost, EconomyReason.GenreGoods),
+            "valhalla" => (EconomyReason.ValhallaCost, EconomyReason.ValhallaCost),
+            _ => throw new InvalidDataException("Unknown family reason namespace.")
+        };
 
     private static void ValidateEscrowRevisions(string beforeJson, string afterJson,
         EscrowRolePart[][] childRoleWrites, object?[] childReceipts)
@@ -903,6 +920,9 @@ public static class EconomyLedgerReader
             "cd13e/advguild-award" => ["inventory", "progress", "adventure_group"],
             "cd13e/monsterhunt-award" => ["inventory", "progress", "area_concur"],
             "cd13e/guild-award" => ["inventory", "progress", "guild_info"],
+            "cd13e/growthclass-award" => ["inventory", "progress", "growth_class"],
+            "cd13e/library-award" => ["inventory", "progress", "library"],
+            "cd13e/firstheart-award" => ["inventory", "progress", "first_heart"],
             "cd13e/daily-stage" => ["inventory", "progress", "daily"],
             "cd13e/daily-reset" => ["progress", "daily", "tasks"],
             "cd13e/journey-victory" => ["inventory", "progress", "new_activities", "dungeons"],
@@ -912,12 +932,12 @@ public static class EconomyLedgerReader
         string[] allowed = commandKind switch
         {
             "monster-kill" => ["inventory", "progress", "library", "task_followup", "tower", "tasks", "wild_afk", "area_concur"],
-            "cd13e/daily-reset" => [..required, "wild_afk"],
-            "gather-yield" => [..required, "library", "task_followup"],
-            "dungeon-reward" => [..required, "auction_order", "library", "task_followup"],
-            "cd13e/tower-milestone" or "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/daily-stage" or
+            "cd13e/daily-reset" => [.. required, "wild_afk"],
+            "gather-yield" => [.. required, "library", "task_followup"],
+            "dungeon-reward" => [.. required, "auction_order", "library", "task_followup"],
+            "cd13e/tower-milestone" or "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/growthclass-award" or "cd13e/library-award" or "cd13e/firstheart-award" or "cd13e/daily-stage" or
             "cd13e/grant" or "cd13e/gm-grant" or "cd13e/character-exp" or
-                "cd13e/journey-victory" => [..required, "daily", "library", "task_followup", "activity_runtime", "mounts"],
+                "cd13e/journey-victory" => [.. required, "daily", "library", "task_followup", "activity_runtime", "mounts"],
             _ => required
         };
         bool library = bParts.ContainsKey("library"), followup = bParts.ContainsKey("task_followup");
@@ -1104,8 +1124,11 @@ public static class EconomyLedgerReader
                 effect.Delta != 1 || !claims.Contains(source) || !IsLotSource(lotSource, source) ||
                 !lots.TryGetValue(lotSource, out var lot) || lot.Entry != effect.Asset.Id)
                 throw new InvalidDataException("E05d auction alias lacks its authenticated created lot.");
-            return effect with { Owner = new EconomyOwner(EconomyOwnerKind.Escrow,
-                "auction:" + lot.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)) };
+            return effect with
+            {
+                Owner = new EconomyOwner(EconomyOwnerKind.Escrow,
+                "auction:" + lot.Id.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            };
         }).ToArray();
 
         static bool IsLotSource(string lotSource, string batchSource)
@@ -1183,6 +1206,25 @@ public static class EconomyLedgerReader
 
     private static bool ValidFingerprint(string? value) => value is null ||
         value.Length == 64 && value.All(c => c is >= '0' and <= '9' or >= 'A' and <= 'F');
+
+    /// <summary>The receipt, source and entry columns the ledger read selects.</summary>
+    private static void RequireLedgerSchema(SqliteConnection db, SqliteTransaction tx)
+    {
+        EconomySchema.Require(db, tx, "operation_receipt", "commit_seq", "operation_id", "leg_count", "source_key",
+            "realm_id", "actor_account", "actor_role", "command_kind", "request_fingerprint", "intent_hash", "outcome",
+            "child_receipts", "before_revisions", "after_revisions", "effective_utc_ms", "intent_payload");
+        EconomySchema.Require(db, tx, "economy_entry", "entry_id", "commit_seq", "operation_id", "leg_no", "owner_kind",
+            "owner_id", "compartment_kind", "compartment_key", "instance_key", "asset_kind", "asset_id", "asset_epoch",
+            "delta", "reason_code", "leg_kind", "edge_no", "before_fingerprint", "after_fingerprint", "source_key",
+            "counterparty_owner_kind", "counterparty_owner_id", "counterparty_compartment_kind",
+            "counterparty_compartment_key", "counterparty_instance_key");
+        EconomySchema.Require(db, tx, "operation_source", "realm_id", "source_key", "operation_id");
+    }
+
+    /// <summary>Checked once, at the first dungeon receipt: older databases without dungeon rewards lack it.</summary>
+    private static void RequireObligationSchema(SqliteConnection db, SqliteTransaction tx) =>
+        EconomySchema.Require(db, tx, "dungeon_reward_obligation", "source_key", "role_id", "activated", "completed",
+            "state");
 
     private static void ValidateDungeonObligation(SqliteConnection db, SqliteTransaction tx,
         string sourceKey, long role, ParsedIntent intent)

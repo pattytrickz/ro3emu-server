@@ -36,9 +36,38 @@ public static partial class EconomySnapshotReader
     // Monster Hunt: role.area_concur is DBAreaConcurInfo (kill counters per monster and map, claimed stage markers,
     // the area's claimed-stage count). No balance: kill counters ride the monster-kill receipt, and a claim's goods are
     // granted by its own cd13e/monsterhunt-award receipt whose claimed marker is only that receipt's once-only source.
-    // Growth classroom: TaskRuntimeState.GrowthRanksClaimed lists the claimed BecomeStrongerRankConfig ranks. No balance:
-    // a rank's goods are granted by its own award receipt, which saves the claimed rank as its once-only marker.
-    public const string ExpectedFormatManifestHash = "2F4FCB0AB017CD7CE96C265ED0F25A02E4495A1E96FE772D5B90B13D7AF7EDC8";
+    // Growth Classroom: role.growth_class is DBGrowthClassInfo (only rankReward, the claimed rank markers; the rest of
+    // 5045 is derived from the quests). No balance: a rank's goods are granted by its own cd13e/growthclass-award receipt.
+    // Codex monsters: role.library monsters (kill count, unlock flag) ride the monster-kill receipt; the unlock's
+    // Collection Points are granted by its own cd13e/library-award receipt whose unlock flag is that receipt's marker.
+    // A card collection unlock (82404) with points is a cd13e/library-award receipt the same way.
+    // Seven-Day Goal: role.first_heart is DBFirstHeartTaskActivityData (task progress and status, score bar, claimed score
+    // rewards). No balance: a task or score claim's goods come with its own cd13e/firstheart-award receipt, whose claimed
+    // marker is only that receipt's once-only source.
+    // Profile: role.personal is DBPersonalInfo (card presets, current preset, upvote times). No balance and no asset:
+    // stickers placed on a card are counted against the owned currency, never spent. role.personal_upvote is
+    // PersonalUpvoteList (who liked the card, when) and role.popularity is DBPopularityStar (popularity and affection
+    // credited by friend gifts): counters, no balance and no asset; the gift item is spent by the friend-gift receipt.
+    // Rift Crisis: role.timed_battle (TimedBattleService.State) OnePieceExtraDay/OnePieceExtraUsed count the day's extra
+    // awards (RestrictConfig 1020) and OnePieceWeek/OnePieceWeekItems the week's capped extra items. No balance: the goods
+    // come with the timed_battle_obligation the same settlement writes; these are only its limits. The legacy per-day
+    // OnePieceGains/OnePieceItemGains are read and dropped on the next Rift payment.
+    // Item actions: role.social_outfit is DBSocialOutfit (chat cosmetics unlocked by 349 items, with unlock and expiry
+    // times, and the worn choices) and role.emoji_info is DBEmojiInfo (chat emoticon ids unlocked by 212 items). Unlocks,
+    // no balance and no asset: the item is spent by the cd13a/character-item-action receipt that writes them.
+    // Power: role.emblems EmblemState.Power (PowerService.Record) holds the role's last published power total and its
+    // best total (maxHistoryPower), as normal/season parts. Rating counters, no balance and no asset: they only gate
+    // Become Stronger stage claims (whose goods come with their own daily-stage receipt) and rank the Hero Registry.
+    // Realm of the Gods: dungeons Honors (Final Trial goal states) and BlessingsSeen (acknowledged blessing levels) are
+    // markers; a Received honor is only the once-only source of its event/dungeon/honor-award receipt. server_state
+    // multi_dungeon_server (DBMultiDungeonServerInfo) holds the realm's first clears: the hall of fame keeps the clearing
+    // roles' equipment as a display snapshot, never a holding.
+    // Mock Battle: role.timed_battle CasualMmr/CasualRecords/CasualBest/CasualTotal are a rating and statistics, and
+    // CasualSettled the once-only markers of each match's event/casual-battle receipt; no balance, no asset.
+    // casual_battle_obligation.payout is CasualBattleService.Payout: a frozen match result (rating delta, record,
+    // numbers) and the DropPool ids its payment rolls. No goods: they are granted by the role's event/casual-battle
+    // receipt that also writes the timed_battle state and marks the row delivered.
+    public const string ExpectedFormatManifestHash = "C30B966932EA711BC056382F73CF7189C57E143F7C7A15351BEC6D13ECDCB91F";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State
@@ -97,6 +126,8 @@ public static partial class EconomySnapshotReader
             entries.Add("role-string-set:task_followup:System.String");
             entries.Add("dungeon_reward_obligation:Ro3Emu.Server.Accounts.DungeonRewardObligation");
             TypeShape(typeof(Ro3Emu.Server.Accounts.DungeonRewardObligation));
+            entries.Add("casual_battle_obligation:Ro3Emu.Server.Game.CasualBattleService+Payout");
+            TypeShape(typeof(Ro3Emu.Server.Game.CasualBattleService.Payout));
             // These JSON wrappers carry embedded protobuf bytes in addition to their explicit DTO graph.
             Message(Romsg.DBMountsInfo.Descriptor);
             Message(Romsg.DBLotteryData.Descriptor);
@@ -107,6 +138,8 @@ public static partial class EconomySnapshotReader
             TypeShape(typeof(Ro3Emu.Server.Game.FestivalService.Round));
             entries.Add("server_state/season_history:Ro3Emu.Server.Game.SeasonService.Season");
             TypeShape(typeof(Ro3Emu.Server.Game.SeasonService.Season));
+            entries.Add("server_state/multi_dungeon_server:romsg.DBMultiDungeonServerInfo");
+            Message(Romsg.DBMultiDungeonServerInfo.Descriptor);
             return Hash(string.Join("\n", entries));
         }
     }
