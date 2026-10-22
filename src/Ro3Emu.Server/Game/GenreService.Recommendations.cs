@@ -294,7 +294,7 @@ public sealed partial class GenreService
         }
         if (concrete.SeasonTalentPlan != null && concrete.SeasonTalentPlan.TalentNodes.Any(kv =>
             kv.Value.CurrentLevel < 0 || data.Row("SeasonTalentConfig", kv.Key) == null
-            || kv.Value.CurrentLevel > (s.SeasonTalent?.Plan.Values.Select(p => p.TalentNodes.GetValueOrDefault(kv.Key)?.CurrentLevel ?? 0).DefaultIfEmpty().Max() ?? 0)))
+            || kv.Value.CurrentLevel > (s.SeasonTalent?.Plan.Values.Select(p => SeasonTalentService.Level(s.SeasonTalent, p, kv.Key)).DefaultIfEmpty().Max() ?? 0)))
             return ErrorCodes.TalentLocked;
         return 0;
     }
@@ -518,12 +518,8 @@ public sealed partial class GenreService
                         foreach (int slot in next.Pets.SetupPlans[target].SupportPets.Where(kv => kv.Value == 0).Select(kv => kv.Key).ToArray())
                             next.Pets.SetupPlans[target].SupportPets.Remove(slot);
                         break;
-                    case Talent when concrete.SeasonTalentPlan != null && next.Talents.Plan.TryGetValue(target, out var purchased):
-                        // Talent levels are paid for per plan/node. A recommendation cannot purchase them for the seeker.
-                        if (concrete.SeasonTalentPlan.TalentNodes.Any(kv => kv.Value.CurrentLevel < 0
-                            || !purchased.TalentNodes.ContainsKey(kv.Key)
-                            || kv.Value.CurrentLevel > purchased.TalentNodes[kv.Key].CurrentLevel)) result = ErrorCodes.TalentLocked;
-                        else next.Talents.Plan[target] = concrete.SeasonTalentPlan.Clone();
+                    case Talent when concrete.SeasonTalentPlan != null && next.Talents.Plan.ContainsKey(target):
+                        result = talents.StageRecommendedPlan(next.Talents, target, concrete.SeasonTalentPlan);
                         break;
                     default: result = ErrorCodes.Parameter; break;
                 }
