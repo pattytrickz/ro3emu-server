@@ -251,6 +251,11 @@ public sealed partial class CombatService
         }
         if (hit.Dsts.Count > 0)
         {
+            // Heal's 14007 template has point effects but no damage effect. LC_DamageHelper
+            // skips impact presentation for showPoint 0; the normal-attack fallback adds
+            // an incorrect hit sound/flinch. Keep configured damage effects when present.
+            if (hit.Dsts.All(d => d.DamageType == DamageType.Heal))
+                hit.ShowPoint = HitEffect(GameData.Int(row, "_iScriptShow"), fallback: 0);
             foreach (var result in hit.Dsts)
             {
                 if (!CurrentCaster()) break;

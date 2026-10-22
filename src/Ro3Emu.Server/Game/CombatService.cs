@@ -300,12 +300,12 @@ public sealed partial class CombatService : IGameTicker
     }
 
     /// <summary>The template's damage EffectData (hit fx + flinch): the first with m_kDamage in [show*100, show*100+99].</summary>
-    private int HitEffect(long scriptShow)
+    private int HitEffect(long scriptShow, int fallback = 1000002)
     {
         var effects = data.SkillTemplateTable("Lua_Config_EffectData");
         for (long id = scriptShow * 100; id < scriptShow * 100 + 100; id++)
             if (effects.TryGetValue(id.ToString(), out var e) && e.TryGetProperty("m_kDamage", out _)) return (int)id;
-        return 1000002;
+        return fallback;
     }
 
     /// <summary>
