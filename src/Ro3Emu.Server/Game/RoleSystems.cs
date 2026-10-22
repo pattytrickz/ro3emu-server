@@ -27,7 +27,7 @@ public sealed class RoleSystems(Maps.World world, ChatService chat, CharacterSer
         afk.Load(session);
         daily.Load(session);
         await emblems.LoadAsync(session);
-        talents.Load(session);
+        await talents.LoadAsync(session); // may mail the one-time refund of levels bought twice
         seasonRefine.Load(session);
         character.Refresh(session); // first entity/stats use this role's saved active talent plan
     }

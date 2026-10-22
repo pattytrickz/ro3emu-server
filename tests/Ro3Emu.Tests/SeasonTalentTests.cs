@@ -149,7 +149,7 @@ public sealed class SeasonTalentTests
     }
 
     [ClientDataFact]
-    public async Task QuestRewardUnlocksFivePlansAndPaidLevelsPersistAcrossSwitchAndRelog()
+    public async Task QuestRewardUnlocksFivePlansAndPaidLevelsAreSharedByEveryPlanAndPersist()
     {
         await using var fixture = new ServerFixture();
         await fixture.StartAsync();
@@ -200,7 +200,8 @@ public sealed class SeasonTalentTests
         {
             int before = alice.Inbox.Snapshot().Count;
             Assert.Equal(0, await Upgrade(alice, Root));
-            Assert.Equal(level, fixture.Session.SeasonTalent!.Plan[0].TalentNodes[Root].CurrentLevel);
+            Assert.Equal(level, fixture.Session.SeasonTalent!.TalentNodes[Root].CurrentLevel);
+            Assert.DoesNotContain(fixture.Session.SeasonTalent.Plan.Values, p => p.TalentNodes.ContainsKey(Root));
             Assert.Equal(50 - 10 * level, fixture.Character.CountOf(fixture.Session, Remnant));
             Assert.Equal(500 - 100 * level, fixture.Character.CountOf(fixture.Session, MintedCoin));
             Assert.InRange(fixture.Character.Stats(fixture.Session)[101] - hp0, 100L * level, 100L * level + 3);
@@ -218,7 +219,6 @@ public sealed class SeasonTalentTests
             Assert.Equal(50 - 10 * level, bagChange.PackInfo[1].Inc.Items.Values
                 .Single(v => v.Inc?.Stack == 50 - 10 * level).Inc.Stack);
             var talentChange = DBSeasonTalentIncrement.Parser.ParseFrom(packets.Single(e => e.IsGame(SeasonTalentService.TalentSync)).Body);
-            Assert.Equal(level, talentChange.Plan[0].Inc.TalentNodes[Root].Inc.CurrentLevel);
             Assert.Equal(level, talentChange.TalentNodes[Root].Inc.CurrentLevel);
             var changedStats = OnePropertyChange.Parser.ParseFrom(packets.Single(e => e.IsGame(CharacterService.OnePropertyChange)).Body);
             Assert.Equal(fixture.Character.Stats(fixture.Session)[101],
@@ -228,11 +228,16 @@ public sealed class SeasonTalentTests
         Assert.Equal(ErrorCodes.SkillMaxLevel, await Upgrade(alice, Root));
         Assert.Equal(20, fixture.Character.CountOf(fixture.Session, Remnant));
 
+        // #bug-reports "Talent build does not reset Talent Remnants": a level is bought once and every plan shows it,
+        // so Build 2 keeps the levels (and their stats) instead of starting over without the Remnants.
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 1 });
         Assert.Equal(0, (await Next(alice, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
-        Assert.Equal(0, fixture.Session.SeasonTalent!.Plan[1].TalentNodes[Root].CurrentLevel);
-        Assert.Equal(hp0, fixture.Character.Stats(fixture.Session)[101]);
-        Assert.Equal(ErrorCodes.TalentLocked, await Upgrade(alice, Child));
+        Assert.Equal(3, fixture.Session.SeasonTalent!.TalentNodes[Root].CurrentLevel);
+        Assert.Equal(hp3, fixture.Character.Stats(fixture.Session)[101]);
+        Assert.True(fixture.Session.SeasonTalent.UnlockedNode[Child]); // the maxed root opens its child in Build 2 too
+        Assert.Equal(0, await Upgrade(alice, Child));
+        Assert.Equal(10, fixture.Character.CountOf(fixture.Session, Remnant));
+        long hpChild = fixture.Character.Stats(fixture.Session)[101];
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 0 });
         Assert.Equal(ErrorCodes.Cooldown, (await Next(alice, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
         await alice.SendGameAsync(SeasonTalentService.RenamePlan, new SeasonTalentSetPlanNameReq { PlanId = 1, PlanName = "Second" });
@@ -240,16 +245,18 @@ public sealed class SeasonTalentTests
         await Task.Delay(TimeSpan.FromSeconds(3.1));
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 0 });
         Assert.Equal(0, (await Next(alice, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
-        Assert.Equal(hp3, fixture.Character.Stats(fixture.Session)[101]);
+        Assert.Equal(1, fixture.Session.SeasonTalent.TalentNodes[Child].CurrentLevel); // bought in Build 2, shown in Build 1
+        Assert.Equal(hpChild, fixture.Character.Stats(fixture.Session)[101]);
 
         await alice.DisposeAsync();
         await using var again = await fixture.InWorld("Alice", create: false);
         var saved = await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
         Assert.True(saved.SyncAllMark);
-        Assert.Equal(3, saved.Plan[0].All.TalentNodes[Root].CurrentLevel);
-        Assert.Equal(0, saved.Plan[1].All.TalentNodes[Root].CurrentLevel);
+        Assert.Equal(3, saved.TalentNodes[Root].All.CurrentLevel);
+        Assert.Equal(1, saved.TalentNodes[Child].All.CurrentLevel);
+        Assert.All(saved.Plan.Values, p => Assert.False(p.All.TalentNodes.ContainsKey(Root)));
         Assert.Equal("Second", saved.Plan[1].All.PlanName);
-        Assert.Equal(hp3, fixture.Character.Stats(fixture.Session)[101]);
+        Assert.Equal(hpChild, fixture.Character.Stats(fixture.Session)[101]);
     }
 
     [ClientDataFact]
@@ -309,7 +316,7 @@ public sealed class SeasonTalentTests
             .Any(m => m.Property.Propertys.Any(p => p.PropertyId == 1330 && p.Data == 0));
         for (int i = 0; i < 250 && !Cleared(); i++) await Task.Delay(20);
         Assert.True(Cleared());
-        Assert.Equal(1, fixture.Session.SeasonTalent!.Plan[0].TalentNodes[Root].CurrentLevel); // durable during gate loss
+        Assert.Equal(1, fixture.Session.SeasonTalent!.TalentNodes[Root].CurrentLevel); // durable during gate loss
         await fixture.Gm("alice", "!job 1100");
         Assert.Equal(10, fixture.Character.Stats(fixture.Session)[1330]);
     }
@@ -328,10 +335,10 @@ public sealed class SeasonTalentTests
 
         await fixture.Gm("alice", "!job 1400");
         long generic = fixture.Character.Stats(fixture.Session)[101];
+        Assert.Equal(100, fixture.Character.TalentAttributes!(fixture.Session).Where(a => a.Id == 101).Sum(a => a.Value));
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 1 });
         Assert.Equal(0, (await Next(alice, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
-        long empty = fixture.Character.Stats(fixture.Session)[101];
-        Assert.InRange(generic - empty, 100, 103);
+        Assert.Equal(generic, fixture.Character.Stats(fixture.Session)[101]); // the bought level is every plan's
     }
 
     [ClientDataFact]
@@ -350,12 +357,12 @@ public sealed class SeasonTalentTests
         Assert.Equal(0, fixture.Character.CountOf(fixture.Session, 1250901));
         Assert.Equal(1, fixture.Session.SeasonTalent.BattleOathLevel);
         Assert.Equal(1, fixture.Session.SeasonTalent.TalentNodes[10100000].CurrentLevel);
-        Assert.All(fixture.Session.SeasonTalent.Plan.Values, p => Assert.Equal(1, p.TalentNodes[10100000].CurrentLevel));
+        Assert.All(fixture.Session.SeasonTalent.Plan.Values, p => Assert.False(p.TalentNodes.ContainsKey(10100000)));
         Assert.Equal(10, fixture.Character.Stats(fixture.Session)[1330]);
         Assert.Equal(10, fixture.Character.Stats(fixture.Session)[1331]);
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 1 });
         Assert.Equal(0, (await Next(alice, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
-        Assert.Equal(1, fixture.Session.SeasonTalent.Plan[1].TalentNodes[10100000].CurrentLevel);
+        Assert.Equal(1, fixture.Session.SeasonTalent.TalentNodes[10100000].CurrentLevel);
         Assert.Equal(10, fixture.Character.Stats(fixture.Session)[1330]);
         await alice.DisposeAsync();
 
@@ -363,7 +370,7 @@ public sealed class SeasonTalentTests
         var full = await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
         Assert.Equal(1, full.BattleOathLevel);
         Assert.Equal(1, full.TalentNodes[10100000].All.CurrentLevel);
-        Assert.All(full.Plan.Values, p => Assert.Equal(1, p.All.TalentNodes[10100000].CurrentLevel));
+        Assert.All(full.Plan.Values, p => Assert.False(p.All.TalentNodes.ContainsKey(10100000)));
         Assert.Equal(1, full.CurPlanId);
     }
 
@@ -396,7 +403,7 @@ public sealed class SeasonTalentTests
                 BEGIN SELECT RAISE(ABORT, 'deliberate talent write failure'); END;
                 """);
         Assert.Equal(ErrorCodes.Unknown, await Upgrade(alice, Root));
-        Assert.Equal(0, fixture.Session.SeasonTalent!.Plan[0].TalentNodes[Root].CurrentLevel);
+        Assert.Equal(0, fixture.Session.SeasonTalent!.TalentNodes[Root].CurrentLevel);
         Assert.Equal(50, fixture.Character.CountOf(fixture.Session, Remnant));
         Assert.Equal(500, fixture.Character.CountOf(fixture.Session, MintedCoin));
         await alice.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 1 });
@@ -451,7 +458,7 @@ public sealed class SeasonTalentTests
             leg.Asset.Id == Remnant && leg.Delta == -10);
         Assert.Contains(window.Legs, leg => leg.Kind == EconomyLegKind.Sink &&
             leg.Asset.Id == MintedCoin && leg.Delta == -100);
-        Assert.Equal(1, fixture.Session.SeasonTalent!.Plan[0].TalentNodes[Root].CurrentLevel);
+        Assert.Equal(1, fixture.Session.SeasonTalent!.TalentNodes[Root].CurrentLevel);
         Assert.Equal(40, fixture.Character.CountOf(fixture.Session, Remnant));
         Assert.Equal(400, fixture.Character.CountOf(fixture.Session, MintedCoin));
     }
@@ -472,9 +479,8 @@ public sealed class SeasonTalentTests
         await fixture.Loop.InvokeAsync(() =>
         {
             // 40 purchased levels open tree 10102; its first two nodes maxed open the gate (the live players' state).
-            var plan = session.SeasonTalent!.Plan[0];
             foreach (int node in new[] { 10101001, 10101002, 10101003, 10101004, 10102001, 10102002 })
-                plan.TalentNodes[node].CurrentLevel = 10;
+                session.SeasonTalent!.TalentNodes[node].CurrentLevel = 10;
             return Task.CompletedTask;
         });
 
@@ -506,6 +512,117 @@ public sealed class SeasonTalentTests
         Assert.Contains(fixture.Session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
     }
 
+    [ClientDataFact]
+    public async Task JobTalentPicksStayWithTheirPlanWhileBoughtLevelsAreShared()
+    {
+        const int Gate = 10102003, SonicOption = 10102105, SonicChoice = 10102107, OtherChoice = 10102111;
+        const int After = 10102004, SonicChoiceBuff = 1522701, OtherChoiceBuff = 1523001;
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        await using var player = await fixture.InWorld("Assassin");
+        await fixture.Gm("assassin", "!job 5200");
+        await fixture.Gm("assassin", "!lvl 30");
+        await fixture.Gm("assassin", "!quest done 10101170");
+        await fixture.Gm("assassin", "!quest done 10103160");
+        var session = fixture.Session;
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            foreach (int node in new[] { 10101001, 10101002, 10101003, 10101004, 10102001, 10102002 })
+                session.SeasonTalent!.TalentNodes[node].CurrentLevel = 10;
+            return Task.CompletedTask;
+        });
+        Assert.Equal(0, await Upgrade(player, SonicChoice));
+
+        await player.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 1 });
+        Assert.Equal(0, (await Next(player, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
+        var state = session.SeasonTalent!;
+        Assert.Equal([0, 0, 0], new[] { Gate, SonicOption, SonicChoice }.Select(n => state.Plan[1].TalentNodes[n].CurrentLevel));
+        Assert.True(state.UnlockedNode[Gate]); // the bought path to the gate is the same in every plan
+        Assert.False(state.UnlockedNode[After]); // but this plan has not picked at the gate
+        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned);
+        Assert.Equal(0, await Upgrade(player, OtherChoice));
+        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+
+        await Task.Delay(TimeSpan.FromSeconds(3.1));
+        await player.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 0 });
+        Assert.Equal(0, (await Next(player, SeasonTalentService.SetPlan, SeasonTalentSetCurPlanResp.Parser)).Result);
+        state = session.SeasonTalent!;
+        Assert.Equal(1, state.Plan[0].TalentNodes[SonicChoice].CurrentLevel);
+        Assert.Equal(0, state.Plan[0].TalentNodes[OtherChoice].CurrentLevel);
+        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == SonicChoiceBuff);
+        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+    }
+
+    /// <summary>
+    /// Saves from before shared levels hold every level in its plan. On load each node takes its highest level over the
+    /// plans and the levels bought again in the other plans are refunded by mail, once.
+    /// </summary>
+    [ClientDataFact]
+    public async Task OldPerPlanLevelsBecomeSharedAndTheDuplicateCostIsMailedBackOnce()
+    {
+        const int Gate = 10102003, Oath = 10100000;
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        var alice = await fixture.InWorld("Alice");
+        long roleId = fixture.Session.Role!.Id;
+        await fixture.Gm("alice", "!job 1100"); // the Effect rows are read for this job
+        await alice.DisposeAsync();
+
+        // Build 1: root 3; Build 2: root 2 and a job pick; Build 4: root 1, child 1. Every plan held the oath node.
+        var legacy = new DBSeasonTalent { CurPlanId = 1 };
+        for (int plan = 0; plan < 5; plan++)
+            legacy.Plan[plan] = new SeasonTalentPlan { TalentNodes = { [Oath] = new DBSeasonTalentNode { TalentId = Oath } } };
+        void Set(int plan, long node, long level) =>
+            legacy.Plan[plan].TalentNodes[node] = new DBSeasonTalentNode { TalentId = node, CurrentLevel = level };
+        Set(0, Root, 3); Set(1, Root, 2); Set(1, Gate, 1); Set(3, Root, 1); Set(3, Child, 1);
+        FixtureSql.Execute(fixture.Accounts, "UPDATE role SET season_talent = $blob WHERE id = $id",
+            ("$blob", Google.Protobuf.MessageExtensions.ToByteArray(legacy)), ("$id", roleId));
+
+        var again = await fixture.InWorld("Alice", create: false);
+        var full = await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
+        Assert.Equal(3, full.TalentNodes[Root].All.CurrentLevel);
+        Assert.Equal(1, full.TalentNodes[Child].All.CurrentLevel);
+        Assert.All(full.Plan.Values, p => Assert.False(p.All.TalentNodes.ContainsKey(Root) || p.All.TalentNodes.ContainsKey(Oath)));
+        Assert.Equal(1, full.Plan[1].All.TalentNodes[Gate].CurrentLevel); // job picks stay in their plan
+        Assert.Equal(0, full.Plan[0].All.TalentNodes[Gate].CurrentLevel);
+        Assert.Equal(1, full.CurPlanId);
+
+        // Root levels 1-2 (Build 2) and 1 (Build 4): 3 x (10 Remnants + 100); the child was bought only once.
+        var letters = Letters(fixture, roleId);
+        var letter = Assert.Single(letters);
+        var refund = letter.GetProperty("Attachments").EnumerateArray()
+            .GroupBy(a => a.GetProperty("Entry").GetInt32()).ToDictionary(g => g.Key, g => g.Sum(a => a.GetProperty("Count").GetInt32()));
+        Assert.Equal(new Dictionary<int, int> { [Remnant] = 30, [MintedCoin] = 300 }, refund);
+
+        await again.DisposeAsync();
+        await using var third = await fixture.InWorld("Alice", create: false);
+        var reloaded = await Next(third, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
+        Assert.Equal(3, reloaded.TalentNodes[Root].All.CurrentLevel);
+        Assert.Single(Letters(fixture, roleId));
+        var saved = DBSeasonTalent.Parser.ParseFrom(ReadBlob(fixture, roleId, "season_talent"));
+        Assert.Equal(3, saved.TalentNodes[Root].CurrentLevel);
+        Assert.All(saved.Plan.Values, p => Assert.False(p.TalentNodes.ContainsKey(Root)));
+    }
+
+    private static byte[] ReadBlob(ServerFixture fixture, long roleId, string column)
+    {
+        using var db = new SqliteConnection($"Data Source={fixture.DatabaseFile}");
+        db.Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = $"SELECT {column} FROM role WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", roleId);
+        return cmd.ExecuteScalar() as byte[] ?? [];
+    }
+
+    private static List<System.Text.Json.JsonElement> Letters(ServerFixture fixture, long roleId)
+    {
+        byte[] box = ReadBlob(fixture, roleId, "mailbox");
+        if (box.Length == 0) return [];
+        using var doc = System.Text.Json.JsonDocument.Parse(box);
+        return doc.RootElement.GetProperty("Letters").EnumerateArray()
+            .Where(l => l.GetProperty("DeliveryKey").GetString()!.StartsWith("season-talent")).Select(l => l.Clone()).ToList();
+    }
+
     /// <summary>
     /// Reported: "Cold-Blooded/Quick Hands and Weapon Mastery ... not working". Cold-Blooded [1, 103, 15] never reached
     /// the sheet (the season tree's purchase rules gated free picks), and ops 16 (while a weapon type is held) and 19
@@ -528,11 +645,11 @@ public sealed class SeasonTalentTests
         var session = fixture.Session;
         await fixture.Loop.InvokeAsync(() =>
         {
-            var plan = session.SeasonTalent!.Plan[0];
+            var bought = session.SeasonTalent!.TalentNodes;
             foreach (var row in fixture.Data.Table("SeasonTalentConfig").Values
                 .SelectMany(v => v.ValueKind == System.Text.Json.JsonValueKind.Array ? v.EnumerateArray().ToArray() : [v]))
                 if (Ro3Emu.Server.Data.GameData.Int(row, "_iTalentTreeID") is 10101 or 10102 && Ro3Emu.Server.Data.GameData.Int(row, "_iType") == 1)
-                    plan.TalentNodes[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
+                    bought[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
             return Task.CompletedTask;
         });
 
@@ -559,11 +676,11 @@ public sealed class SeasonTalentTests
         var session = fixture.Session;
         await fixture.Loop.InvokeAsync(() =>
         {
-            var plan = session.SeasonTalent!.Plan[0];
+            var bought = session.SeasonTalent!.TalentNodes;
             foreach (var row in fixture.Data.Table("SeasonTalentConfig").Values
                 .SelectMany(v => v.ValueKind == System.Text.Json.JsonValueKind.Array ? v.EnumerateArray().ToArray() : [v]))
                 if (Ro3Emu.Server.Data.GameData.Int(row, "_iTalentTreeID") is 10101 or 10102 && Ro3Emu.Server.Data.GameData.Int(row, "_iType") == 1)
-                    plan.TalentNodes[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
+                    bought[(int)Ro3Emu.Server.Data.GameData.Int(row, "_iId")].CurrentLevel = (int)Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel");
             session.Progress!.Skills[15107] = 1; // Katar Mastery
             session.Progress.Skills[15101] = 1; // Dual-Wield Mastery
             return Task.CompletedTask;
