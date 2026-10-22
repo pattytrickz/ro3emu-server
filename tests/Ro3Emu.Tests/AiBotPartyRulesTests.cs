@@ -36,6 +36,18 @@ public sealed class AiBotPartyRulesTests
     public void APlayersMonsterIsLeftForTheirLastHit(long hp, long maxHp, long botHit, bool leave) =>
         Assert.Equal(leave, PartyRules.LeaveToPlayer(hp, maxHp, botHit));
 
+    [Theory]
+    [InlineData(40, 40, true)]
+    [InlineData(45, 40, true)]  // up to five levels above the player
+    [InlineData(46, 40, false)] // far stronger: only the player's own fights
+    [InlineData(50, 40, false)]
+    [InlineData(30, 40, true)]  // below the player
+    public void AFarStrongerBotStartsNoFightsOfItsOwn(long bot, long player, bool starts) =>
+        Assert.Equal(starts, PartyRules.StartsOwnFights(bot, player));
+
+    [Fact]
+    public void APlayerOfUnknownLevelGetsNoFightsStartedForThem() => Assert.False(PartyRules.StartsOwnFights(40, 0));
+
     [Fact]
     public void APartyWithNoPlayerLeftIsLeft()
     {
