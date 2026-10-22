@@ -300,6 +300,10 @@ public sealed class ActivitiesMessages(DailyActivityService daily, TowerService 
         {
             await daily.ClaimAsync(session, StageRewardGainReq.Parser.ParseFrom(body.Span));
         });
+        routes.Map(DailyActivityService.StageBatchGain, "daily", async (session, msgId, body) =>
+        {
+            await daily.BatchClaimAsync(session, StageRewardBatchGainReq.Parser.ParseFrom(body.Span));
+        });
         routes.Map(MonsterHuntService.GainMonsterAward, "monsterHunt", async (session, msgId, body) =>
         {
             await monsterHunt.ClaimMonsterAsync(session, AreaConcurGainMonsterAwardReq.Parser.ParseFrom(body.Span));
