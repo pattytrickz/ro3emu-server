@@ -131,6 +131,9 @@ public sealed class QuestEngineTests : IAsyncLifetime
                 Home = new SpawnPoint(0, 0, 0, 0, 0, npc), Group = new SpawnGroup(0, false, 1, 0, [], []),
             };
             foreach (var handler in combat.Dealt) handler(s, monster, 1);
+            // Real kills stage task progress with their durable reward before publishing Killed.
+            // Calling only the task callback bypasses that path and hid missing objective kinds.
+            await Service<RewardService>().PrepareKilledAsync(s, monster);
             await callback(s, monster);
         });
         await Kill(5000055); // an ordinary monster is no boss win

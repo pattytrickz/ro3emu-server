@@ -276,7 +276,7 @@ public sealed partial class DungeonTests : IAsyncLifetime
         });
         var noRevive = await Next(bob, DungeonService.ReviveInfo, SyncClientPlayerReviveInfoNtf.Parser, info => info.BDead);
         Assert.Equal(0, noRevive.ReviveTime);
-        Assert.Equal(ErrorCodes.FeatureUnavailable, Service<DungeonService>().ExternalReviveError(Session(bob)));
+        Assert.Equal(0, Service<DungeonService>().ExternalReviveError(Session(bob))); // battle resurrection is separate
         await bob.SendGameAsync(CombatService.Relive, new EntityReliveReq());
         Assert.Equal(ErrorCodes.FeatureUnavailable,
             (await Next(bob, CombatService.Relive, EntityReliveAck.Parser)).Result);

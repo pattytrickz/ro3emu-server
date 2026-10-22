@@ -55,9 +55,14 @@ original-server encounter parity:
    script is absent and no five-player preparation countdown/start-button contract was recovered.
    Killing all configured actors before the time limit wins; timeout, surrender or defeat loses.
 5. For finite OnClickRevive counts, the boss's initial count is per participant. The existing map resurrection point,
-   full HP and all-dead loss when no revival option remains are inferred. Scene 3120401 is explicitly NoRevive.
+   full HP and all-dead loss when no self-revival option remains are inferred. Scene 3120401 is explicitly NoRevive.
+   NoRevive disables the ordinary self-revive button, not battle resurrection: priest/item revives use the boss's
+   `_iOriginalReviveNum` allowance even in those scenes. The existing per-participant scope is inferred. A full wipe
+   still ends a NoRevive encounter; unused battle revives do not create a self-revive button.
    The top-level automatic mode appears only in other gameplay types here; no script-only mode is given a generic
    self-revive bypass.
+   On a committed clear, 30110 statistics precede 30403: `LC_DunGeon_PVE_10P.CELL_DUNGEON_STATISTICS` fills
+   `MultiDungeonBattleInfo`, which `UI_Sys_Dungeon_MvpPanelModel._updateTopThreeRole` needs for the results screen.
 6. Only the leader may surrender or reset. Reset requires settlement, repeats admission/readiness and creates a new
    room. Continuations retain the original outside return point; they cannot combine unrelated private rooms.
 7. Disconnect/exit detaches that member and cancels their pending ready queue. The remaining team may continue below
