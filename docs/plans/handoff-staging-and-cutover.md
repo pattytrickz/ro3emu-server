@@ -236,6 +236,21 @@ Timeline and go/no-go:
   backlog steady at about one operation per bot, no stuck work, no inflate disconnects; the largest realm waiter is
   now `timer/card library sync` (a candidate for the same once-a-second treatment). Windows stay the original weekday evenings
   (Survivor days 2/4/7, Dragon 1/3/6, 18:30-19:55 realm time) and Base 49+.
+- **Phantom Realm entry for a small population (23 Oct evening, player suggestion, owner: go with the recommendation):**
+  house rule `DungeonMatchFillSeconds` (`a9f27d2`): once the oldest party has waited that long, the queue starts with
+  whoever is queued for that boss, down to one player (the boss is not scaled down). AI bots (`8a32fd0`) now ready up
+  for their party's dungeon, follow the leader in and leave with them. Live on the PTR (`1.1.0-ptr.6`, bots from
+  `/home/solro3/aibots-staging/bin-ptr`): solo and player + AI runs both passed (ready check after 30 s, both loaded into
+  3120401, bot left with the leader). A member changing map or line while queued still cancels the queue (original
+  rule), so a player should give a freshly invited bot a few seconds to reach them. **At cutover, add**
+  `Ro3Emu__DungeonMatchFillSeconds=30`, and after the server is up **publish `src/Ro3Emu.AiBots` from this branch**
+  (`dotnet publish -r linux-x64 --self-contained false -p:ErrorOnDuplicatePublishOutputFiles=false`, `chmod +x` the
+  apphost) into `/home/solro3/aibots/bin` (keep a `bin.bak-…` copy) and restart the production bot loop.
+- **Evening stalls, 23 Oct (production, hotfix `2f6c7bd`, live as `1.0.0-casefix.33.3` at 21:11 UTC):** lookups of
+  `operation_source` by `source_key` scanned the whole table (1M rows, ~110 ms per kill, growing), and
+  `SeasonTalentService.Effect` scanned all 779 talent effect rows on every stats recompute (70-80% of the game loop in
+  a CPU profile). The index was created by hand on production at 20:33; both fixes are on this branch (`df44475`).
+  After the restart: loop busy 11% (was 89%), 20 ticks/s, lock waiting 0.7 s/min (was up to 580 s).
 - **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
   chat off) plays on staging. Load test not run yet.
 - **Live fixes on the merged line (23 Oct, owner asked for a bot pass instead of a human one):**
