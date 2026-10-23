@@ -73,6 +73,9 @@ internal sealed class EconomySchemaPlan : DbPlan
                 FOREIGN KEY(operation_id) REFERENCES operation_receipt(operation_id)
             );
             CREATE INDEX IF NOT EXISTS economy_entry_cut ON economy_entry(commit_seq,entry_id);
+            -- Duplicate-source checks look a claim up by source_key alone, which the (realm_id,source_key) key cannot
+            -- serve: without this every kill scanned the whole table (1M rows, ~100 ms each, 23 Oct 2026 stalls).
+            CREATE INDEX IF NOT EXISTS operation_source_by_key ON operation_source(source_key);
             """);
         SchemaSql.AddColumn(db, tx, "operation_receipt", "intent_hash", "TEXT NOT NULL DEFAULT ''");
         SchemaSql.AddColumn(db, tx, "operation_receipt", "intent_payload", "BLOB NOT NULL DEFAULT X''");
@@ -151,6 +154,7 @@ internal sealed class EconomySchemaPlan : DbPlan
                         counterparty_compartment_key,counterparty_instance_key,before_fingerprint,after_fingerprint,source_key
                     FROM economy_entry_cd13b;
                     CREATE INDEX economy_entry_cut ON economy_entry(commit_seq,entry_id);
+                    CREATE INDEX operation_source_by_key ON operation_source(source_key);
                     DROP TABLE operation_source_cd13b;
                     DROP TABLE economy_entry_cd13b;
                     """);
