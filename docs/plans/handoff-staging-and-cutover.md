@@ -172,7 +172,7 @@ Timeline and go/no-go:
 
 ## Decisions for the owner (open)
 
-1. Which day is "tomorrow" for the cutover, and is 10:00 acceptable without the 24 h soak (see above)?
+1. Is 10:00 today acceptable without the 24 h soak (see above), or should the cutover move to Saturday?
 2. Remove the developer test weapon "Basic Dagger" (item 90000102) from characters that are not GMs?
 3. Add a setting to turn AI chat off in world and private chat (suggestion thread 1562821188101869578)?
 
