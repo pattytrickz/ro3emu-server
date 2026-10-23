@@ -13,15 +13,14 @@ merged with the upstream emulator (`aethai/ro3emu-server` `main`) on a **staging
 1. **Select the client** that works for everyone on the server.
 2. **Stand up a staging realm on the Finland server**; that is where the merge is tested.
 3. **Run the test plan there.**
-4. **Cut over at 10:00 Central "tomorrow".** The owner wrote this overnight on 22/23 Oct. *Ask which day they mean before doing
-   anything time-dependent:* Friday 23 Oct 10:00 is five hours after this was written, Saturday 24 Oct 10:00 is the other
-   reading. See "Timeline and go/no-go" for what that does to the plan.
+4. **Cut over at 10:00 Central on Friday 23 Oct 2026** (the owner confirmed: today, not tomorrow). At 05:10 that is five hours
+   away and nothing of steps 1-3 exists yet, so read "Timeline and go/no-go" before anything else.
 
 ## State of the code
 
 | | |
 |---|---|
-| Live line | `origin/v1.0.0-fixes` at `aa9075c` (includes PRs #60, #61, #62; #62 was staged for the 10 pm release, check that it shipped) |
+| Live line | `origin/v1.0.0-fixes` at `aa9075c` (includes PRs #60, #61, #62; all shipped, #62 as 1.0.0-casefix.33 at 10 pm Thursday) |
 | Staging branch | **`origin/sync/upstream-2026-10-22`** at `987c576` (merge `067f8da` + fixes). Includes everything in live up to `aa9075c` |
 | Rollback build | live `aa9075c`. A local tag `pre-upstream-sync` points at it but was **not pushed**: `git tag pre-upstream-sync aa9075c && git push origin pre-upstream-sync` |
 | Upstream | `aethai/ro3emu-server` `main` at `9f3c04d` (22 Oct). Fetch it with `git remote add upstream https://github.com/aethai/ro3emu-server && git fetch upstream` |
@@ -126,8 +125,10 @@ Fix what breaks on the staging branch (commit with a short imperative subject; *
 Timeline and go/no-go:
 
 - The merge plan wants a **24 h soak** and an announcement 24 h ahead, in an off-peak slot (2 am Central). The owner chose
-  **10:00 Central**, which is also one of the automation's release slots (2/6/10 am and pm). If the cutover is Friday 10:00,
-  the soak cannot happen; if Saturday, there is about a day. **Do not skip the checks to hit the time.** Cutover is
+  **Friday 10:00 Central**, which is also one of the automation's release slots (2/6/10 am and pm). The soak cannot
+  happen, and no announcement has been posted. **Do not skip the checks to hit the time.** The cloud session's view: unless
+  staging, the rollback proof and a human pass are all done well before 10:00, say so to the owner and propose Saturday 2 am
+  or 10 am instead; they decide. Cutover is
   go only if: the first-start migration ran clean, the rollback was proven, the bots and a human pass found no blocker, and a
   fresh backup was taken. If not, tell the owner and move to the next slot (the merge plan's off-peak 2 am slot, or whatever
   they choose). Say so plainly; they decide.
