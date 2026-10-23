@@ -131,8 +131,14 @@ Timeline and go/no-go:
   on Friday. An earlier cutover the same night is allowed only if everything below is green. **Do not skip the checks to hit
   a time.** Cutover is go only if: the first-start migration ran clean, the rollback was proven, the bots and a human pass found
   no blocker, and a fresh backup was taken. If not, tell the owner and move to the next slot; they decide.
-- **Hold the automation** (turn it off with `/admin` or `!off` in Discord, if the owner has not already) from now until the cutover is done (`/admin` or `!off` in Discord) so it does not stage a release in
-  between; tell GPT Astra/Codex the same. Nothing is merged into `v1.0.0-fixes` before the cutover.
+- **The automation stays on until the cutover** (the owner still has bug fixes to ship through it, every 4 hours). That means
+  `v1.0.0-fixes` keeps moving while you test, so: (1) every fix the automation or Codex ships must also reach the staging branch
+  before cutover: `git fetch origin && git merge origin/v1.0.0-fixes` into `sync/upstream-2026-10-22`, resolve (rerere is
+  on locally only), rebuild, rerun the affected tests, and repeat once more right before cutover; (2) the staging database
+  copy ages, which is fine for the migration test but retake the production backup just before cutover; (3) **freeze the
+  automation only for the cutover window**: turn it off (`/admin` or `!off`) about an hour before the cutover slot so it
+  cannot stage another release in between, tell GPT Astra/Codex the same, and turn it back on after. Nothing from the
+  staging branch is merged into `v1.0.0-fixes` before the cutover: a merge there ships to production at the next slot.
 - **Announce** in `#announcements` as soon as the owner agrees to a time (channel `1561168146201583656`, `@everyone`, same style as
   the earlier posts): a longer restart, what is new (job talents, boss skills, pet skills, Rift later), and the time. A draft:
   "Sol RO3 is getting a big update at 10:00 Central: job talents and boss skills now work, plus many fixes. Expect a restart of
