@@ -3,6 +3,42 @@
 *22 Oct 2026. How to bring `aethai/ro3emu-server` `main` into the live line (`v1.0.0-fixes`) without breaking the
 realm, its database or its players' clients. Companion: [fix priorities](fix-priorities.md) · [roadmap](roadmap.md) 1.10.*
 
+## Status (22 Oct, evening)
+
+Phase 2 is done on the staging branch **`sync/upstream-2026-10-22`** (upstream `9f3c04d` merged into live `aa9075c`,
+which includes PRs #60–#62). The live line is untouched; the automation does not deploy this branch.
+
+- **Builds**: server, tests, AI bots, data export, bot CLI, load test, setup. The launcher (Windows) and the client hooks
+  (need the client's own DLLs) build only on a Windows box with the client, as before.
+- **Tests (data-backed)**: see the PR for the final counts. Pure upstream fails 3 of its own tests in this environment; the
+  merge's remaining failures are listed there with their cause.
+- **Data migrations**: Growth Classroom claims move from `TaskRuntime.GrowthRanksClaimed` to `role.growth_class` at the
+  first login (`GrowthClassService.MigrateLiveClaims`, tested). Season talents keep live's storage (bought levels in the
+  global nodes, `6bba547`), so nothing to migrate there.
+
+### Decisions made while resolving (live vs upstream)
+
+| Area | Kept | Why |
+|---|---|---|
+| Season talents | **Live storage** (levels shared by every build, refund migration) + **upstream's effects engine and profession picker** | Owner decision (option A); upstream's effects read levels through live's "build pick, else shared" |
+| Talent total | **Upstream**: SkillPoint gates do not count | The client's grade (`_buildGradeNodeIDs`) leaves them out; II+-1 needs three picks, not two |
+| Job-talent option unlock | **Upstream**: opens once its parent is picked | Upstream's picker only needs the gate open |
+| Quick Hands AGI | **Upstream**: +8 once | "Learning [Katar Mastery] and [Dual-Wield Mastery] grants 8 AGI" |
+| Normal attack by weapon (JobAttackConfig), bar slots | **Live** | Client data and player reports (bow Archer, Thief dagger); upstream's career-only attack would undo them |
+| Auto-attack loop (walking, out of reach, NotInterrupt) | **Live** | Player reports |
+| Cast speed in chants | **Live** (any Cast Speed, guardian included) | Player report `5bacd8c`; upstream applies only a guardian's |
+| Walk-grid skill check | **Live: none** | Owner decision `4785cf4` |
+| FLEE vs monster normal attacks | **Live** | Player report (#62) |
+| Double Attack, Sonic Blow, Tension Relax, gift/selection boxes, Growth Classroom, stage rewards, pet hatchery | **Upstream** | Same features, upstream's own tests; live's regression tests kept where they still describe the behaviour |
+| Arrow elements, Aura Blade, Shield Reflect, Fire Wall / Jupitel Thunder knockback, Heal sound, bolt/arrow flight | **Live**, added to upstream's restructured cast | Upstream lacks them |
+| Dodo's Request Wheel, party EXP share, quest-limited drops, F2P, access list, launcher gate, AI players | **Live** | Groups D/E |
+
+### Next (phases 3–5, unchanged)
+
+Staging realm on a production database copy, rollback check with the old build, bots and load test, the human test pass
+(with the checklist below), 24 h soak, then the off-peak cutover. Pick the client version first (upstream targets the
+20/21 Oct Genesis clients).
+
 ## Where the two lines stand
 
 | | |
