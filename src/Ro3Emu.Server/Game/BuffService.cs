@@ -29,6 +29,8 @@ public sealed partial class BuffService : IGameTicker
     private readonly ILogger<BuffService> log;
     private long _guids = 900000;
     private readonly Dictionary<long, List<ActiveBuff>> _unitBuffs = new();
+    private bool _maintenancePending, _maintenanceRunning;
+    private long _maintenanceQueuedMs, _maintenanceGeneration;
 
     /// <summary>Subscribers recompute effective skill parameters/slots after a buff changes.</summary>
     public List<Func<GameSession, Task>> Changed { get; } = new();
@@ -436,23 +438,66 @@ public sealed partial class BuffService : IGameTicker
     public void Tick(GameTime time)
     {
         long now = MonsterService.NowMs;
+        foreach (var s in sessions.All()) TickImmuneDeath(s, now);
+        // TrackDetached only logs a refused admission (the loop at its work limit), so a sweep that never started
+        // would leave the flag set and stop every expiry. Requeue after 10 s; the stale sweep exits if it starts late.
+        if (_maintenancePending && !_maintenanceRunning && now - _maintenanceQueuedMs > 10_000) _maintenancePending = false;
+        if (_maintenancePending || loop.Phase != GameLoopPhase.Accepting) return;
+        bool due = sessions.All().Any(s => CanMaintain(s) && (s.Buffs.Any(b => b.ExpireMs <= now)
+            || s.Energy.Values.Any(m => m.NextRecoverMs != 0 && m.NextRecoverMs <= now)))
+            || _unitBuffs.Values.Any(list => list.Any(b => b.ExpireMs <= now));
+        if (!due) return;
+        // One outstanding sweep, including its reservation wait. Previously every tick queued another removal
+        // of each still-expired buff, creating tens of thousands of realm waiters during ordinary contention.
+        _maintenancePending = true;
+        _maintenanceQueuedMs = now;
+        long generation = ++_maintenanceGeneration;
+        loop.TrackDetached("buff maintenance", async () =>
+        {
+            if (generation != _maintenanceGeneration || _maintenanceRunning) return;
+            _maintenanceRunning = true;
+            try
+            {
+                // Changed handlers can touch multiple owners. Keep their existing conservative scope, but acquire
+                // it once per sweep and read current sessions/buffs only after admission (never stale attachments).
+                using var scope = loop.Owners is { } owners
+                    ? await owners.EnterAsync("timer/buff maintenance", Ownership.ReservationKey.Realm) : null;
+                await MaintainAsync();
+            }
+            finally { _maintenancePending = false; _maintenanceRunning = false; }
+        });
+    }
+
+    private async Task MaintainAsync()
+    {
+        long now = MonsterService.NowMs;
         foreach (var s in sessions.All())
         {
-            foreach (var b in s.Buffs.Where(b => b.ExpireMs <= now).ToList()) loop.TrackLegacyDetached("buff expiration", () => RemoveAsync(s, b));
-            TickEnergy(s, now);
-            TickImmuneDeath(s, now);
+            if (!CanMaintain(s)) continue;
+            // One failing removal must not stall the rest of the sweep (each expiry used to be its own job).
+            foreach (var b in s.Buffs.Where(b => b.ExpireMs <= now).ToList())
+            {
+                try { await RemoveAsync(s, b); }
+                catch (Exception e) { log.LogError(e, "Buff {Buff} expiry failed for role {Role}", b.ConfigId, s.Role?.Id); }
+            }
+            try { await TickEnergyAsync(s, now); }
+            catch (Exception e) { log.LogError(e, "Energy recovery failed for role {Role}", s.Role?.Id); }
         }
         foreach (var (uid, list) in _unitBuffs.ToList())
         {
             foreach (var buff in list.Where(b => b.ExpireMs <= now).ToList())
             {
                 var unit = world.AllUnits().FirstOrDefault(u => u.Uid == uid);
-                if (unit != null) loop.TrackLegacyDetached("unit buff expiration", () => RemoveUnitBuffAsync(unit, buff));
-                else list.Remove(buff);
+                if (unit == null) { list.Remove(buff); continue; }
+                try { await RemoveUnitBuffAsync(unit, buff); }
+                catch (Exception e) { log.LogError(e, "Unit buff {Buff} expiry failed for unit {Unit}", buff.ConfigId, uid); }
             }
             if (list.Count == 0) _unitBuffs.Remove(uid);
         }
     }
+
+    private bool CanMaintain(GameSession session) => session.Role != null &&
+        (loop.Owners is not { } owners || owners.IsCurrentAttachedTimer(session, session.Owner, session.Attachment));
 
     private async Task ToPlayerAndViewersAsync(GameSession p, uint msgId, Google.Protobuf.IMessage body)
     {
