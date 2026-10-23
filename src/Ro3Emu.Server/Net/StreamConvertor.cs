@@ -31,9 +31,7 @@ public sealed class StreamConvertor
     /// More than <paramref name="maxOutput"/> plain bytes from one chunk is refused (a decompression bomb).</summary>
     public byte[] ConvertInput(ReadOnlySpan<byte> received, int maxOutput = int.MaxValue)
     {
-        var buf = received.ToArray();
-        _decrypt.Process(buf);
-        _inflater.SetInput(buf);
+        BeginInput(received);
         using var plain = new MemoryStream();
         while (true)
         {
@@ -48,6 +46,23 @@ public sealed class StreamConvertor
             if (_inflater.IsNeedingDictionary) throw new InvalidDataException("zlib stream wants a preset dictionary");
         }
         return plain.ToArray();
+    }
+
+    // The channel drains frames between bounded inflate steps. A TCP receive is not a frame: limiting the
+    // combined output of a receive to MaxFrame disconnected valid coalesced messages after a slow reader.
+    internal void BeginInput(ReadOnlySpan<byte> received)
+    {
+        var buf = received.ToArray();
+        _decrypt.Process(buf);
+        _inflater.SetInput(buf);
+    }
+
+    internal int ReadInput(byte[] output, int count)
+    {
+        int n = _inflater.Inflate(output, 0, count);
+        if (n == 0 && _inflater.IsNeedingDictionary)
+            throw new InvalidDataException("zlib stream wants a preset dictionary");
+        return n;
     }
 
     /// <summary>Deflates one or more whole frames with a sync flush and encrypts the result.</summary>

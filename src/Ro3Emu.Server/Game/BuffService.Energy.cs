@@ -144,10 +144,10 @@ public sealed partial class BuffService
         await SendEnergyAsync(p, id, (EPlayerEnergyChangeReason)2);
     }
 
-    private void TickEnergy(GameSession p, long now)
+    private async Task TickEnergyAsync(GameSession p, long now)
     {
         if (p.Role == null) return;
-        foreach (var (id, meter) in p.Energy)
+        foreach (var (id, meter) in p.Energy.ToArray())
         {
             if (meter.NextRecoverMs == 0 || meter.NextRecoverMs > now || _data.Row("EnergyConfig", id) is not { } row) continue;
             long interval = GameData.Int(row, "_iAutoRecoverInterval");
@@ -157,7 +157,7 @@ public sealed partial class BuffService
             meter.Value = Math.Clamp(meter.Value + ticks * change, 0, GameData.Int(row, "_iLimitValue"));
             meter.LastRecoverMs = meter.NextRecoverMs + (ticks - 1) * interval;
             meter.NextRecoverMs += ticks * interval;
-            _loop.TrackLegacyDetached("energy recovery send", () => SendEnergyAsync(p, id, (EPlayerEnergyChangeReason)1));
+            await SendEnergyAsync(p, id, (EPlayerEnergyChangeReason)1);
         }
     }
 
