@@ -295,6 +295,12 @@ public sealed partial class TimedBattleService : IGameTicker
         // start a Survivor Battle with a small lobby (the config asks for 100 entrants in teams of 5).
         if (entry == ChickenEntry && (ChickenTestShape ?? (_options.ChickenTestPlayers, _options.ChickenTestTeamSize)) is ( > 0 and var testPlayers, > 0 and var testTeam))
             (players, teamSize) = (testPlayers, testTeam);
+        // House rule: small-population lobbies (ServerOptions.SurvivorPlayers / DragonIslandPlayers).
+        else if (entry == ChickenEntry && (_options.SurvivorPlayers, _options.SurvivorTeamSize) is ( > 0 and var survivors, > 0 and var survivorTeam))
+            (players, teamSize) = (survivors, survivorTeam);
+        else if (entry == DragonEntry && (_options.DragonIslandPlayers, _options.DragonIslandTeamSize) is ( > 0 and var dragons, > 0 and var squad)
+            && dragons % (2 * squad) == 0)
+            (players, teamSize) = (dragons, squad);
         return players > teamSize && players <= 1000 && teamSize > 0 && players % teamSize == 0
             ? (players, teamSize) : (0, 0);
     }

@@ -214,6 +214,19 @@ public sealed class ServerOptions
     public int ChickenTestTeamSize { get; set; }
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): lobby sizes for a small population. Survivor Battle (entry 2)
+    /// starts with <see cref="SurvivorPlayers"/> entrants in teams of <see cref="SurvivorTeamSize"/> instead of
+    /// EatChickenMatchConfig's 100 in teams of 5; Battle of Dragon Coffin Island (entry 6) with
+    /// <see cref="DragonIslandPlayers"/> in squads of <see cref="DragonIslandTeamSize"/> instead of
+    /// DragonIslandMatchConfig's 30 in squads of 5 (squads alternate between the two camps, so the lobby must hold an
+    /// even number of squads). 0 keeps the config; the Survivor test aid above and GM "!chicken shape" win over it.
+    /// </summary>
+    public int SurvivorPlayers { get; set; }
+    public int SurvivorTeamSize { get; set; }
+    public int DragonIslandPlayers { get; set; }
+    public int DragonIslandTeamSize { get; set; }
+
+    /// <summary>
     /// (inferred) Seconds of a Realm of the Gods raid's preparation phase: the boss waits until the team leader presses the
     /// scene's "Start Battle" button (DungeonLua_30201xx DungeonBase.FunctionButtons, sent as 30125) or this time runs out.
     /// The client has the button, not the phase length.
