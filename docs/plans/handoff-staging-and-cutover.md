@@ -230,7 +230,11 @@ Timeline and go/no-go:
   minimum 10. The live runner queued 20 and 10 bots and both matches fired their ready check and moved everyone in
   (28/28). **At cutover, add to the production unit** (the owner approved these sizes on 23 Oct):
   `Ro3Emu__SurvivorPlayers=20`, `Ro3Emu__SurvivorTeamSize=4`, `Ro3Emu__DragonIslandPlayers=10`,
-  `Ro3Emu__DragonIslandTeamSize=5`, `Ro3Emu__GuildLeagueMinMembers=10`. Windows stay the original weekday evenings
+  `Ro3Emu__DragonIslandTeamSize=5`, `Ro3Emu__GuildLeagueMinMembers=10`, and (owner decisions 23 Oct, `ec7531f`,
+  `c7d193a`) `Ro3Emu__PartyShareExcludedAccounts__0=aibot*` (AI members take no share of a player's kill) and
+  `Ro3Emu__FieldMvpHpPercent=50` (field MVPs at half HP). Load test 23 Oct, 60 AI bots for 20 min on this build:
+  backlog steady at about one operation per bot, no stuck work, no inflate disconnects; the largest realm waiter is
+  now `timer/card library sync` (a candidate for the same once-a-second treatment). Windows stay the original weekday evenings
   (Survivor days 2/4/7, Dragon 1/3/6, 18:30-19:55 realm time) and Base 49+.
 - **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
   chat off) plays on staging. Load test not run yet.
