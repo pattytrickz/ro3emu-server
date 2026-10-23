@@ -286,6 +286,14 @@ public sealed partial class TimedBattleService : IGameTicker
     /// <summary>The role's timed-battle state after a Mock Battle settlement (CasualBattleService), and its syncs.</summary>
     internal Task CasualSettledAsync(GameSession session) => SyncBattleStateAsync(session);
 
+    /// <summary>GM "!arena open|close" (test aid, not original behaviour): this process's window for todo 114 or 126.</summary>
+    internal void TestWindow(int todo, bool open)
+    {
+        long now = _time.GetUtcNow().ToUnixTimeSeconds();
+        if (open) _schedule.TestWindows[todo] = new(now, now + 30 * 60);
+        else _schedule.TestWindows.Remove(todo);
+    }
+
     private (int Players, int TeamSize) MatchShape(int entry)
     {
         var row = _data.Row(entry == ChickenEntry ? "EatChickenMatchConfig" : "DragonIslandMatchConfig", entry);

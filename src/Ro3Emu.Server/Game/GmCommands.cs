@@ -312,6 +312,16 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             else throw new ArgumentException("shape <players> <team> (players a multiple of team, more than one team) | shape reset | skip | rank <n>");
         }
         ),
+        ["arena"] = ("open|close survivor|dragon (test aid: the timed PvP window for 30 minutes)", async (s, a) =>
+        {
+            // Test aid, not original behaviour: Survivor Battle (todo 114) and Dragon Coffin Island (126) open on fixed
+            // weekday evenings only; this opens or closes the window in memory so a lobby can be tried at any time.
+            if (a.Length != 2 || a[0] is not ("open" or "close") || a[1] is not ("survivor" or "dragon"))
+                throw new ArgumentException("open|close survivor|dragon");
+            services.GetRequiredService<TimedBattleService>().TestWindow(a[1] == "survivor" ? 114 : 126, a[0] == "open");
+            await ReplyAsync(s, $"{(a[1] == "survivor" ? "Survivor Battle" : "Dragon Coffin Island")} test window {a[0]} (in memory).");
+        }
+        ),
         ["online"] = ("", Online),
         ["announce"] = ("<message> (every online player's marquee)", async (s, a) =>
         {
