@@ -39,8 +39,10 @@ public sealed class RewardService
     /// <summary>Monster Hunt: its kill counters join the kill's own transaction, after the AFK child (MonsterHuntService).</summary>
     internal Action<GameSession, MonsterUnit, RewardSettlement>? StageHuntKill { get; set; }
 
-    public RewardService(CombatService combat, CharacterService character, TeamService teams, GameData data, ILogger<RewardService> log)
+    public RewardService(CombatService combat, CharacterService character, TeamService teams, GameData data, ILogger<RewardService> log,
+        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
     {
+        _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
         this._character = character;
         this._teams = teams;
         this._data = data;
@@ -101,7 +103,8 @@ public sealed class RewardService
                 var (items, baseExp, jobExp) = ResolveKill(player, monster, bonus);
                 // Field kills: the bonused EXP is split evenly among the members online on the killer's map.
                 var party = player.InstanceId != 0 || baseExp + jobExp <= 0 ? [] : _teams.SameMapMembers(player)
-                    .Where(s => s != player && s.Role is not null && s.Progress != null && s.Attachment?.Cancelled != true)
+                    .Where(s => s != player && s.Role is not null && s.Progress != null && s.Attachment?.Cancelled != true
+                        && !ExcludedFromShare(s.Account))
                     .Select(s => (s, s.Role!)).ToList();
                 if (party.Count > 0)
                     (baseExp, jobExp) = (Share(baseExp, party.Count + 1), Share(jobExp, party.Count + 1));
@@ -224,6 +227,15 @@ public sealed class RewardService
     }
 
     private static long Share(long exp, int members) => exp > 0 ? Math.Max(1, exp / members) : 0;
+
+    private readonly string[] _noShare;
+
+    /// <summary>ServerOptions.PartyShareExcludedAccounts (Sol RO3 house rule): exact names or "prefix*". Such members
+    /// (the AI players) take no share of a party kill, so a player's kill is split among the real players only.</summary>
+    private bool ExcludedFromShare(string? account) =>
+        account != null && _noShare.Any(e => e.EndsWith('*')
+            ? e.Length > 1 && account.StartsWith(e[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(e, account, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Each member's share is its own monster-kill source (the kill's source + the role), committed after the
     /// killer's. Like the kill itself it is paid at most once: a replay finds the source claimed.</summary>

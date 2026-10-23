@@ -199,6 +199,13 @@ public sealed class ServerOptions
     public int? GuildLeagueMinMembers { get; set; }
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): party members whose account matches (exact, or "prefix*") take no
+    /// share of a field kill's EXP, so the AI players ("aibot*") no longer halve a real player's kills. Their own kills
+    /// still share with the real players on the map. Empty: every member shares (the original rule).
+    /// </summary>
+    public string[] PartyShareExcludedAccounts { get; set; } = [];
+
+    /// <summary>
     /// Seconds an in-game role stays in the world after its game socket drops, waiting for the client's silent
     /// reconnect (Phonest ConnectServerReq ReConnection). 60 is the reference
     /// AVATAR_LOSE_CONNECTION_TIMEOUT_SECONDS; it must exceed the client's 20 s + 10 s budgets. 0 turns grace off.

@@ -30,6 +30,7 @@ public sealed class KillEconomyTests : IAsyncLifetime
         {
             o.DataDir = _directory; o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = web; o.MicroGatePort = micro; o.GameGatePort = game;
+            o.PartyShareExcludedAccounts = ["aibot*"]; // Sol RO3 house rule; the party tests' other accounts are real players
         });
         SureHitRolls.Install(_app);
         await _app.StartAsync(); _http = $"http://127.0.0.1:{web}";
@@ -312,6 +313,28 @@ public sealed class KillEconomyTests : IAsyncLifetime
         Assert.Equal(bobLoot, b.Items.Where(i => i.Entry == 1000000).Sum(i => i.Stack));
         Assert.Equal(3, ReceiptCount());
         Assert.Equal(before[0].Exp + 3, Service<RoleStore>().LoadProgress(c.Role!.Id).Exp);
+    }
+
+    [ClientDataFact]
+    public async Task AnAiPartyMemberTakesNoShareOfAPlayersKillButSharesItsOwn()
+    {
+        await using var bot = await Enter(); var player = Session;
+        await using var bob = await Member("partybob", "Bob");
+        await using var ai = await Member("aibot01", "Botty");
+        await Party(bot, bob, ai);
+        GameSession Of(string account) => Service<SessionRegistry>().All().Single(s => s.Account == account && s.Role != null);
+        var (b, a) = (Of("partybob"), Of("aibot01"));
+        await OnLoop(() => { Service<RewardService>().ResolveKillForTest = (_, _) => ([], 2, 2); return Task.CompletedTask; });
+        long p0 = player.Progress!.Exp, b0 = b.Progress!.Exp, a0 = a.Progress!.Exp;
+
+        // The player's kill: split between the two real players (2 / 2), the AI member gets nothing.
+        await OnLoop(() => Reward(player, Monster(78)));
+        Assert.Equal((p0 + 1, b0 + 1, a0), (player.Progress.Exp, b.Progress.Exp, a.Progress.Exp));
+
+        // The AI member's kill still shares with the real players (3 / 3). Small amounts: a level-1 role levels at 5.
+        await OnLoop(() => { Service<RewardService>().ResolveKillForTest = (_, _) => ([], 3, 3); return Task.CompletedTask; });
+        await OnLoop(() => Reward(a, Monster(79)));
+        Assert.Equal((p0 + 2, b0 + 2, a0 + 1), (player.Progress.Exp, b.Progress.Exp, a.Progress.Exp));
     }
 
     private async Task<BotClient> Member(string account, string name)
