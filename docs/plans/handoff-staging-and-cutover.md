@@ -183,9 +183,35 @@ Timeline and go/no-go:
 
 ## Record (fill in as you go)
 
-- Client chosen / evidence:
-- Finland staging address, ports, who has access:
-- Rollback proven (date, build):
-- Bots / load-test results:
-- Human pass result:
-- Cutover go/no-go and time:
+- **Client chosen / evidence (23 Oct, local session):** stay on **publisher release 140072**, not 140076. The deployed
+  Sol launcher pins `maxGameRelease` 140072 (`G:\RO3Emu\launcher\launcher.json`), so every player runs 140072 today;
+  moving to 140076 would push a large game update on everyone for no gain. The merged patcher and hooks, built against
+  the owner's client (`RO3Emu.exe check`: "patch targets and every hook reference found"), fit it. The staging join tool
+  is `G:\RO3Emu-staging\RO3Emu.exe` (hooks/loc built from this branch against that client's original DLLs).
+  `prebuilt/client` is **not** rebuilt yet: `pack.ps1` needs PowerShell 7, which this PC lacks; the Sol launcher build
+  compiles the hooks from source anyway. Not yet proven: a real login (human pass below).
+- **Finland staging address, ports, who has access:** `95.217.239.53`, HTTP **5480**, micro **20100**, game **33200**;
+  ufw allows only the owner's IP (24.78.173.215). systemd `ro3emu-staging` (user `ro3staging`, MemoryMax 3G,
+  CPUQuota 200%, Restart=no), binary `/srv/solro3-staging/current` -> `bin-new` (this branch) or `bin-old` (live
+  `aa9075c`). DataDir `/srv/solro3-staging/data`: a `VACUUM INTO` copy of production backup `ro3emu-20261023-091006`
+  (4.5 GB, sha checked). GameDataDir is production's export (fingerprint 2d94b90d…, same as Ashburn). House-rule options
+  copied from production except `MinLauncherVersion` (so the join tool can log in). New option
+  `Ro3Emu:DatabaseBackups=false` (commit "Add a switch to turn off database backups for a test realm"): the disk
+  (94% used) cannot hold a second copy. The untouched pre-migration copy stays on Ashburn at `/root/staging/staging.db`.
+- **Rollback proven (23 Oct 10:51-10:54 UTC):** the new build started clean on the copy (no warnings besides the backup
+  switch), 20 AI bots logged in and fought; then the **old** build `aa9075c` started on the same migrated copy
+  (backups dir made read-only so its startup backup fails harmlessly): 20 logins, 73 kills in 3 minutes, no errors
+  besides that backup. Back on the new build afterwards. So a failed cutover can roll back to the old binary without a
+  database restore. The Growth Classroom migration logs only for roles with old claims; the bots have none, so it is
+  checked at the human pass.
+- **Tests (local Windows, this branch + the backup switch, data exported 20 Oct):** 2,098 tests, 2,080 passed, 13 failed.
+  Rerun alone, 10 pass (timing), `CardCrashRecoveryTests.ProcessCrash…` fails only on Windows (the crash child keeps
+  `ro3emu.db-shm` open), `SkillCombatTests.NotInterruptSkill…` is the known baseline, and
+  **`FirstHeartTests.SyncStartsAtItsOpenLevel…` fails: a First Heart claim below the open level is accepted (0, expected
+  ActivityClosed 3902)**. It passed in the cloud on 22 Oct; check whether it depends on the date or the data before
+  cutover, and test First Heart on staging. `QuestWalkTests.ChapterOneCanBeWalkedToTheEnd` failed after 7.5 minutes in
+  the full run (not rerun yet).
+- **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
+  chat off) plays on staging. Load test not run yet.
+- **Human pass result:** pending (owner).
+- **Cutover go/no-go and time:** pending: planned Sat 24 Oct 10:00 Central; earlier only if the human pass is clean.
