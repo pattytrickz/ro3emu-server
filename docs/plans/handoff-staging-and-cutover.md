@@ -183,10 +183,12 @@ Timeline and go/no-go:
 
 ## Record (fill in as you go)
 
-- **Client chosen / evidence (23 Oct, local session):** stay on **publisher release 140072**, not 140076. The deployed
-  Sol launcher pins `maxGameRelease` 140072 (`G:\RO3Emu\launcher\launcher.json`), so every player runs 140072 today;
-  moving to 140076 would push a large game update on everyone for no gain. The merged patcher and hooks, built against
-  the owner's client (`RO3Emu.exe check`: "patch targets and every hook reference found"), fit it. The staging join tool
+- **Client chosen / evidence (23 Oct, local session):** keep the releases players already have; do **not** move to
+  140076. Correction to an earlier note: the deployed Sol launcher's `maxGameRelease` 140072 does not put everyone on
+  140072. The launcher can only install the publisher's newest release, so while that is above the ceiling (140078 on
+  23 Oct) it leaves the game where it is ("Release 140078 isn't supported by Sol RO3 yet, so the game stays on release
+  140065"). Players run 140065 to 140072. The merged patcher and hooks, built against the owner's 140065 client
+  (`RO3Emu.exe check`: "patch targets and every hook reference found"), fit it, and the patched client reached staging. The staging join tool
   is `G:\RO3Emu-staging\RO3Emu.exe` (hooks/loc built from this branch against that client's original DLLs).
   `prebuilt/client` is **not** rebuilt yet: `pack.ps1` needs PowerShell 7, which this PC lacks; the Sol launcher build
   compiles the hooks from source anyway. Not yet proven: a real login (human pass below).
@@ -208,10 +210,37 @@ Timeline and go/no-go:
   Rerun alone, 10 pass (timing), `CardCrashRecoveryTests.ProcessCrash…` fails only on Windows (the crash child keeps
   `ro3emu.db-shm` open), `SkillCombatTests.NotInterruptSkill…` is the known baseline, and
   **`FirstHeartTests.SyncStartsAtItsOpenLevel…` fails: a First Heart claim below the open level is accepted (0, expected
-  ActivityClosed 3902)**. It passed in the cloud on 22 Oct; check whether it depends on the date or the data before
-  cutover, and test First Heart on staging. `QuestWalkTests.ChapterOneCanBeWalkedToTheEnd` failed after 7.5 minutes in
-  the full run (not rerun yet).
+  ActivityClosed 3902)**. It passed in the cloud on 22 Oct. **Explained (data, not code):** the test assumes First Heart
+  opens at Base 30 (LC_ConditionList 21000012 in the 21 Oct client the cloud exported), but the export players' clients
+  match (140065 to 140072) has 21000012 = Base **10**, so its "Base 29 is still closed" step fails. The server reads the
+  condition from the data, so live players see First Heart from Base 10, as their client does. `QuestWalkTests.ChapterOneCanBeWalkedToTheEnd` failed after 7.5 minutes in
+  the full run and passes alone (7 min 5 s): timing under the full suite's load.
 - **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
   chat off) plays on staging. Load test not run yet.
-- **Human pass result:** pending (owner).
-- **Cutover go/no-go and time:** pending: planned Sat 24 Oct 10:00 Central; earlier only if the human pass is clean.
+- **Live fixes on the merged line (23 Oct, owner asked for a bot pass instead of a human one):**
+  - Every test the live PRs #6 to #62 added (108) passes on this branch, and so do upstream's own tests for the areas
+    where upstream's code replaced live's (Double Attack, choice boxes, boss-clear quest targets). Three live tests were
+    dropped in the merge. Each was restored locally and run (not committed):
+    - the selection chest test passes for an eligible role. Upstream now enforces ItemConfig `_iLevelNeed` and
+      `_kJobNeed` (exact career, like the client's `LC_ItemHelper.CanUseByInfo`). The 10 job-limited boxes are held by no
+      real player on the copy;
+    - the side-guide "boss win" now counts a dungeon clear, not a field kill of the boss (upstream's rule, its test passes);
+    - the Double Attack test relied on live-only hooks; upstream's test covers the Dagger hit and the Katar CRIT.
+  - A wire-level runner (`.loadtest-temp/StagingCheck`, not committed; on Finland `/srv/solro3-staging/check`, run with
+    the staging bots stopped because it uses their roster) passed 26/26 on staging:
+    - all 20 migrated bot characters log in and enter the world;
+    - Zeny Shop potions and fire arrows, and the arrow switch;
+    - selection chest (an invalid pick is refused, a valid pick pays) and the Old Card Album gift box;
+    - Dodo's wheel (one turn spends a gem and names its slot);
+    - Growth Classroom: a role seeded with live-style claims [1,2] logged "keeps its claimed ranks 1,2", and both
+      claims answered 2062 (already claimed).
+  - EconomyProbe compare (opening sequence 966141 to 966854): verdict Fail, all from history the old production build
+    wrote:
+    - 598,772 monster-kill receipts before seq 732352 have no outcome payload;
+    - 247 cd13e daily-stage and quest-award receipts are older than the opening;
+    - 489 Coverage items are on families the probe lists as uncovered (newactivity, monster-kill progress).
+    No Corruption issue comes from a receipt written on staging. Summary at `/srv/solro3-staging/compare-summary.md`.
+- **Human pass result:** the owner's 140065 client was patched with the join tool and fetched the staging gate key; the
+  owner asked for the checks to be done with bots instead (above).
+- **Cutover go/no-go and time:** the owner chose **Sat 24 Oct 10:00 Central (15:00 UTC)**. Announced in `#announcements`
+  on 23 Oct (message 1563158477654859851).
