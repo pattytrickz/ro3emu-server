@@ -13,8 +13,10 @@ merged with the upstream emulator (`aethai/ro3emu-server` `main`) on a **staging
 1. **Select the client** that works for everyone on the server.
 2. **Stand up a staging realm on the Finland server**; that is where the merge is tested.
 3. **Run the test plan there.**
-4. **Cut over at 10:00 Central on Friday 23 Oct 2026** (the owner confirmed: today, not tomorrow). At 05:10 that is five hours
-   away and nothing of steps 1-3 exists yet, so read "Timeline and go/no-go" before anything else.
+4. **Cut over at 10:00 Central on Saturday 24 Oct 2026** (owner's decision on Friday morning: moved from Fri 10:00). If staging, the
+   rollback proof and the human pass are done early, the owner is happy to go **earlier the same night** (Fri 10 pm or Sat 2 am
+   release slot), but only if the go/no-go below is met and the announcement has been up for a few hours. Ask them before
+   moving it.
 
 ## State of the code
 
@@ -124,15 +126,12 @@ Fix what breaks on the staging branch (commit with a short imperative subject; *
 
 Timeline and go/no-go:
 
-- The merge plan wants a **24 h soak** and an announcement 24 h ahead, in an off-peak slot (2 am Central). The owner chose
-  **Friday 10:00 Central**, which is also one of the automation's release slots (2/6/10 am and pm). The soak cannot
-  happen, and no announcement has been posted. **Do not skip the checks to hit the time.** The cloud session's view: unless
-  staging, the rollback proof and a human pass are all done well before 10:00, say so to the owner and propose Saturday 2 am
-  or 10 am instead; they decide. Cutover is
-  go only if: the first-start migration ran clean, the rollback was proven, the bots and a human pass found no blocker, and a
-  fresh backup was taken. If not, tell the owner and move to the next slot (the merge plan's off-peak 2 am slot, or whatever
-  they choose). Say so plainly; they decide.
-- **Hold the automation** from now until the cutover is done (`/admin` or `!off` in Discord) so it does not stage a release in
+- The merge plan wants a **24 h soak** and an announcement 24 h ahead, in an off-peak slot (2 am Central). The cutover is
+  **Saturday 10:00 Central** (one of the automation's release slots: 2/6/10 am and pm), which leaves about a day for staging
+  on Friday. An earlier cutover the same night is allowed only if everything below is green. **Do not skip the checks to hit
+  a time.** Cutover is go only if: the first-start migration ran clean, the rollback was proven, the bots and a human pass found
+  no blocker, and a fresh backup was taken. If not, tell the owner and move to the next slot; they decide.
+- **Hold the automation** (turn it off with `/admin` or `!off` in Discord, if the owner has not already) from now until the cutover is done (`/admin` or `!off` in Discord) so it does not stage a release in
   between; tell GPT Astra/Codex the same. Nothing is merged into `v1.0.0-fixes` before the cutover.
 - **Announce** in `#announcements` as soon as the owner agrees to a time (channel `1561168146201583656`, `@everyone`, same style as
   the earlier posts): a longer restart, what is new (job talents, boss skills, pet skills, Rift later), and the time. A draft:
@@ -172,7 +171,7 @@ Timeline and go/no-go:
 
 ## Decisions for the owner (open)
 
-1. Is 10:00 today acceptable without the 24 h soak (see above), or should the cutover move to Saturday?
+1. Saturday 10:00 is the plan; do they want to go earlier (Fri night) if staging finishes early? (Their answer so far: yes, if it is done.)
 2. Remove the developer test weapon "Basic Dagger" (item 90000102) from characters that are not GMs?
 3. Add a setting to turn AI chat off in world and private chat (suggestion thread 1562821188101869578)?
 
