@@ -345,7 +345,16 @@ public sealed partial class SeasonTalentService
             : Math.Max(0, type == PvpNodeType ? state.BattleOathLevel : n.Level));
     }
 
-    private JsonElement? Effect(long group, long level, int career)
+    /// <summary>
+    /// Effect rows by (group, level, career). The table is fixed once loaded, and CharacterService.Stats asks for every
+    /// bought node on every cast and HP change: scanning all 779 rows each time took 70% of the game loop (23 Oct 2026).
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(long Group, long Level, int Career), JsonElement?> _effects = new();
+
+    private JsonElement? Effect(long group, long level, int career) =>
+        _effects.GetOrAdd((group, level, career), key => FindEffect(key.Group, key.Level, key.Career));
+
+    private JsonElement? FindEffect(long group, long level, int career)
     {
         JsonElement? generic = null;
         foreach (var row in _data.Table("SeasonTalentEffectConfig").Values)
