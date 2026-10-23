@@ -212,6 +212,13 @@ public sealed class ServerOptions
     public int FieldMvpHpPercent { get; set; } = 100;
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): once the oldest party in a Phantom Realm queue (DungeonMatchService)
+    /// has waited this many seconds, the match starts with the parties queued for that boss, down to a single player.
+    /// The boss is not scaled down. 0 keeps the original rule: the match waits for a full party.
+    /// </summary>
+    public int DungeonMatchFillSeconds { get; set; }
+
+    /// <summary>
     /// Seconds an in-game role stays in the world after its game socket drops, waiting for the client's silent
     /// reconnect (Phonest ConnectServerReq ReConnection). 60 is the reference
     /// AVATAR_LOSE_CONNECTION_TIMEOUT_SECONDS; it must exceed the client's 20 s + 10 s budgets. 0 turns grace off.

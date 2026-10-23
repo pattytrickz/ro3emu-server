@@ -244,6 +244,47 @@ public sealed class DungeonMatchTests : IAsyncLifetime
         Assert.NotEqual(0, teamIds.Single());
     }
 
+    /// <summary>House rule ServerOptions.DungeonMatchFillSeconds: a short queue starts with who is in it.</summary>
+    [ClientDataFact]
+    public async Task AShortQueueStartsWithWhoIsQueuedOnceTheFillWaitIsOver()
+    {
+        Service<Microsoft.Extensions.Options.IOptions<ServerOptions>>().Value.DungeonMatchFillSeconds = 30;
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        await using var carol = await InWorld("Carol");
+        var members = new[] { alice, bob, carol };
+        foreach (var bot in members) await Gm(bot, "!lvl 99");
+        await Party(alice, bob);
+        await Start(alice);
+        _clock.Advance(TimeSpan.FromSeconds(10));
+        await Start(carol);
+        _clock.Advance(TimeSpan.FromSeconds(19));
+        await Task.Delay(1500);
+        Assert.All(members, bot => Assert.DoesNotContain(bot.Inbox.Snapshot(), e => e.IsGame(DungeonMatchService.ReadyNotify)));
+        _clock.Advance(TimeSpan.FromSeconds(1)); // Alice's party has now waited 30 s: the three queued players start.
+        foreach (var bot in members)
+            Assert.Equal(3, (await Next(bot, DungeonMatchService.ReadyNotify, MatchReadyNotify.Parser)).ReadyInfos.Count);
+        foreach (var bot in members)
+        {
+            await bot.SendGameAsync(DungeonMatchService.Ready, new MatchReadyReq
+            { MatchEntryId = Entry, PlayerId = (long)bot.Self!.Uuid, IsReady = true });
+            Assert.Equal(0, (await Next(bot, DungeonMatchService.Ready, MatchReadyResp.Parser)).Result);
+        }
+        long instance = await Load(alice);
+        foreach (var bot in members.Skip(1)) Assert.Equal(instance, await Load(bot));
+
+        // Alone in the queue, Dan starts by himself after the wait.
+        await using var dan = await InWorld("Dan");
+        await Gm(dan, "!lvl 99");
+        await Start(dan);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.Single((await Next(dan, DungeonMatchService.ReadyNotify, MatchReadyNotify.Parser)).ReadyInfos);
+        await dan.SendGameAsync(DungeonMatchService.Ready, new MatchReadyReq
+        { MatchEntryId = Entry, PlayerId = (long)dan.Self!.Uuid, IsReady = true });
+        Assert.Equal(0, (await Next(dan, DungeonMatchService.Ready, MatchReadyResp.Parser)).Result);
+        Assert.NotEqual(instance, await Load(dan));
+    }
+
     [ClientDataFact]
     public async Task ChickenRoutingCrossOwnerExclusionSwitchAndRoleCleanup()
     {

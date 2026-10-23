@@ -14,12 +14,13 @@ public sealed partial class DungeonService
     /// <summary>
     /// The 82637 vote has already finished. The normal dungeon owner allocates the room and performs
     /// 30107/70010/30005/30401; no second 42033/30406 vote is issued (LC_DAL_Match and LC_DAL_Team).
+    /// <paramref name="filled"/>: the queue started short (ServerOptions.DungeonMatchFillSeconds), below the minimum.
     /// </summary>
-    public async Task<int> BeginMatchedAsync(DungeonCatalog.Plan plan, GameSession[] members, long teamId)
+    public async Task<int> BeginMatchedAsync(DungeonCatalog.Plan plan, GameSession[] members, long teamId, bool filled = false)
     {
         if (members.Length == 0 || members.Distinct().Count() != members.Length
             || members.Any(s => s.Role == null || !_sessions.All().Contains(s))) return ErrorCodes.PlayerOffline;
-        if (members.Length < plan.MinPlayers && !(members.Length == 1 && members[0].DungeonSoloMatch))
+        if (members.Length < plan.MinPlayers && !filled && !(members.Length == 1 && members[0].DungeonSoloMatch))
             return ErrorCodes.DungeonTeamSize;
         if (members.Length > plan.MaxPlayers) return ErrorCodes.PartyFull;
         foreach (var member in members)

@@ -22,6 +22,7 @@ public sealed class DungeonMatchService : IGameTicker
     private readonly TimeProvider _time;
     private readonly GameLoop _loop;
     private readonly ILogger<DungeonMatchService> _log;
+    private readonly Microsoft.Extensions.Options.IOptions<ServerOptions>? _options;
 
     private readonly record struct Selection(int Entry, long Scene, int Multi, int Mark);
 
@@ -48,6 +49,8 @@ public sealed class DungeonMatchService : IGameTicker
         public required long StartSeconds;
         public HashSet<GameSession> Ready { get; } = new();
         public bool Closed;
+        /// <summary>Started short by ServerOptions.DungeonMatchFillSeconds, below the boss's minimum party.</summary>
+        public bool Filled;
     }
 
     private readonly Dictionary<Selection, List<Group>> _queue = new();
@@ -57,8 +60,9 @@ public sealed class DungeonMatchService : IGameTicker
 
     public DungeonMatchService(GameData data, DungeonCatalog catalog, DungeonService dungeons, TeamService teams,
         TimedBattleService timedBattles, SessionRegistry sessions, TimeProvider time, GameLoop loop,
-        ILogger<DungeonMatchService> log)
+        ILogger<DungeonMatchService> log, Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
     {
+        _options = options;
         this._data = data; this._catalog = catalog; this._dungeons = dungeons; this._teams = teams;
         this._timedBattles = timedBattles; this._sessions = sessions; this._time = time; this._loop = loop; this._log = log;
         timedBattles.OtherMatchBusy = Owns;
@@ -204,7 +208,34 @@ public sealed class DungeonMatchService : IGameTicker
         return ways[quantity];
     }
 
-    private async Task PrepareAsync(IReadOnlyList<Group> picked)
+    /// <summary>
+    /// House rule ServerOptions.DungeonMatchFillSeconds: the oldest party in this boss's queue has waited long enough,
+    /// so the match starts with the parties queued for it (oldest first, up to the start quantity), even one player.
+    /// </summary>
+    private async Task FillAsync(Selection key)
+    {
+        if (!_queue.TryGetValue(key, out var list)) return;
+        foreach (var group in list.ToArray())
+            if (GroupAdmission(group) != 0) await RemoveGroupAsync(group, manual: false);
+        if (!_queue.TryGetValue(key, out list)
+            || FillSeconds is not (> 0 and var wait) || _time.GetUtcNow().ToUnixTimeSeconds() - list[0].StartSeconds < wait) return;
+        int quantity = (int)GameData.Int(_data.Row("MatchConfig", key.Entry)!.Value, "_iStartQuantity");
+        var picked = new List<Group>();
+        int count = 0;
+        foreach (var group in list)
+            if (count + group.Members.Length <= quantity) { picked.Add(group); count += group.Members.Length; }
+        foreach (var group in picked)
+        {
+            list.Remove(group);
+            foreach (var member in group.Members) _waiting.Remove(member);
+        }
+        if (list.Count == 0) _queue.Remove(key);
+        await PrepareAsync(picked, filled: count < quantity);
+    }
+
+    private int FillSeconds => _options?.Value.DungeonMatchFillSeconds ?? 0;
+
+    private async Task PrepareAsync(IReadOnlyList<Group> picked, bool filled = false)
     {
         var first = picked[0];
         int seconds = ReadySeconds();
@@ -215,7 +246,7 @@ public sealed class DungeonMatchService : IGameTicker
         {
             Key = first.Key, Plan = first.Plan, Groups = picked.ToArray(),
             Members = picked.SelectMany(g => g.Members).ToArray(), Data = first.Data,
-            DeadlineMs = deadlineMs, StartSeconds = picked.Min(g => g.StartSeconds)
+            DeadlineMs = deadlineMs, StartSeconds = picked.Min(g => g.StartSeconds), Filled = filled
         };
         foreach (var member in match.Members) _preparing[member] = match;
         await BroadcastReadyAsync(match);
@@ -276,7 +307,7 @@ public sealed class DungeonMatchService : IGameTicker
         if (match.Members.Length > 1 && teamId == 0) error = ErrorCodes.MemberLeft;
         if (error == 0)
         {
-            try { error = await _dungeons.BeginMatchedAsync(match.Plan, match.Members, teamId); }
+            try { error = await _dungeons.BeginMatchedAsync(match.Plan, match.Members, teamId, match.Filled); }
             catch (Exception e)
             {
                 _log.LogWarning(e, "Matched dungeon handoff failed for {Scene}", match.Key.Scene);
@@ -407,6 +438,9 @@ public sealed class DungeonMatchService : IGameTicker
         _lastSecond = now;
         foreach (var group in _waiting.Values.Distinct().ToArray())
             if (GroupAdmission(group) != 0) _loop.PostLegacy(() => RemoveGroupAsync(group, false));
+        if (FillSeconds is > 0 and var fill)
+            foreach (var (key, list) in _queue)
+                if (list.Count > 0 && now - list[0].StartSeconds >= fill) _loop.PostLegacy(() => FillAsync(key));
         foreach (var match in _preparing.Values.Distinct().ToArray())
             if (match.Groups.Any(g => GroupAdmission(g) != 0)) _loop.PostLegacy(() => CancelReadyAsync(match, false));
             else if (_time.GetUtcNow().ToUnixTimeMilliseconds() >= match.DeadlineMs) _loop.PostLegacy(() => ExpireAsync(match));
