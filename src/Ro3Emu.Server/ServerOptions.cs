@@ -45,6 +45,12 @@ public sealed class ServerOptions
     /// </summary>
     public string? GameDataDir { get; set; }
 
+    /// <summary>
+    /// Copy the database to DataDir/backups at startup and every 6 hours (DatabaseBackup). Off only for a test realm
+    /// running on a database copy where the disk cannot hold another one.
+    /// </summary>
+    public bool DatabaseBackups { get; set; } = true;
+
     /// <summary>Walk check against the client's nav grid: "off", "log" (report only) or "enforce" (snap back).</summary>
     public string WalkCheck { get; set; } = "log";
 

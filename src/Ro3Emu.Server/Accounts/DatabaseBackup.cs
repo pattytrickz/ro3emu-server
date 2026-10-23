@@ -37,6 +37,11 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        if (!options.Value.DatabaseBackups)
+        {
+            log.LogWarning("Database backups are off (Ro3Emu:DatabaseBackups=false)");
+            return;
+        }
         while (!ct.IsCancellationRequested)
         {
             try
