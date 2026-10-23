@@ -228,7 +228,7 @@ Timeline and go/no-go:
   `SurvivorTeamSize` and `DragonIslandPlayers`/`DragonIslandTeamSize` (`ae28377`), GM test aid `!arena open|close
   survivor|dragon` (`3e07679`). On staging: Survivor 20 in teams of 4, Dragon Island 10 in squads of 5, Guild League
   minimum 10. The live runner queued 20 and 10 bots and both matches fired their ready check and moved everyone in
-  (28/28). **At cutover, add to the production unit** (only if the owner approves the sizes):
+  (28/28). **At cutover, add to the production unit** (the owner approved these sizes on 23 Oct):
   `Ro3Emu__SurvivorPlayers=20`, `Ro3Emu__SurvivorTeamSize=4`, `Ro3Emu__DragonIslandPlayers=10`,
   `Ro3Emu__DragonIslandTeamSize=5`, `Ro3Emu__GuildLeagueMinMembers=10`. Windows stay the original weekday evenings
   (Survivor days 2/4/7, Dragon 1/3/6, 18:30-19:55 realm time) and Base 49+.

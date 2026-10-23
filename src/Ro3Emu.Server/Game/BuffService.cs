@@ -30,7 +30,10 @@ public sealed partial class BuffService : IGameTicker
     private long _guids = 900000;
     private readonly Dictionary<long, List<ActiveBuff>> _unitBuffs = new();
     private bool _maintenancePending, _maintenanceRunning;
-    private long _maintenanceQueuedMs, _maintenanceGeneration;
+    private long _maintenanceQueuedMs, _maintenanceGeneration, _nextMaintenanceMs;
+    /// <summary>Minimum gap between sweep starts. Each sweep holds the realm reservation, so with ~30 players a sweep
+    /// every tick (95 a minute) kept kills waiting about a second each for the realm; an expiry may now land up to 1 s late.</summary>
+    internal const long MaintenanceIntervalMs = 1000;
 
     /// <summary>Subscribers recompute effective skill parameters/slots after a buff changes.</summary>
     public List<Func<GameSession, Task>> Changed { get; } = new();
@@ -495,7 +498,7 @@ public sealed partial class BuffService : IGameTicker
         // TrackDetached only logs a refused admission (the loop at its work limit), so a sweep that never started
         // would leave the flag set and stop every expiry. Requeue after 10 s; the stale sweep exits if it starts late.
         if (_maintenancePending && !_maintenanceRunning && now - _maintenanceQueuedMs > 10_000) _maintenancePending = false;
-        if (_maintenancePending || _loop.Phase != GameLoopPhase.Accepting) return;
+        if (_maintenancePending || now < _nextMaintenanceMs || _loop.Phase != GameLoopPhase.Accepting) return;
         bool due = _sessions.All().Any(s => CanMaintain(s) && (s.Buffs.Any(b => b.ExpireMs <= now)
             || s.Energy.Values.Any(m => m.NextRecoverMs != 0 && m.NextRecoverMs <= now)))
             || _unitBuffs.Values.Any(list => list.Any(b => b.ExpireMs <= now));
@@ -504,6 +507,7 @@ public sealed partial class BuffService : IGameTicker
         // of each still-expired buff, creating tens of thousands of realm waiters during ordinary contention.
         _maintenancePending = true;
         _maintenanceQueuedMs = now;
+        _nextMaintenanceMs = now + MaintenanceIntervalMs;
         long generation = ++_maintenanceGeneration;
         _loop.TrackDetached("buff maintenance", async () =>
         {
