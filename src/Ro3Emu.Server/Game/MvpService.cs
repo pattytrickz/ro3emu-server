@@ -124,12 +124,15 @@ public sealed partial class MvpService : IGameTicker
 
     private TimeSpan _sinceCheck;
     private readonly RoleObligations<MvpObligationRow> _awardObligations;
+    private readonly int _hpRatio;
 
     public MvpService(GameData data, AccountStore accounts, MonsterService monsters, WorldData worldData, CharacterService character,
         RewardService rewards, TaskService tasks, TeamService teams, CombatService combat, BuffService buffs, SessionRegistry sessions,
-        World world, GameLoop loop, SceneService scene, PublicLineManager lines, ILogger<MvpService> log)
+        World world, GameLoop loop, SceneService scene, PublicLineManager lines, ILogger<MvpService> log,
+        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
     {
         this._buffs = buffs;
+        _hpRatio = Math.Clamp(options?.Value.FieldMvpHpPercent ?? 100, 1, 1000) * 100;
         this._data = data;
         this._accounts = accounts;
         this._monsters = monsters;
@@ -394,7 +397,8 @@ public sealed partial class MvpService : IGameTicker
         var points = map.SpawnGroups.SelectMany(g => g.Points).ToList();
         var at = points.Count > 0 ? points[_random.Next(points.Count)] is var p ? new MapPoint(p.X, p.Y, p.Z, p.Face) : default
             : map.Born ?? default;
-        st.Unit = await _monsters.SpawnSingleAsync(st.Runtime, st.Def.NpcId, at);
+        // House rule ServerOptions.FieldMvpHpPercent: a small realm's party can finish a field MVP.
+        st.Unit = await _monsters.SpawnSingleAsync(st.Runtime, st.Def.NpcId, at, hpRatio: _hpRatio);
         if (st.Unit != null) st.Unit.SpecialsOwnedByMvp = true; // TickBossSkills paces all of its specials
         if (st.Retired) { st.Unit = null; return; }
         if (st.Unit == null) return;

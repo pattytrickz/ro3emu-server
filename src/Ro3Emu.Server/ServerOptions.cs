@@ -206,6 +206,12 @@ public sealed class ServerOptions
     public string[] PartyShareExcludedAccounts { get; set; } = [];
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): field MVPs (MvpService) spawn with this percentage of their
+    /// configured HP, so a small realm's party can finish one. 100 keeps the config. Dungeon and story bosses are unchanged.
+    /// </summary>
+    public int FieldMvpHpPercent { get; set; } = 100;
+
+    /// <summary>
     /// Seconds an in-game role stays in the world after its game socket drops, waiting for the client's silent
     /// reconnect (Phonest ConnectServerReq ReConnection). 60 is the reference
     /// AVATAR_LOSE_CONNECTION_TIMEOUT_SECONDS; it must exceed the client's 20 s + 10 s budgets. 0 turns grace off.
