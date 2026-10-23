@@ -215,6 +215,15 @@ Timeline and go/no-go:
   match (140065 to 140072) has 21000012 = Base **10**, so its "Base 29 is still closed" step fails. The server reads the
   condition from the data, so live players see First Heart from Base 10, as their client does. `QuestWalkTests.ChapterOneCanBeWalkedToTheEnd` failed after 7.5 minutes in
   the full run and passes alone (7 min 5 s): timing under the full suite's load.
+- **23 Oct production incident and hotfix (merged here as `4b00532`):** live players could not connect. Expired buffs
+  queued a realm-wide job every tick (70,000 outstanding operations), and a coalesced receive over 1 MiB after inflate
+  was refused as one frame. The hotfix `d690f7b` (PR #64) went live at 15:52 UTC; this branch carries it, adapted to
+  upstream's field names and its new periodic, halo and decay ticks. Full suite afterwards: 2,091 passed, 6 failed:
+  - CardCrash (Windows only), First Heart (data, above) and NotInterrupt (the baseline);
+  - NewActivity defense and PassPlay premium are timing (they pass alone, PassPlay 5 times in a row);
+  - **`PowerTests.ChangesPublishAndTheHistoryIsKeptAcrossRelog` fails every run, before the hotfix too.** The power
+    record is saved after the 5021 notify, and a logout straight after it keeps the older current power (3600, not 600).
+    Login recomputes the power, so only the stored number is stale. Not a cutover blocker; fix after.
 - **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
   chat off) plays on staging. Load test not run yet.
 - **Live fixes on the merged line (23 Oct, owner asked for a bot pass instead of a human one):**
