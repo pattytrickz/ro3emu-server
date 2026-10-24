@@ -107,7 +107,8 @@ public sealed class HttpStateTests : IAsyncLifetime
     {
         var registry = new SessionRegistry(NullLogger<SessionRegistry>.Instance);
         long id = 0;
-        foreach (var account in new[] { "player", "aibot07", "AIBOT12" })
+        string[] accounts = ["player", "aibot07", "AIBOT12"];
+        foreach (var account in accounts)
             await registry.RegisterAsync(new GameSession(null!, null!)
             {
                 Account = account, SceneEntry = 10100,

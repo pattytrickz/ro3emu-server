@@ -14,7 +14,7 @@ namespace Ro3Emu.Server.Game;
 /// ServerOptions.GmOpenWhenEmpty is false (a Production host, docs/guide/gm-access.md). The loopback HTTP /ro3emu/gm keeps
 /// "empty = everyone" (<see cref="Allowed(ServerOptions, string?, bool)"/>).
 /// </summary>
-public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, SessionRegistry sessions, CharacterService character, SceneService scene, TaskService tasks, IServiceProvider services, ILogger<GmCommands> log)
+public sealed partial class GmCommands(IOptions<ServerOptions> options, GameData data, SessionRegistry sessions, CharacterService character, SceneService scene, TaskService tasks, IServiceProvider services, ILogger<GmCommands> log)
 {
     public const uint BroadcastNotify = 83270;
     public const uint GeneralProcGm = 30300;
@@ -496,10 +496,12 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         string title = args.Length > 3 ? string.Join(' ', args[3..]) : "A gift from the Sol RO3 team";
         string mail = await services.GetRequiredService<MailService>().SendRawAsync(role.Id, title, title,
             [new MailService.Attachment(item, count)]);
-        log.LogWarning("GM {Gm} mailed {Count} x {Item} ({ItemName}) to {Role} ({RoleId}), mail {Mail}",
-            s.Role?.Name, count, item, itemName, role.Name, role.Id, mail);
+        LogMailTo(log, s.Role?.Name, count, item, itemName, role.Name, role.Id, mail);
         await ReplyAsync(s, $"Mail {mail} with {count} x {itemName} delivered to {role.Name} ({role.Id}).");
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "GM {Gm} mailed {Count} x {Item} ({ItemName}) to {Role} ({RoleId}), mail {Mail}")]
+    private static partial void LogMailTo(ILogger logger, string? gm, int count, int item, string itemName, string role, long roleId, string mail);
 
     private Task Zeny(GameSession s, string[] args)
     {
