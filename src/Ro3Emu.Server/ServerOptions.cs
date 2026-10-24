@@ -206,6 +206,19 @@ public sealed class ServerOptions
     public string[] PartyShareExcludedAccounts { get; set; } = [];
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a monster kill's Base and Job EXP in percent, after the level gap
+    /// correction and the party bonus (RewardService.ResolveKill), so a small realm levels faster. 100 keeps the data's.
+    /// </summary>
+    public int KillExpPercent { get; set; } = 100;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a kill's drop tables roll this many times for cards (1-10), keeping
+    /// only the cards of the extra rolls, so a card is about that many times as likely and nothing else changes. 1 keeps
+    /// the data's odds.
+    /// </summary>
+    public int CardDropRolls { get; set; } = 1;
+
+    /// <summary>
     /// Accounts (exact, or "prefix*") whose roles the public player count (/ro3emu/status, read by the website and the
     /// launcher) leaves out, so the AI players ("aibot*") do not show as people online. The admin's /ro3emu/online and
     /// /ro3emu/metrics still count every session. Empty: every role counts.
