@@ -153,11 +153,21 @@ Timeline and go/no-go:
   - Data loss or duplication (items, currencies, claims): stop the server, restore the pre-release backup, start the old
     build, and post what happened.
   - Anything else: fix forward in the next release.
+- **Spirit Tower clean-up, right after the cutover** (owner's request, Sat 24 Oct): a GM's test run took the server-first
+  record on Spirit Tower floors, so no player can be first there. From an admin account in game (or the loopback
+  `/ro3emu/gm` tool on the box), run `!tower firstpass` to list who holds the floors, then
+  `!tower firstpass clear <that GM's role name or id>`. It removes only that role's records; milestones players already
+  claimed stay claimed. Post a short note in `#announcements` that the server-first floors are open again.
 - **After**: turn the automation back on with the new base; recreate or rebase open fix branches (`fix/new-report-followup` is
   Codex's); post patch notes in the usual format. Then start the weekly upstream syncs ([upstream-merge-plan.md](upstream-merge-plan.md), "Staying close").
 
 ## Things to know
 
+- **Publisher state on Sat 24 Oct morning**: the publisher shipped release **140079** (2026.10.23.1) on 23 Oct, newer than
+  the 140076 picked in step 1, so a fresh install now gets 140079. Their main download host `update.genesis3.is` was not
+  resolving in DNS (its name servers refuse queries); the Linode mirror still served the signed manifests, which our
+  launcher verifies and falls back to. New players reported "Can't reach the official Ragnarok Online 3 download servers"
+  in `#help`. Check whether 140079 logs in on the patched client before deciding `maxGameRelease`.
 - **How to work with the release automation**: it ships `v1.0.0-fixes` every 4 hours from 2 am Central, posts the countdown,
   patch notes and a `news.ts` snippet for the website. When writing a PR for it, put the **News draft above the Patch notes
   draft and end the body with nothing after it**: it copies a PR section to the end of the description, and the last ship

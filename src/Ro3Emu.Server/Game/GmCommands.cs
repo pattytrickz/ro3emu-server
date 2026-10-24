@@ -361,6 +361,10 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             await ReplyAsync(s, reply);
         }
         ),
+        ["tower"] = ("firstpass [clear <role id|name>] (Spirit Tower server-first floor records)", async (s, a) =>
+            await ReplyAsync(s, a.Length > 0 && a[0] == "firstpass"
+                ? services.GetRequiredService<TowerService>().FirstPassGm(a)
+                : "usage: !tower firstpass [clear <role id|name>]")),
         ["boss"] = ("spawn <npcId> | skills [npcId] | phase <n> | cast <skillId> | kill (boss skill test aids: the nearest boss within 40 m)", async (s, a) =>
         {
             string reply = await services.GetRequiredService<MonsterService>().BossGmAsync(s, a);

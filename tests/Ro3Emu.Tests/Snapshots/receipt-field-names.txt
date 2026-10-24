@@ -451,6 +451,8 @@ Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_fallback
 Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_nextEpoch
 Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_oldEpoch
 Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_oldState
+Ro3Emu.Server.Accounts.Persistence.TowerFirstPassClearPlan/_floor
+Ro3Emu.Server.Accounts.Persistence.TowerFirstPassClearPlan/_record
 Ro3Emu.Server.Accounts.Persistence.TowerFirstPassWritePlan/_floor
 Ro3Emu.Server.Accounts.Persistence.TowerFirstPassWritePlan/_record
 Ro3Emu.Server.Economy.EconomyAsset#Epoch

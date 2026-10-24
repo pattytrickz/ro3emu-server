@@ -346,6 +346,9 @@ public sealed class RoleStore(AccountStore accounts)
         else transaction.Add(plan);
     }
 
+    /// <summary>GM repair: deletes a floor's first pass if it is still <paramref name="record"/>; 1 when removed.</summary>
+    public int ClearTowerFirstPass(long floor, byte[] record) => _accounts.WriteLegacySync<int>(new TowerFirstPassClearPlan(floor, record));
+
     public Dictionary<long, byte[]> LoadTowerFirstPasses(long min, long max)
         => _accounts.ReadSync<Dictionary<long, byte[]>>(new TowerFirstPassReadPlan(min, max));
 

@@ -354,6 +354,31 @@ public sealed class TowerTests : IAsyncLifetime
         Assert.Equal(0, Count(alice, 1250709));
     }
 
+    /// <summary>
+    /// A GM's test clears took every server-first floor: "!tower firstpass clear &lt;name&gt;" removes only that role's
+    /// records, so a real player's next clear records the floor again.
+    /// </summary>
+    [ClientDataFact]
+    public async Task AGmCanClearTheServerFirstFloorsOneRoleHolds()
+    {
+        await using var alice = await InWorld("Alice");
+        var roles = Service<RoleStore>();
+        byte[] Record(long floor, long player, string name) =>
+            new ClimbTowerFirstPassData { Layer = floor, HasFirstPass = true, PlayerId = player, PlayerName = name, PassTime = 1 }.ToByteArray();
+        roles.RecordTowerFirstPass(10, Record(10, 900001, "TestGM"));
+        roles.RecordTowerFirstPass(20, Record(20, 900001, "TestGM"));
+        roles.RecordTowerFirstPass(30, Record(30, 900002, "Winner"));
+
+        await Gm(alice.Account!, "!tower firstpass clear testgm");
+        var left = roles.LoadTowerFirstPasses(0, long.MaxValue);
+        Assert.Equal([30L], left.Keys.Order());
+        Assert.Equal("Winner", ClimbTowerFirstPassData.Parser.ParseFrom(left[30]).PlayerName);
+        roles.RecordTowerFirstPass(10, Record(10, (long)alice.Self!.Uuid, "Alice"));
+        Assert.Equal("Alice", ClimbTowerFirstPassData.Parser.ParseFrom(roles.LoadTowerFirstPasses(10, 10)[10]).PlayerName);
+        Assert.Equal("No server-first floor records held by nobody",
+            Service<TowerService>().FirstPassGm(["firstpass", "clear", "nobody"]));
+    }
+
     [ClientDataFact]
     public async Task BossFirstPassBelongsToFirstWinnerAndOtherPlayersClaimItsMilestoneOnce()
     {

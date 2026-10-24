@@ -610,6 +610,32 @@ public sealed partial class TowerService
     }
 
     /// <summary>
+    /// GM "!tower firstpass": who holds the server-first floor records; "clear &lt;role id|name&gt;" removes every record
+    /// that role holds (a GM's test clears took them), so the next real clear records the floor again. Milestones
+    /// players already claimed stay claimed: a claim watermark never goes back.
+    /// </summary>
+    public string FirstPassGm(string[] a)
+    {
+        var records = _roles.LoadTowerFirstPasses(0, long.MaxValue)
+            .Select(r => (Floor: r.Key, Bytes: r.Value, Data: ClimbTowerFirstPassData.Parser.ParseFrom(r.Value))).ToList();
+        if (a.Length >= 3 && a[1] == "clear")
+        {
+            string who = string.Join(' ', a.Skip(2));
+            var held = records.Where(r => r.Data.PlayerId.ToString() == who
+                || string.Equals(r.Data.PlayerName, who, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (held.Count == 0) return $"No server-first floor records held by {who}";
+            int removed = held.Sum(r => _roles.ClearTowerFirstPass(r.Floor, r.Bytes));
+            _log.LogWarning("GM removed {Count} Spirit Tower first-pass records held by {Holder} ({Role}), floors {First}-{Last}",
+                removed, held[0].Data.PlayerName, held[0].Data.PlayerId, held[0].Floor, held[^1].Floor);
+            return $"Removed {removed} server-first floor records of {held[0].Data.PlayerName} ({held[0].Data.PlayerId}), floors {held[0].Floor}-{held[^1].Floor}";
+        }
+        if (a.Length > 1) return "usage: !tower firstpass [clear <role id|name>]";
+        if (records.Count == 0) return "No server-first floor records";
+        return "Server-first floors: " + string.Join("; ", records.GroupBy(r => (r.Data.PlayerId, r.Data.PlayerName))
+            .Select(g => $"{g.Key.PlayerName} ({g.Key.PlayerId}) {g.Count()} floors {g.Min(r => r.Floor)}-{g.Max(r => r.Floor)}"));
+    }
+
+    /// <summary>
     /// Claim all contiguous recorded boss milestones above the watermark, including other players' wins (inferred
     /// eligibility/batching from the DAL red dot). Stop at a gap so a later first clear is never skipped forever.
     /// </summary>
