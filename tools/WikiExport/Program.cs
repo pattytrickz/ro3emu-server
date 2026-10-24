@@ -1,5 +1,6 @@
-// Writes the monster spawns of every map for the Sol RO3 website's wiki (apps/solro3/scripts/build-mob-data.py in GEM11),
-// read with the server's own scene-editor parser so the wiki lists exactly what the server spawns.
+// Writes what the Sol RO3 website's wiki (apps/solro3/scripts/build-*-data.py in GEM11) needs from the server itself:
+// every map's monster spawns, NPCs, portals and Kafras, read with the server's own scene-editor parser, and the shop
+// catalogue as the live realm prices it (F2P and OpenContent on, as in production), so the wiki shows what players meet.
 // Usage: WikiExport <exported data dir> <output .json>
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,7 +14,10 @@ if (args.Length != 2)
     Console.Error.WriteLine("usage: WikiExport <exported data dir> <output .json>");
     return 2;
 }
-var server = Options.Create(new ServerOptions { GameDataDir = args[0], DataDir = args[0] });
+var options = new ServerOptions { GameDataDir = args[0], DataDir = args[0] };
+options.F2P.Enabled = true;
+options.OpenContent.Enabled = true;
+var server = Options.Create(options);
 var data = new GameData(server, NullLogger<GameData>.Instance);
 var world = new WorldData(server, data, NullLogger<WorldData>.Instance);
 
@@ -22,7 +26,7 @@ foreach (var (table, kind) in new[] { ("MapConfig", "field"), ("DungeonConfig", 
 {
     foreach (string key in data.Table(table).Keys)
     {
-        if (!long.TryParse(key, out long scene) || world.Map(scene) is not { } map || map.SpawnGroups.Count == 0) continue;
+        if (!long.TryParse(key, out long scene) || world.Map(scene) is not { } map) continue;
         var groups = map.SpawnGroups.Where(g => g.Points.Count > 0).Select(g => new
         {
             id = g.Id,
@@ -36,12 +40,26 @@ foreach (var (table, kind) in new[] { ("MapConfig", "field"), ("DungeonConfig", 
                     min = Alive(g, p.Count()),
                     max = Alive(g, p.Count()),
                 }).ToArray(),
+            // Where the group spawns: a pool's monsters take any of its points.
+            points = g.Points.Select(p => new[] { MathF.Round(p.X, 1), MathF.Round(p.Z, 1) }).ToArray(),
         }).Where(g => g.monsters.Length > 0).ToArray();
-        if (groups.Length > 0) maps.Add(new { scene, kind, name = data.MapName(scene), groups });
+        var npcs = map.Npcs.Select(n => new
+        {
+            npc = n.NpcId,
+            kind = n.Kind.ToString().ToLowerInvariant(),
+            name = n.Name,
+            x = MathF.Round(n.X, 1),
+            z = MathF.Round(n.Z, 1),
+            to = n.Target?.Map ?? 0,
+        }).ToArray();
+        if (groups.Length == 0 && npcs.Length == 0) continue;
+        maps.Add(new { scene, kind, name = data.MapName(scene), width = map.Nav?.Width ?? 0, height = map.Nav?.Height ?? 0, groups, npcs });
     }
 }
-File.WriteAllText(args[1], JsonSerializer.Serialize(new { maps }));
-Console.WriteLine($"{maps.Count} maps with spawns -> {args[1]}");
+// The commodity table after GameData's F2P overlay (Sol RO3 prices and caps, and the Zeny Shop rows it adds).
+var shop = data.Table("ShopCommodityConfig").Values.ToArray();
+File.WriteAllText(args[1], JsonSerializer.Serialize(new { maps, shop, openFunctions = options.OpenContent.Functions }));
+Console.WriteLine($"{maps.Count} maps, {shop.Length} shop commodities -> {args[1]}");
 return 0;
 
 // A pool spawns each kind's count on its own free points, so together they never exceed the group's points.
