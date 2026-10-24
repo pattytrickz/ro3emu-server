@@ -17,7 +17,7 @@ namespace Ro3Emu.Tests;
 /// </summary>
 public sealed class F2PTests : IAsyncLifetime
 {
-    private const int CoinBag = 13123, BlessedWeaponOreCommodity = 13104, TeaParty = 5000002, TeaPartySuit = 40050010;
+    private const int CoinBag = 13123, BlessedWeaponOreCommodity = 13104, Stroll = 5000005, StrollSuit = 40040030;
     private const int BlessedWeaponOre = 1200100, BlessedArmorOre = 1200102, HighDensityOridecon = 1200004, HighDensityElunium = 1200005;
     private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-f2p-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
@@ -188,11 +188,11 @@ public sealed class F2PTests : IAsyncLifetime
         Assert.Equal(0, (await Buy(alice, BlessedWeaponOreCommodity, 2)).Result);
         Assert.Equal(crystals - 1000 - 600, await Crystals(alice));
 
-        // A Fashion-tab outfit at a quarter of its price (1880 -> 450) unlocks the look.
-        var outfit = await Buy(alice, TeaParty);
+        // A Fashion-tab outfit still on Crystals, at a quarter of its price (1880 -> 450), unlocks the look.
+        var outfit = await Buy(alice, Stroll);
         Assert.Equal((0, 450), (outfit.Result, outfit.Price));
         Assert.Equal(crystals - 1000 - 600 - 450, await Crystals(alice));
-        Assert.True(await OnLoop(() => Session(alice).Wardrobe!.AllLightUpAppearances.ContainsKey(TeaPartySuit)));
+        Assert.True(await OnLoop(() => Session(alice).Wardrobe!.AllLightUpAppearances.ContainsKey(StrollSuit)));
     }
 
     [ClientDataFact]
@@ -210,10 +210,24 @@ public sealed class F2PTests : IAsyncLifetime
 
         await Gm(alice, $"!item {F2PRules.SupporterToken} 700");
         var bought = await Buy(alice, SupporterMount);
-        Assert.Equal((0, 600), (bought.Result, bought.Price));
-        Assert.Equal(100, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.SupporterToken)));
+        Assert.Equal((0, 650), (bought.Result, bought.Price));
+        Assert.Equal(50, await OnLoop(() => Service<CharacterService>().CountOf(Session(alice), F2PRules.SupporterToken)));
         Assert.Equal(crystals, await Crystals(alice));
         Assert.True(await OnLoop(() => Session(alice).Wardrobe!.AllLightUpAppearances.ContainsKey(SupporterMountLook)));
+    }
+
+    /// <summary>Owner's choice (24 Oct 2026): 70% of the Fashion tab is for Supporter Tokens only, and every kind of
+    /// appearance (outfit, mount, hairstyle, headwear, backwear) keeps at least one on Crystals.</summary>
+    [ClientDataFact]
+    public void SeventyPercentOfTheFashionTabIsForSupporterTokensOnly()
+    {
+        var data = Service<GameData>();
+        var fashion = F2PRules.Commodities.Where(c => c.Id / 100 == 50000).ToList();
+        Assert.Equal(27, fashion.Count);
+        Assert.Equal(19, fashion.Count(c => c.Payment == F2PRules.SupporterToken));
+        var crystalKinds = fashion.Where(c => c.Payment == 0)
+            .Select(c => GameData.Int(data.Row("ShopCommodityConfig", c.Id)!.Value, "_iClassID")).ToHashSet();
+        Assert.Equal(new long[] { 50201, 50202, 50203, 50204, 50207 }, crystalKinds.Order());
     }
 
     [ClientDataFact]
