@@ -333,6 +333,7 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         ["finditem"] = ("<name>", FindItem),
         ["item"] = ("<id|name> [count]", Item),
         ["mail"] = ("<title> [item count]", Mail),
+        ["mailto"] = ("<role id|name> <item id> <count> [title] (mail items to any role, online or not)", MailTo),
         ["delitem"] = ("<id> [count]", (s, a) => Op(s, OpRemoveItem, a)),
         ["zeny"] = ("<amount>", Zeny),
         ["lvl"] = ("<base> [job]", (s, a) => Op(s, OpSetLevel, a)),
@@ -468,6 +469,35 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         var mail = services.GetRequiredService<MailService>();
         string id = await mail.SendRawAsync(s.Role!.Id, title, title, goods);
         await ReplyAsync(s, $"Mail {id} delivered.");
+    }
+
+    /// <summary>
+    /// "!mailto Sunbather 1250709 70 Spirit Tower eggs": system mail with items for any role, online or not, such as a
+    /// compensation. Unlike !item and !mail it never goes to the GM's own role; the letter waits in the role's mailbox.
+    /// </summary>
+    private async Task MailTo(GameSession s, string[] args)
+    {
+        if (args.Length < 3) throw new ArgumentException("mailto <role id|name> <item id> <count> [title]");
+        int item = I(args[1]), count = I(args[2]);
+        if (count <= 0) throw new ArgumentException("count");
+        if (data.ItemName(item) is not { Length: > 0 } itemName)
+        {
+            await ReplyAsync(s, $"No item {item}.");
+            return;
+        }
+        var roles = services.GetRequiredService<Accounts.RoleStore>();
+        var role = (long.TryParse(args[0], out long id) ? await roles.GetAsync(id) : null) ?? await roles.FindByNameAsync(args[0]);
+        if (role == null)
+        {
+            await ReplyAsync(s, $"No role {args[0]}.");
+            return;
+        }
+        string title = args.Length > 3 ? string.Join(' ', args[3..]) : "A gift from the Sol RO3 team";
+        string mail = await services.GetRequiredService<MailService>().SendRawAsync(role.Id, title, title,
+            [new MailService.Attachment(item, count)]);
+        log.LogWarning("GM {Gm} mailed {Count} x {Item} ({ItemName}) to {Role} ({RoleId}), mail {Mail}",
+            s.Role?.Name, count, item, itemName, role.Name, role.Id, mail);
+        await ReplyAsync(s, $"Mail {mail} with {count} x {itemName} delivered to {role.Name} ({role.Id}).");
     }
 
     private Task Zeny(GameSession s, string[] args)
