@@ -108,6 +108,14 @@ public sealed class RoleStore(AccountStore accounts)
     public Role? FindByName(string name) => _accounts.ReadSync<List<Role>>(new RoleProjectionRead(RoleProjectionKind.ByName, text: name)).FirstOrDefault();
     public async Task<Role?> FindByNameAsync(string name) => (await _accounts.ReadAsync<List<Role>>(new RoleProjectionRead(RoleProjectionKind.ByName, text: name))).FirstOrDefault();
 
+    /// <summary>Every live role (identity columns only), by id: the GM gift tool's recipients.</summary>
+    public Task<List<Role>> AllAsync() => _accounts.ReadAsync<List<Role>>(new RoleProjectionRead(RoleProjectionKind.All));
+
+    /// <summary>A server_state value (null when unset), and its write: small realm-wide settings such as event windows.</summary>
+    public Task<string?> ServerStateAsync(string key) => _accounts.ReadAsync<string?>(new SeasonStateReadPlan(key));
+    public string? ServerState(string key) => _accounts.ReadSync<string?>(new SeasonStateReadPlan(key));
+    public Task SetServerStateAsync(string key, string value) => _accounts.WriteLegacyAsync<int>(new SeasonStateWritePlan(key, value));
+
     /// <summary>
     /// Deletes a role of the account (the client has no delete: its role screen button is hidden and unbound). The row
     /// stays for support; the name is released by suffixing the id. Returns false when the role is not the account's.

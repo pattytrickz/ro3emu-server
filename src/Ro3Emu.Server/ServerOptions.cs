@@ -219,6 +219,19 @@ public sealed class ServerOptions
     public int CardDropRolls { get; set; } = 1;
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): timed rate windows (Bonus Sunday, a holiday event), on top of
+    /// KillExpPercent and CardDropRolls. GMs add more while the server runs ("!rates", POST /ro3emu/event); those are kept
+    /// in the database. Empty: no event rates (Game/EventService.cs, docs/guide/events.md).
+    /// </summary>
+    public EventRateWindow[] EventRates { get; set; } = [];
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a mail every role gets once, at its first login inside the window
+    /// (an advent gift, a holiday present). GMs add more while the server runs ("!logingift"). Empty: none.
+    /// </summary>
+    public LoginGift[] LoginGifts { get; set; } = [];
+
+    /// <summary>
     /// Accounts (exact, or "prefix*") whose roles the public player count (/ro3emu/status, read by the website and the
     /// launcher) leaves out, so the AI players ("aibot*") do not show as people online. The admin's /ro3emu/online and
     /// /ro3emu/metrics still count every session. Empty: every role counts.
@@ -407,6 +420,37 @@ public sealed class PassOptions
 
     /// <summary>Pass EXP from play: challenges, daily activity, monsters, dungeons, MVPs and story (NewActivityService.PassPlay).</summary>
     public bool Play { get; set; }
+}
+
+/// <summary>
+/// One <see cref="ServerOptions.EventRates"/> window (UTC). Overlapping windows don't stack: each rate takes the highest.
+/// </summary>
+public sealed class EventRateWindow
+{
+    /// <summary>Shown on the marquee when the window opens and to players who log in while it runs.</summary>
+    public string Name { get; set; } = "Bonus event";
+    public DateTimeOffset Start { get; set; }
+    public DateTimeOffset End { get; set; }
+    /// <summary>Kill EXP in percent of the house rate (200 = twice KillExpPercent).</summary>
+    public int ExpPercent { get; set; } = 100;
+    /// <summary>A kill's loot tables roll this many times (1-5); the extra rolls keep their items, never their EXP.</summary>
+    public int DropRolls { get; set; } = 1;
+    /// <summary>Card chance times this (1-5), on top of CardDropRolls.</summary>
+    public int CardRolls { get; set; } = 1;
+}
+
+/// <summary>One <see cref="ServerOptions.LoginGifts"/> mail (UTC window).</summary>
+public sealed class LoginGift
+{
+    /// <summary>Unique and never reused: a role that claimed this id never gets it again.</summary>
+    public string Id { get; set; } = "";
+    public DateTimeOffset Start { get; set; }
+    public DateTimeOffset End { get; set; }
+    public int Item { get; set; }
+    public int Count { get; set; } = 1;
+    public string Title { get; set; } = "A gift from the Sol RO3 team";
+    /// <summary>Roles below this Base level wait for it until they reach it inside the window.</summary>
+    public int MinLevel { get; set; }
 }
 
 /// <summary>House rule: who may play. Existing accounts keep logging in unless blocked.</summary>

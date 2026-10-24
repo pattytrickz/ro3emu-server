@@ -28,6 +28,7 @@ public sealed class RewardService
     private Dictionary<int, long>? _expCorrection;
     private readonly DropAttenuation _attenuation;
     private readonly int _killExpPercent, _cardDropRolls;
+    private readonly EventService? _events;
 
     /// <summary>Field AFK selects the enhanced _iDrop table only for qualified ordinary field kills.
     /// Other kills use environment 0, preserving ordinary rewards (localization 10960000077; mapping inferred).</summary>
@@ -41,8 +42,9 @@ public sealed class RewardService
     internal Action<GameSession, MonsterUnit, RewardSettlement>? StageHuntKill { get; set; }
 
     public RewardService(CombatService combat, CharacterService character, TeamService teams, GameData data, ILogger<RewardService> log,
-        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
+        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null, EventService? events = null)
     {
+        _events = events;
         _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
         _killExpPercent = Math.Max(1, options?.Value.KillExpPercent ?? 100);
         _cardDropRolls = Math.Clamp(options?.Value.CardDropRolls ?? 1, 1, 10);
@@ -178,7 +180,8 @@ public sealed class RewardService
                 }
             }
         }
-        RollWithExtraCards(drops, Roll, _character.IsCard, _cardDropRolls);
+        var (eventExp, eventDrops, eventCards) = _events?.Current ?? (100, 1, 1);
+        RollWithExtraCards(drops, Roll, _character.IsCard, Math.Min(10, _cardDropRolls * eventCards), eventDrops);
 
         if (ExtraKillDrops != null) drops.AddRange(ExtraKillDrops(player, monster));
         long baseExp = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
@@ -188,7 +191,7 @@ public sealed class RewardService
             long gap = player.Progress!.Level - monster.Template.Level;
             baseExp = baseExp * Correction((int)Math.Clamp(gap, -200, 200)) / 10000;
             baseExp = Math.Max(1, baseExp * _teams.ExpBonus(player) / 10000);
-            baseExp = HouseExp(baseExp, _killExpPercent);
+            baseExp = HouseExp(baseExp, _killExpPercent * eventExp / 100);
         }
         // BaseExpAddConfig catch-up below the server level raises Base EXP only (CharacterService.LevelRules).
         return (items, _character.WithPursueBonus(player.Progress!.Level, baseExp), baseExp);
@@ -198,18 +201,19 @@ public sealed class RewardService
     /// (ResolveKill), so it scales both; a kill that gave EXP still gives at least 1.</summary>
     internal static long HouseExp(long exp, int percent) => exp > 0 ? Math.Max(1, exp * percent / 100) : exp;
 
-    /// <summary>Sol RO3 house rule (ServerOptions.CardDropRolls): the drop tables roll <paramref name="rolls"/> times, the
-    /// first in full and the others for cards only, so a card is about that many times as likely and every other drop
-    /// and the EXP keep the data's odds.</summary>
+    /// <summary>Sol RO3 house rules (ServerOptions.CardDropRolls, EventRates): the drop tables roll once in full, then
+    /// <paramref name="dropRolls"/> - 1 more times keeping every item but no EXP (event loot), then up to
+    /// <paramref name="cardRolls"/> rolls in all keeping only cards, so a card is about max(cardRolls, dropRolls) times as
+    /// likely and the EXP keeps the data's odds.</summary>
     internal static void RollWithExtraCards(List<(int Entry, int Count)> drops, Action<List<(int Entry, int Count)>> roll,
-        Func<int, bool> isCard, int rolls)
+        Func<int, bool> isCard, int cardRolls, int dropRolls = 1)
     {
         roll(drops);
-        for (int extra = 1; extra < rolls; extra++)
+        for (int extra = 1; extra < Math.Max(cardRolls, dropRolls); extra++)
         {
             var again = new List<(int Entry, int Count)>();
             roll(again);
-            drops.AddRange(again.Where(d => isCard(d.Entry)));
+            drops.AddRange(again.Where(d => extra < dropRolls ? d.Entry is not (BaseExpItem or JobExpItem) : isCard(d.Entry)));
         }
     }
 

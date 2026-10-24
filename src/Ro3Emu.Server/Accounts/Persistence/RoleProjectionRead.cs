@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 namespace Ro3Emu.Server.Accounts.Persistence;
 
 /// <summary>Narrow detached role projections for micro auth/social; role mutations remain transitional legacy.</summary>
-internal enum RoleProjectionKind { ForAccount, ById, ByName, Wardrobe }
+internal enum RoleProjectionKind { ForAccount, ById, ByName, Wardrobe, All }
 
 internal sealed class RoleProjectionRead(RoleProjectionKind kind, string? text = null, long id = 0) : DbReadPlan
 {
@@ -22,10 +22,13 @@ internal sealed class RoleProjectionRead(RoleProjectionKind kind, string? text =
             RoleProjectionKind.ForAccount => "SELECT * FROM role WHERE account=$p AND deleted_time=0 ORDER BY last_login_time DESC",
             RoleProjectionKind.ById => "SELECT * FROM role WHERE id=$p AND deleted_time=0",
             RoleProjectionKind.ByName => "SELECT * FROM role WHERE name=$p COLLATE NOCASE AND deleted_time=0",
+            // Every live role without its blobs: the GM gift tool's recipient list.
+            RoleProjectionKind.All => "SELECT id,account,area,name,sex,career,level,hair,create_time,last_login_time,scene_entry,"
+                + "pos_x,pos_y,pos_z,face FROM role WHERE deleted_time=0 ORDER BY id",
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
         using var cmd = DbSql.Command(db, tx, sql);
-        cmd.Parameters.AddWithValue("$p", kind == RoleProjectionKind.ById ? id : text!);
+        if (kind != RoleProjectionKind.All) cmd.Parameters.AddWithValue("$p", kind == RoleProjectionKind.ById ? id : text!);
         var roles = new List<Role>();
         using var rows = cmd.ExecuteReader();
         while (rows.Read())

@@ -64,6 +64,7 @@ public static class ServerHost
         builder.Services.AddSingleton<BuffService>();
         builder.Services.AddSingleton<CombatService>();
         builder.Services.AddSingleton<RewardService>();
+        builder.Services.AddSingleton<EventService>();
         builder.Services.AddSingleton<TaskService>();
         builder.Services.AddSingleton<AwardService>();
         builder.Services.AddSingleton<DailyActivityService>();
@@ -564,6 +565,7 @@ internal sealed class GameLoopTickers(IServiceProvider services) : IHostedServic
         Add<GuildLeagueService>();
         Add<WorldCoreService>();
         Add<EmojiService>();
+        Add<EventService>();
         Add<AchievementService>();
         Add<FirstHeartService>();
         Add<DungeonMatchService>();

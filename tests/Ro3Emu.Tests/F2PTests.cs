@@ -227,7 +227,8 @@ public sealed class F2PTests : IAsyncLifetime
         Assert.Equal(19, fashion.Count(c => c.Payment == F2PRules.SupporterToken));
         var crystalKinds = fashion.Where(c => c.Payment == 0)
             .Select(c => GameData.Int(data.Row("ShopCommodityConfig", c.Id)!.Value, "_iClassID")).ToHashSet();
-        Assert.Equal(new long[] { 50201, 50202, 50203, 50204, 50207 }, crystalKinds.Order());
+        long[] kinds = [50201, 50202, 50203, 50204, 50207];
+        Assert.Equal(kinds, crystalKinds.Order());
     }
 
     [ClientDataFact]

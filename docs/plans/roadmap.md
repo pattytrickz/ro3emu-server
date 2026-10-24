@@ -26,7 +26,7 @@ Rules so the lanes don't collide:
 | # | Item | Effort | Done when |
 |---|---|---|---|
 | 0.1 | **Baseline numbers.** SQL against the realm DB: the level histogram (real players vs `aibot*`), D1/D7 return for every account since launch, job spread, peak concurrent real players, total Zeny and Crystals | S | Numbers posted in `#staff-chat`. They set the first cap phase (it must be ≥ the top real player) |
-| 0.2 | **Owner decisions** from [strategy §6](balance-retention-strategy.md#6-decisions-the-owner-needs-to-make): time to 99, cap schedule, Bonus Time budget, match sizes, seasons, bot policy | S | Decisions written into this file |
+| 0.2 | ~~**Owner decisions**~~ made 24 Oct, see [Decisions](#decisions-24-oct-2026) below | S | Done |
 | 0.3 | Review and merge the open player-report PRs: ~~[#48](https://github.com/pattytrickz/ro3emu-server/pull/48), [#50](https://github.com/pattytrickz/ro3emu-server/pull/50), [#51](https://github.com/pattytrickz/ro3emu-server/pull/51), [#52](https://github.com/pattytrickz/ro3emu-server/pull/52), [#53](https://github.com/pattytrickz/ro3emu-server/pull/53), [#54](https://github.com/pattytrickz/ro3emu-server/pull/54)~~ all merged 22 Oct | S | Done |
 | 0.4 | Check that the **100 z instant potions** don't trivialise MVPs and PvP (their cooldown vs. MVP damage) | S | Kept, repriced or limited |
 | 0.5 | **🎃 Night of the Pumpkin** (30 Oct – 8 Nov) with today's GM tools ([events §4](events-plan.md#4-seasonal-calendar-season-1-nov-2026--mar-2027)) | S | Announced by Mon 26 Oct |
@@ -35,6 +35,23 @@ Rules so the lanes don't collide:
 
 **Exit:** we know the real population and pace, the owner has signed off on the pacing plan, and the first event is
 live.
+
+---
+
+## Decisions (24 Oct 2026)
+
+Baseline the same day (real players only): the top real players were Base 51–56 after one week; 41 accounts played
+in the last 24 hours, 68 in 3 days and 136 in the week; 37 % came back on day 3 or later; 5 guilds. The 1.1.0 update
+had already raised kill EXP to ×1.5 (`KillExpPercent=150`) and the card chance to ×3 (`CardDropRolls=3`), and the
+upstream sync (1.10) shipped with it.
+
+| Decision | Choice |
+|---|---|
+| Pacing | **Phased level cap** on our own published schedule: 70 now (above every real player), 80 late Nov, 90 early Jan, 99 mid Feb |
+| Bonus Time above Base 50 | **Banked daily budget ×2**: unlimited below 50; above it twice RO3's daily budget, banking up to 3 days |
+| Small-population sizes | **Lowered**: Survivor Battle 20–40 entrants, Dragon Island 10–20, Guild League minimum 10, dungeon minimum party 3 |
+| Bots | 20 AI players, joining real players within ±15 levels; never counted in the public player count |
+| Build order | Event rates and gifts (for Night of the Pumpkin), pacing, match sizes and party bonus, stats report |
 
 ---
 
