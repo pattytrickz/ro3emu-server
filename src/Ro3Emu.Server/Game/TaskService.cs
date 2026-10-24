@@ -653,19 +653,22 @@ public sealed partial class TaskService
         return accepted + AcceptGrowthTitle(session) + AcceptGrowthClass(session) + AcceptActivityTasks(session);
     }
 
-    private const int TaskTypeSide = 2, TaskTypeGuide = 3; // enum_TaskType
+    private const int TaskTypeMain = 1, TaskTypeSide = 2, TaskTypeGuide = 3; // enum_TaskType
     private List<long>? _rootlessGuides;
 
     /// <summary>
     /// Side and guide quests with no _kPreTask and Auto accept open on their condition alone (TaskConfig 102000xx:
     /// "Join a guild" at Base 21, "Learn About Auto-Battle" at 31, "Clear a Five-Player Dungeon" at 36...); with no
-    /// pre-task, no delivery ever reaches them as a follow-up. Only quests whose every target this server tracks are
-    /// offered, so none sits unfinishable in the log. Other rootless Auto rows (pass, achievement, guild, party and
-    /// event quests) belong to their own services and stay theirs.
+    /// pre-task, no delivery ever reaches them as a follow-up. So does a rootless main quest with a condition: 19991050
+    /// "Third Class Advancement" (Base 50, talk to Alphonse in Prontera, who opens the change-job panel) starts the third
+    /// job line; the main chain itself only says "Reach Lv. 50 to Experience the Third Job". The conditionless rootless
+    /// main row is <see cref="FirstTask"/>. Only quests whose every target this server tracks are offered, so none sits
+    /// unfinishable in the log. Other rootless Auto rows (pass, achievement, guild, party and event quests) belong to
+    /// their own services and stay theirs.
     /// </summary>
     private List<long> RootlessGuides() => _rootlessGuides ??= Defs().Values
-        .Where(d => d.Type is TaskTypeSide or TaskTypeGuide && d.Pre.Length == 0 && d.Accept == ReceiveAuto
-            && d.Targets.Length > 0 && d.Targets.All(Supported))
+        .Where(d => (d.Type is TaskTypeSide or TaskTypeGuide || d.Type == TaskTypeMain && d.Condition != 0)
+            && d.Pre.Length == 0 && d.Accept == ReceiveAuto && d.Targets.Length > 0 && d.Targets.All(Supported))
         .Select(d => d.Id).OrderBy(id => id).ToList();
 
     private bool Ready(GameSession session, TaskDef def) =>

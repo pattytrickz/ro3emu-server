@@ -126,6 +126,40 @@ public sealed class QuestEngineTests : IAsyncLifetime
         Console.WriteLine("Side guides offered at Base 36: " + string.Join(", ", offered));
     }
 
+    /// <summary>
+    /// #help "I'm 53/40 and I can't change job": 19991050 "Third Class Advancement" is a main quest with no _kPreTask
+    /// (Base 50: talk to Alphonse, who opens the change-job panel), so no delivery ever offered it and the third job
+    /// had no way in. It opens at Base 50; its follow-up 19991060 completes on the rank-5 job change.
+    /// </summary>
+    [ClientDataFact]
+    public async Task TheThirdJobQuestOpensAtBaseFiftyAndCompletesOnTheThirdJob()
+    {
+        const long ThirdClass = 19991050, ThirdJobChange = 19991060;
+        const int LordKnight = 1300, RuneKnight = 1400;
+        await using var bot = await InWorld();
+        Task<bool> Has(long id) => Read(s => s.Tasks!.Infos.ContainsKey(id));
+        async Task Eventually(Func<Task<bool>> condition, string what)
+        {
+            for (int i = 0; i < 100 && !await condition(); i++) await Task.Delay(50);
+            Assert.True(await condition(), what);
+        }
+
+        await Gm($"!job {LordKnight}");
+        await Gm("!lvl 49 40");
+        await Refresh();
+        Assert.False(await Has(ThirdClass));
+        await Gm("!lvl 50 40");
+        await Eventually(() => Has(ThirdClass), "the third job quest was not offered at Base 50");
+
+        await Gm($"!quest done {ThirdClass}");
+        await Eventually(() => Has(ThirdJobChange), "the third job change step did not follow");
+        Assert.Equal(TaskState.Running, (await State(ThirdJobChange)).Status);
+        await bot.SendGameAsync(CharacterService.PlayerTransformJob, new PlayerTransformJobReq { JobId = RuneKnight });
+        Assert.Equal(0, (await Next(bot, CharacterService.PlayerTransformJob, PlayerTransformJobResp.Parser)).Result);
+        await Eventually(async () => (await State(ThirdJobChange)).Status is TaskState.Finish or TaskState.Delivery,
+            "the third job change did not complete its step");
+    }
+
     [ClientDataFact]
     public async Task NoviceTrialGrantsExactlySevenExpAndReplaySurvivesRelog()
     {
