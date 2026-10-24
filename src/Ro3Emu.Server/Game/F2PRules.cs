@@ -70,23 +70,30 @@ namespace Ro3Emu.Shared
             new Commodity(13510, 15, None, 0), new Commodity(13511, 15, None, 0), new Commodity(13512, 15, None, 0),
             new Commodity(13513, 15, None, 0),                                                // stickers (50)
 
-            // Fashion tab (shop 502, appearances): about a quarter of the original.
-            new Commodity(5000002, 450, Lifetime, 0), new Commodity(5000003, 450, Lifetime, 0), new Commodity(5000004, 450, Lifetime, 0),
-            new Commodity(5000005, 450, Lifetime, 0), new Commodity(5000006, 450, Lifetime, 0),  // outfit sets (1880)
-            new Commodity(5000007, 160, Lifetime, 0),                                            // outfit set (680)
-            // Supporter cosmetics: the four 2380 mounts and the character effect, for Supporter Tokens only. Supporters earn
-            // tokens 1:1 with their Crystals (server AccessList "supporter"), so the prices are on the Crystal scale.
-            new Commodity(5000008, 600, Lifetime, 0, SupporterToken), new Commodity(5000012, 600, Lifetime, 0, SupporterToken),
-            new Commodity(5000013, 600, Lifetime, 0, SupporterToken), new Commodity(5000014, 600, Lifetime, 0, SupporterToken),
-            new Commodity(5000037, 320, Lifetime, 0, SupporterToken),
-            new Commodity(5000009, 500, Lifetime, 0), new Commodity(5000010, 500, Lifetime, 0), new Commodity(5000011, 500, Lifetime, 0), // mounts (1980)
-            new Commodity(5000038, 250, Lifetime, 0),                                            // mount (980)
-            new Commodity(5000015, 120, Lifetime, 0),                                            // hairstyle (480)
-            new Commodity(5000017, 320, Lifetime, 0), new Commodity(5000018, 320, Lifetime, 0),  // headwear (1280)
-            new Commodity(5000020, 120, Lifetime, 0), new Commodity(5000024, 120, Lifetime, 0), new Commodity(5000025, 120, Lifetime, 0), // headwear (480)
-            new Commodity(5000030, 450, Lifetime, 0), new Commodity(5000031, 450, Lifetime, 0),  // backwear (1880)
-            new Commodity(5000032, 160, Lifetime, 0), new Commodity(5000033, 160, Lifetime, 0), new Commodity(5000034, 160, Lifetime, 0),
-            new Commodity(5000035, 160, Lifetime, 0),                                            // backwear (680)
+            // Fashion tab (shop 502, appearances). Owner's choice (24 Oct 2026): 19 of its 27 appearances (70%) are Supporter
+            // cosmetics, for Supporter Tokens only; at least one of each kind stays on Crystals, about a quarter of the
+            // original. Supporters earn tokens 1:1 with their Crystals (server AccessList "supporter"), so token prices are on
+            // the Crystal scale: rarer (_iQuality 5) and higher _iFashionScore appearances cost more. Appearances bought
+            // with Crystals before stay owned.
+            // Crystals:
+            new Commodity(5000005, 450, Lifetime, 0),                                            // outfit Afternoon Stroll (1880)
+            new Commodity(5000007, 160, Lifetime, 0),                                            // outfit Master of the Game (680)
+            new Commodity(5000038, 250, Lifetime, 0),                                            // mount Big Poring (980)
+            new Commodity(5000015, 120, Lifetime, 0),                                            // hairstyle Strawberry Macaron (480)
+            new Commodity(5000020, 120, Lifetime, 0), new Commodity(5000024, 120, Lifetime, 0), // headwear Sage's Stone Helm, Black Cat Ears (480)
+            new Commodity(5000032, 160, Lifetime, 0), new Commodity(5000033, 160, Lifetime, 0), // backwear Bonnie's Afternoon, Fluffy Tail (680)
+            // Supporter Tokens:
+            new Commodity(5000002, 500, Lifetime, 0, SupporterToken), new Commodity(5000003, 500, Lifetime, 0, SupporterToken),
+            new Commodity(5000004, 500, Lifetime, 0, SupporterToken), new Commodity(5000006, 500, Lifetime, 0, SupporterToken), // outfits, fashion score 500
+            new Commodity(5000008, 650, Lifetime, 0, SupporterToken), new Commodity(5000009, 650, Lifetime, 0, SupporterToken),
+            new Commodity(5000013, 650, Lifetime, 0, SupporterToken),                            // mounts, fashion score 500
+            new Commodity(5000010, 550, Lifetime, 0, SupporterToken), new Commodity(5000011, 550, Lifetime, 0, SupporterToken),
+            new Commodity(5000012, 550, Lifetime, 0, SupporterToken), new Commodity(5000014, 550, Lifetime, 0, SupporterToken), // mounts, score 200
+            new Commodity(5000017, 380, Lifetime, 0, SupporterToken), new Commodity(5000018, 380, Lifetime, 0, SupporterToken), // headwear, quality 5
+            new Commodity(5000025, 150, Lifetime, 0, SupporterToken),                            // headwear, quality 4
+            new Commodity(5000030, 520, Lifetime, 0, SupporterToken), new Commodity(5000031, 520, Lifetime, 0, SupporterToken), // backwear, quality 5
+            new Commodity(5000034, 190, Lifetime, 0, SupporterToken), new Commodity(5000035, 190, Lifetime, 0, SupporterToken), // backwear, quality 4
+            new Commodity(5000037, 320, Lifetime, 0, SupporterToken),                            // character effect Sweet Waltz
         };
 
         /// <summary>The Fashion tab's ShopConfig rows (shop 502): their currency bar also shows Supporter Tokens.</summary>
