@@ -29,6 +29,7 @@ namespace Ro3Emu.ClientHooks
     /// before any scene needs them (MapModules).</item>
     /// <item>Clicking a quest with a kill objective starts the client's Auto Battle on its monsters once the player
     /// arrives, and stops it when the kills are done, as the client already does for Ring Tasks (QuestAutoBattle).</item>
+    /// <item>Profile cards without stickers parse (LC_DAL_Personal.ParsePersonalInfo walks a nil list; PersonalCards).</item>
     /// </list>
     /// </summary>
     public static class LuaPatches
@@ -100,6 +101,7 @@ namespace Ro3Emu.ClientHooks
                     global.Obf_RuA<Obf_R.Obf_ff>("LC_SeasonHelper") ?? Module(manager, global, "lc_seasonhelper"),
                     global.Obf_RuA<Obf_R.Obf_ff>("LC_SeasonExplorationHelper") ?? Module(manager, global, "lc_seasonexplorationhelper"));
                 QuestAutoBattle.Install(global);
+                PersonalCards.Install((Obf_R.Obf_Cf)env, Module(manager, global, "lc_dal_personal"));
                 Debug.Log("[Ro3Emu.LuaPatches] lc_itemshowfunc: " + added + " card show-func method(s) added; stall name limit "
                     + (param != null ? StallNameMaxLength.ToString() : "not set (publicparamconfig missing)"));
             }
@@ -227,7 +229,11 @@ namespace Ro3Emu.ClientHooks
 
         internal static long ToLong(object value) => value switch
         {
-            long l => l, int i => i, double d => (long)d, float f => (long)f, _ => long.MinValue,
+            long l => l,
+            int i => i,
+            double d => (long)d,
+            float f => (long)f,
+            _ => long.MinValue,
         };
 
         private static readonly System.Collections.Generic.HashSet<string> Reported = new System.Collections.Generic.HashSet<string>();

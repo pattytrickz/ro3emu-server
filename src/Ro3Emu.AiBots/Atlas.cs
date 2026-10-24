@@ -31,6 +31,9 @@ public sealed class Atlas
 
     public MapWorld? Map(long sceneEntry) => _world.Map(sceneEntry);
 
+    /// <summary>A dungeon scene (DungeonConfig), such as a Phantom Realm, rather than a field or town map.</summary>
+    public bool IsDungeon(long sceneEntry) => _data.Row("DungeonConfig", sceneEntry) != null;
+
     public string MapName(long sceneEntry)
     {
         string name = _data.MapName(sceneEntry);

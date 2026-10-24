@@ -16,32 +16,44 @@ namespace Ro3Emu.Server.Game;
 /// and keeps the personal purchase counters and favourites in 5024 DBShopInfo. Fashion-tab commodities (shop type 7)
 /// carry _iAppearanceId instead of _iItemId: WardrobeService.BuyFromShopLockedAsync unlocks the look in the same commit.
 /// </summary>
-public sealed class ShopService
+public sealed class ShopService(GameData data, CharacterService character, FunctionService functions, RoleStore roles, SeasonService seasons,
+    WardrobeService wardrobe, AwardService awards, TimeProvider clock, SessionRegistry sessions, GameLoop loop,
+    ILogger<ShopService> log) : IGameTicker
 {
     public const uint ShopSync = 5024;
     public const uint BuyCommodity = 82332, CommodityCollect = 82333, CommodityPresent = 82335, CommodityGetInfo = 82338,
         BatchBuyCommodity = 82340;
 
-    private readonly GameData data;
-    private readonly CharacterService character;
-    private readonly FunctionService functions;
-    private readonly RoleStore roles;
-    private readonly SeasonService seasons;
-    private readonly WardrobeService wardrobe;
-    private readonly AwardService awards;
-    private readonly ILogger<ShopService> log;
+    private readonly GameData _data = data;
+    private readonly CharacterService _character = character;
+    private readonly FunctionService _functions = functions;
+    private readonly RoleStore _roles = roles;
+    private readonly SeasonService _seasons = seasons;
+    private readonly WardrobeService _wardrobe = wardrobe;
+    private readonly AwardService _awards = awards;
+    private readonly TimeProvider _clock = clock;
+    private readonly SessionRegistry _sessions = sessions;
+    private readonly GameLoop _loop = loop;
+    private readonly ILogger<ShopService> _log = log;
+    private TimeSpan _lastTick;
+    private DateTime _gameDay;
 
-    public ShopService(GameData data, CharacterService character, FunctionService functions, RoleStore roles, SeasonService seasons,
-        WardrobeService wardrobe, AwardService awards, ILogger<ShopService> log)
+    /// <summary>
+    /// At the 05:00 game-day rollover the online roles get 5024 again: their daily (and on Monday weekly, on the 1st
+    /// monthly) counters now count as zero, and the client only learns that from the sync (LC_DAL_Shop keeps the map).
+    /// </summary>
+    public void Tick(GameTime time)
     {
-        this.data = data;
-        this.character = character;
-        this.functions = functions;
-        this.roles = roles;
-        this.seasons = seasons;
-        this.wardrobe = wardrobe;
-        this.awards = awards;
-        this.log = log;
+        if (time.Now - _lastTick < TimeSpan.FromSeconds(1)) return;
+        _lastTick = time.Now;
+        var day = DailyActivityService.GameDay(_clock.GetLocalNow().DateTime);
+        if (day == _gameDay) return;
+        bool first = _gameDay == default;
+        _gameDay = day;
+        if (first) return;
+        foreach (var session in _sessions.All())
+            if (session.Role != null && session.Shop is { Bought.Count: > 0 })
+                _loop.PostOwned(session, () => session.Shop != null && session.Role != null ? SyncAsync(session) : Task.CompletedTask);
     }
 
     /// <summary>Saved per role: purchase counters with the period they were counted in, and favourites.</summary>
@@ -61,13 +73,13 @@ public sealed class ShopService
 
     public async Task LoginAsync(GameSession session)
     {
-        var saved = roles.LoadShop(session.Role!.Id);
+        var saved = _roles.LoadShop(session.Role!.Id);
         session.Shop = saved != null ? JsonSerializer.Deserialize<ShopState>(saved) ?? new ShopState() : new ShopState();
         // Before explicit rollover existed all seasonal counters used the empty lifetime key in season 1.
         // Preserve that purchase history in cycle 1; a later cycle naturally resets its seasonal allowance.
         bool migrated = false;
         foreach (var (id, counter) in session.Shop.Bought)
-            if (counter.Period == "" && data.Row("ShopCommodityConfig", id) is { } row && Family(row) == 5)
+            if (counter.Period == "" && _data.Row("ShopCommodityConfig", id) is { } row && Family(row) == 5)
             { counter.Period = "S1"; migrated = true; }
         if (migrated) Save(session);
         await SyncAsync(session);
@@ -82,7 +94,7 @@ public sealed class ShopService
         return CharacterService.SyncAsync(session, ShopSync, info);
     }
 
-    private void Save(GameSession session) => roles.SaveShop(session.Role!.Id, JsonSerializer.SerializeToUtf8Bytes(session.Shop));
+    private void Save(GameSession session) => _roles.SaveShop(session.Role!.Id, JsonSerializer.SerializeToUtf8Bytes(session.Shop));
 
     // ---- buying ----
 
@@ -115,11 +127,11 @@ public sealed class ShopService
     private async Task<(int Result, int Price, int BuyTimes)> BuyOneAsync(GameSession session, int commodityId, int count, int quote)
     {
         using var guard = await CharacterService.Lock(session);
-        var row = data.Row("ShopCommodityConfig", commodityId);
+        var row = _data.Row("ShopCommodityConfig", commodityId);
         Fail? error = row is not { } c ? new(ErrorCodes.ShopNoConfig, "unknown commodity")
             : count < 1 ? new(ErrorCodes.Parameter, "bad count")
             : Unavailable(session, c);
-        int unit = row is { } r ? UnitPrice(r) : 0;
+        int unit = row is { } r ? UnitPrice(session, r) : 0;
         int bought = row is { } r2 ? Current(session, commodityId, session.Shop!.Bought.GetValueOrDefault(commodityId)) : 0;
         if (error == null && GameData.Int(row!.Value, "_iPurchaseNum") is var limit and > 0 && (long)bought + count > limit) error = new(ErrorCodes.PurchaseLimit, $"limit {bought}/{limit}");
         if (error == null && (long)bought + count > int.MaxValue) error = new(ErrorCodes.Parameter, "counter overflow");
@@ -133,16 +145,19 @@ public sealed class ShopService
             next.Bought[commodityId] = new Counter { Count = bought + 1, Period = Period(Family(row.Value), session) };
             long awardGroup = GameData.Int(row.Value, "_iAppearanceAwardId");
             AwardPlan? bonus = null;
-            try { bonus = awards.Resolve(session, awardGroup, (int)(session.SeasonState?.PlayBookId ?? seasons.PlayBook)); }
+            try { bonus = _awards.Resolve(session, awardGroup, (int)(session.SeasonState?.PlayBookId ?? _seasons.PlayBook)); }
             catch (Exception e) when (e is AwardResolutionException or OverflowException)
             { error = new(ErrorCodes.ShopRewardMissing, $"award {awardGroup}: {e.Message}"); }
             if (bonus != null)
             {
-                int code = await wardrobe.BuyFromShopLockedAsync(session, appearance, Parts(row.Value), cost, bonus,
+                int code = await _wardrobe.BuyFromShopLockedAsync(session, appearance, Parts(row.Value), cost, bonus,
                     persistShop: tx => tx.RoleBlob(session.Role!.Id, "shop", JsonSerializer.SerializeToUtf8Bytes(next)),
                     committedShop: () => session.Shop = next,
-                    shopOutcome: new { Commodity = commodityId, Count = 1, Unit = unit, Payment = currency, Appearance = appearance,
-                        Before = bought, Counter = next.Bought[commodityId] });
+                    shopOutcome: new
+                    {
+                        Commodity = commodityId, Count = 1, Unit = unit, Payment = currency, Appearance = appearance,
+                        Before = bought, Counter = next.Bought[commodityId]
+                    });
                 if (code != 0) error = new(code, $"appearance {appearance}");
             }
         }
@@ -156,21 +171,24 @@ public sealed class ShopService
                 var next = Copy(session.Shop!);
                 next.Bought[commodityId] = new Counter { Count = bought + count, Period = Period(Family(row.Value), session) };
                 var economy = NpcPurchase(session, row.Value, commodityId, count, unit, currency, entry,
-                    perUnit, bought, next.Bought[commodityId]) ?? character.FamilyEconomy(session, "cd13a/shop-buy",
-                        cost, [(entry, perUnit * count)], new { Commodity = commodityId, Count = count, Unit = unit,
-                            Payment = currency, Goods = entry, Before = bought, Counter = next.Bought[commodityId] });
+                    perUnit, bought, next.Bought[commodityId]) ?? _character.FamilyEconomy(session, "cd13a/shop-buy",
+                        cost, [(entry, perUnit * count)], new
+                        {
+                            Commodity = commodityId, Count = count, Unit = unit,
+                            Payment = currency, Goods = entry, Before = bought, Counter = next.Bought[commodityId]
+                        });
                 // The new-cycle allowance and its payment must commit together; a failed save cannot grant a free retry.
-                if (await character.ExchangeLockedAsync(session, cost, [(entry, perUnit * count)],
+                if (await _character.ExchangeLockedAsync(session, cost, [(entry, perUnit * count)],
                     persist: tx =>
                     {
                         tx.RoleBlob(session.Role!.Id, "shop", JsonSerializer.SerializeToUtf8Bytes(next));
                         tx.WithEconomy(economy);
                     },
                     committed: () => session.Shop = next, asyncCommit: true) == null)
-                    error = new(character.ShortageOf(session, cost), "payment short");
+                    error = new(_character.ShortageOf(session, cost), "payment short");
             }
         }
-        log.LogInformation("{Name} buys {Count}x commodity {Id} at {Unit} (quote {Quote}): {Result}", session.Role!.Name, count, commodityId, unit, quote, error?.Why ?? "ok");
+        _log.LogInformation("{Name} buys {Count}x commodity {Id} at {Unit} (quote {Quote}): {Result}", session.Role!.Name, count, commodityId, unit, quote, error?.Why ?? "ok");
         if (error is { } fail) return (fail.Code, unit, bought);
 
         return (0, unit, session.Shop!.Bought[commodityId].Count);
@@ -199,7 +217,7 @@ public sealed class ShopService
     /// </summary>
     public async Task RefusePresentAsync(GameSession session, CommodityPresentReq req)
     {
-        log.LogInformation("{Name} tries to gift commodity {Id} to {Target}: refused, gifting is not implemented",
+        _log.LogInformation("{Name} tries to gift commodity {Id} to {Target}: refused, gifting is not implemented",
             session.Role!.Name, req.BuyReq?.CommodityId ?? 0, req.TargetId);
         await session.SendGameAsync(CommodityPresent, new CommodityPresentResp
         {
@@ -217,17 +235,23 @@ public sealed class ShopService
         int unit, int payment, int entry, int perUnit, int priorCount, Counter next)
     {
         long classId = GameData.Int(row, "_iClassID");
-        var shop = data.Table("ShopConfig").Values.FirstOrDefault(s => GameData.Int(s, "_iClassID") == classId);
+        var shop = _data.Table("ShopConfig").Values.FirstOrDefault(s => GameData.Int(s, "_iClassID") == classId);
         if (shop.ValueKind != JsonValueKind.Object || GameData.Int(shop, "_iShopType") != 3) return null;
-        EconomyAsset Asset(int id) => new(GameData.Int(data.Row("ItemConfig", id)!.Value, "_iType") == 1
+        EconomyAsset Asset(int id) => new(GameData.Int(_data.Row("ItemConfig", id)!.Value, "_iType") == 1
             ? EconomyAssetKind.Currency : EconomyAssetKind.Item, id);
         string operation = Guid.NewGuid().ToString("N");
         string config = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(row.GetRawText() + "\n" + shop.GetRawText())));
         // Quote is diagnostic only in the original service; the resolved server price is the semantic input.
-        string fingerprint = JsonSerializer.Serialize(new { Version = 1, Commodity = commodity, Count = count,
-            UnitPrice = unit, Payment = payment, Goods = entry, PerUnit = perUnit, Config = config });
-        byte[] outcome = JsonSerializer.SerializeToUtf8Bytes(new { Version = 1, Result = 0, Commodity = commodity,
-            Count = count, Price = unit, BuyTimes = next.Count, BeforeBuyTimes = priorCount, next.Period, Config = config });
+        string fingerprint = JsonSerializer.Serialize(new
+        {
+            Version = 1, Commodity = commodity, Count = count,
+            UnitPrice = unit, Payment = payment, Goods = entry, PerUnit = perUnit, Config = config
+        });
+        byte[] outcome = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            Version = 1, Result = 0, Commodity = commodity,
+            Count = count, Price = unit, BuyTimes = next.Count, BeforeBuyTimes = priorCount, next.Period, Config = config
+        });
         EconomyQuantity[] costs = payment > 0 && unit > 0 ? [new(Asset(payment), checked((long)unit * count))] : [];
         return new EconomyMutation(operation, session.Account!, session.Role!.Id, "npc-shop-buy", fingerprint,
             "npc-shop/" + session.Role.Id.ToString(CultureInfo.InvariantCulture) + "/" + operation,
@@ -237,28 +261,54 @@ public sealed class ShopService
     /// <summary>Why a commodity cannot be bought now, or null: its shop's function, the buy/lock conditions, the variant.</summary>
     private Fail? Unavailable(GameSession session, JsonElement commodity)
     {
-        if (session.SeasonState is { } state && state.SeasonId != seasons.SeasonId)
+        if (session.SeasonState is { } state && state.SeasonId != _seasons.SeasonId)
             return new(ErrorCodes.ShopClosed, "season changed; login required");
         long classId = GameData.Int(commodity, "_iClassID");
-        var shop = data.Table("ShopConfig").Values.FirstOrDefault(s => GameData.Int(s, "_iClassID") == classId);
+        var shop = _data.Table("ShopConfig").Values.FirstOrDefault(s => GameData.Int(s, "_iClassID") == classId);
         if (shop.ValueKind != JsonValueKind.Object) return new(ErrorCodes.ShopMissing, "no shop");
-        if (GameData.Int(shop, "_iFunctionId") is var function and > 0 && !functions.IsOpen(session, function)) return new(ErrorCodes.ShopClosed, $"function {function} closed");
+        if (GameData.Int(shop, "_iFunctionId") is var function and > 0 && !_functions.IsOpen(session, function)) return new(ErrorCodes.ShopClosed, $"function {function} closed");
         foreach (var gate in new[] { "_iIsBuy", "_iIsLock" })
-            if (GameData.Int(commodity, gate) is var cond and > 0 && !functions.ConditionMet(session, cond)) return new(ErrorCodes.PurchaseRequirements, $"{gate} {cond}");
+            if (GameData.Int(commodity, gate) is var cond and > 0 && !_functions.ConditionMet(session, cond)) return new(ErrorCodes.PurchaseRequirements, $"{gate} {cond}");
         // _kMultiverseArray: [0] in every season, else only in the listed playbooks (the current one: SeasonService).
         if (commodity.TryGetProperty("_kMultiverseArray", out var variants) && variants.ValueKind == JsonValueKind.Array
             && variants.EnumerateArray().Select(v => (long)(GameData.Number(v) ?? 0)).ToList() is { Count: > 0 } books
-            && !books.Contains(0) && !books.Contains(session.SeasonState?.PlayBookId ?? seasons.PlayBook))
+            && !books.Contains(0) && !books.Contains(session.SeasonState?.PlayBookId ?? _seasons.PlayBook))
             return new(ErrorCodes.NotForSale, "other season");
         return null;
     }
 
-    /// <summary>Base _kItemPerPrice amount; a positive _iDiscount (basis points) multiplies and rounds up (NpcListWidgetCtrl).</summary>
-    private static int UnitPrice(JsonElement commodity)
+    /// <summary>
+    /// The price the buy dialog quotes (GetCommodityPrice of UI_Sys_Shop_NpcListWidgetCtrl.lua:955-997 and
+    /// UI_Sys_Shop_CommodityListWidgetCtrl.lua:960-997, which feed UI_Com_Shop_BuyTipsPanelCtrl.m_kPrice): the base
+    /// _kItemPerPrice amount times _iDiscount/10000 when positive, times (1 - merchant discount/10000) when the commodity
+    /// has _iMerchantDiscount, rounded up when either applied. Lua's double arithmetic is kept so the quote matches.
+    /// </summary>
+    private int UnitPrice(GameSession session, JsonElement commodity)
     {
         long amount = PricePart(commodity, 1);
         long discount = GameData.Int(commodity, "_iDiscount");
-        return (int)(discount > 0 ? (amount * discount + 9999) / 10000 : amount);
+        long merchant = GameData.Int(commodity, "_iMerchantDiscount") > 0 ? MerchantDiscount(session) : 0;
+        if (discount <= 0 && merchant <= 0) return (int)amount;
+        double price = amount;
+        if (discount > 0) price *= discount / 10000.0;
+        if (merchant > 0) price *= 1 - merchant / 10000.0;
+        return (int)Math.Ceiling(price);
+    }
+
+    /// <summary>
+    /// LC_DAL_Shop.OnGetMerchantDiscount (lua:858-895): the learned level of the BuyLow profession skill
+    /// (PublicParamConfig.DiscountMerchantSkill 16001), and the second _kSpSkillParam of that level's SkillConfig row,
+    /// in basis points (1600101 [2,100] = 1% ... 1600110 [2,1000] = 10%). 0 when not learned.
+    /// </summary>
+    private long MerchantDiscount(GameSession session)
+    {
+        int skill = _data.Table("PublicParamConfig").TryGetValue("DiscountMerchantSkill", out var p) ? (int)(GameData.Number(p) ?? 16001) : 16001;
+        int level = session.Progress?.Skills.GetValueOrDefault(skill) ?? 0;
+        if (level <= 0) return 0;
+        var row = _data.Table("SkillConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iSkillID") == skill && GameData.Int(r, "_iLevel") == level);
+        if (row.ValueKind != JsonValueKind.Object || !row.TryGetProperty("_kSpSkillParam", out var param)
+            || param.ValueKind != JsonValueKind.Array || param.GetArrayLength() < 2) return 0;
+        return Math.Clamp((long)(GameData.Number(param[1]) ?? 0), 0, 10000);
     }
 
     /// <summary>_kItemPerPrice is one flat [payment item, amount] pair.</summary>
@@ -278,13 +328,13 @@ public sealed class ShopService
     private Fail? Malformed(JsonElement commodity, int appearance, int count, int unit)
     {
         int currency = PaymentItem(commodity), entry = (int)GameData.Int(commodity, "_iItemId");
-        if (unit < 0 || currency < 0 || currency > 0 && data.Row("ItemConfig", currency) == null)
+        if (unit < 0 || currency < 0 || currency > 0 && _data.Row("ItemConfig", currency) == null)
             return new(ErrorCodes.ShopNoConfig, $"payment {currency} x{unit} not configured");
         if (appearance > 0)
             return entry != 0 ? new(ErrorCodes.ShopNoConfig, $"appearance {appearance} with item {entry}")
                 : count != 1 ? new(ErrorCodes.Parameter, "appearance count")
                 : null;
-        if (appearance < 0 || entry <= 0 || data.Row("ItemConfig", entry) == null)
+        if (appearance < 0 || entry <= 0 || _data.Row("ItemConfig", entry) == null)
             return new(ErrorCodes.ShopNoConfig, $"goods {entry} not configured");
         return null;
     }
@@ -311,18 +361,19 @@ public sealed class ShopService
     private static long Family(JsonElement commodity) => GameData.Int(commodity, "_iPurchaseTimesLimit");
 
     /// <summary>
-    /// The period a counter belongs to; a counter of an older period counts as zero. Day/week/month boundaries are
-    /// server-local midnight / Monday (inferred); family 5 follows the captured server season ID, as the
-    /// enum_ShopLimitType/LC_ShopHelper seasonal label requires. Explicit rollover takes effect on next login.
+    /// The period a counter belongs to; a counter of an older period counts as zero. The client's only refresh clock is
+    /// the 05:00 game day (Lua_TimeHelper.GetDayRefreshTime) and Monday 05:00, shared with DailyActivityService, in the
+    /// realm zone: the game day's date, its ISO week, and its month (month turning on the 1st at 05:00 is inferred).
+    /// Family 5 follows the captured server season ID, as the enum_ShopLimitType/LC_ShopHelper seasonal label requires.
     /// </summary>
-    private static string Period(long family, GameSession session)
+    private string Period(long family, GameSession session)
     {
-        var now = DateTime.Now;
+        var day = DailyActivityService.GameDay(_clock.GetLocalNow().DateTime);
         return family switch
         {
-            1 => now.ToString("yyyyMMdd", CultureInfo.InvariantCulture),
-            2 => $"{ISOWeek.GetYear(now)}W{ISOWeek.GetWeekOfYear(now)}",
-            3 => now.ToString("yyyyMM", CultureInfo.InvariantCulture),
+            1 => day.ToString("yyyyMMdd", CultureInfo.InvariantCulture),
+            2 => $"{ISOWeek.GetYear(day)}W{ISOWeek.GetWeekOfYear(day)}",
+            3 => day.ToString("yyyyMM", CultureInfo.InvariantCulture),
             5 => $"S{session.SeasonState?.SeasonId ?? 1}",
             _ => "",
         };
@@ -330,7 +381,7 @@ public sealed class ShopService
 
     private int Current(GameSession session, int commodityId, Counter? counter) =>
         counter == null ? 0
-        : data.Row("ShopCommodityConfig", commodityId) is { } row && counter.Period != Period(Family(row), session) ? 0
+        : _data.Row("ShopCommodityConfig", commodityId) is { } row && counter.Period != Period(Family(row), session) ? 0
         : counter.Count;
 
     // ---- favourites ----
@@ -340,7 +391,7 @@ public sealed class ShopService
     {
         using var guard = await CharacterService.Lock(session);
         session.Owners!.Current!.BindPresentation(session);
-        int code = data.Row("ShopCommodityConfig", req.CommodityId) == null ? ErrorCodes.ShopNoConfig
+        int code = _data.Row("ShopCommodityConfig", req.CommodityId) == null ? ErrorCodes.ShopNoConfig
             : req.OpType is CollectOperateType.Add or CollectOperateType.Remove ? 0 : ErrorCodes.Parameter;
         bool ok = code == 0;
         if (ok)
@@ -352,11 +403,11 @@ public sealed class ShopService
             };
             if (req.OpType == CollectOperateType.Add) next.Favorites.Add(req.CommodityId);
             else next.Favorites.Remove(req.CommodityId);
-            var tx = roles.NewTransaction();
+            var tx = _roles.NewTransaction();
             tx.ItemDelta(session.Role!.Id, session.Items, session.Items);
             tx.RoleBlob(session.Role.Id, "shop", JsonSerializer.SerializeToUtf8Bytes(next));
-            tx.WithEconomy(character.FamilyEconomy(session, "cd13a/shop-favorite", [], [], next));
-            await roles.CommitAsync(tx, "shop/favorite", _ => session.Shop = next);
+            tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/shop-favorite", [], [], next));
+            await _roles.CommitAsync(tx, "shop/favorite", _ => session.Shop = next);
             await SyncAsync(session);
         }
         await session.SendGameAsync(CommodityCollect, new CommodityCollectResp { Result = code, CommodityId = req.CommodityId, NpcId = req.NpcId, OpType = req.OpType });

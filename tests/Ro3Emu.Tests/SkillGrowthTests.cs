@@ -12,37 +12,37 @@ namespace Ro3Emu.Tests;
 /// <summary>Skill plans and allocation requests over the ordinary game wire.</summary>
 public sealed class SkillGrowthTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-skill-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-skill-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
-    private WebApplication app = null!;
-    private string http = "";
+    private WebApplication _app = null!;
+    private string _http = "";
 
     public async Task InitializeAsync()
     {
         var (httpPort, microPort, gamePort) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir;
+            o.DataDir = _dataDir;
             o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = httpPort;
             o.MicroGatePort = microPort;
             o.GameGatePort = gamePort;
         });
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{httpPort}";
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{httpPort}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync();
-        await app.DisposeAsync();
+        await _app.StopAsync();
+        await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name, bool create = true)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw");
         await bot.EnterGateAsync();
         long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
@@ -60,7 +60,7 @@ public sealed class SkillGrowthTests : IAsyncLifetime
     private async Task Gm(string account, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
 
     private static string RepoRoot()
@@ -85,11 +85,11 @@ public sealed class SkillGrowthTests : IAsyncLifetime
         }
 
         // Simulate an existing role saved before Novices had a visible normal-attack slot.
-        var roles = app.Services.GetRequiredService<RoleStore>();
+        var roles = _app.Services.GetRequiredService<RoleStore>();
         var old = DBSkillData.Parser.ParseFrom(roles.LoadSkillPlans(roleId)!);
         old.SkillWheel.WhellSkills.Clear();
         old.OriginSkillWheel.WhellSkills.Clear();
-        Assert.Equal(1, FixtureSql.Execute(app.Services.GetRequiredService<AccountStore>(),
+        Assert.Equal(1, FixtureSql.Execute(_app.Services.GetRequiredService<AccountStore>(),
             "UPDATE role SET skill_plans = $plans WHERE id = $id",
             ("$plans", old.ToByteArray()), ("$id", roleId)));
 
@@ -100,6 +100,7 @@ public sealed class SkillGrowthTests : IAsyncLifetime
 
         await Gm("novice", "!job 1100");
         await again.SendGameAsync(1023, new PlayerAssetReq { AssetType = { 5 } });
+        // The career's own normal attack takes the slot: without it a Swordman has no attack on the bar.
         var swordman = await Next(again, SkillService.SkillDataSync, DBSkillDataIncrement.Parser,
             m => m.SyncAllMark && m.CurrentAtkSkillId == 1001001);
         Assert.DoesNotContain(swordman.SkillWheel.All.WhellSkills.Values,
@@ -113,14 +114,18 @@ public sealed class SkillGrowthTests : IAsyncLifetime
         {
             await Next(novice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser);
             await novice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
-                { OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
-                    Info = new SkillData { SkillId = 10000, SkillLevel = 2 } });
+            {
+                OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
+                Info = new SkillData { SkillId = 10000, SkillLevel = 2 }
+            });
             Assert.Equal(ErrorCodes.SkillNotLearned,
                 (await Next(novice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
 
             await novice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
-                { OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
-                    Info = new SkillData { SkillId = 10000, SkillLevel = 1 } });
+            {
+                OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
+                Info = new SkillData { SkillId = 10000, SkillLevel = 1 }
+            });
             Assert.Equal(0, (await Next(novice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
         }
 
@@ -294,28 +299,36 @@ public sealed class SkillGrowthTests : IAsyncLifetime
             Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
 
             await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
-                { OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
-                    Info = new SkillData { SkillId = 13006, SkillLevel = 1 } });
+            {
+                OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 2,
+                Info = new SkillData { SkillId = 13006, SkillLevel = 1 }
+            });
             Assert.Equal(0, (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
             var wheel = await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser,
                 m => !m.SyncAllMark && m.SkillWheel?.Inc?.WhellSkills.ContainsKey(3) == true);
             Assert.Equal(1300601, wheel.SkillWheel.Inc.WhellSkills[3].All.SkillConfigId);
             await alice.SendGameAsync(SkillService.QueueUpdate, new SkillQueueUpdateReq
-                { Plan = 0, OpType = SkillLoadOperation.SkillLoadOpLoad, QueueIndex = 0,
-                    Info = new SkillData { SkillId = 13006, SkillLevel = 1 } });
+            {
+                Plan = 0, OpType = SkillLoadOperation.SkillLoadOpLoad, QueueIndex = 0,
+                Info = new SkillData { SkillId = 13006, SkillLevel = 1 }
+            });
             Assert.Equal(0, (await Next(alice, SkillService.QueueUpdate, SkillQueueUpdateResp.Parser)).Result);
             var loaded = await Next(alice, SkillService.SkillDataSync, DBSkillDataIncrement.Parser,
                 m => !m.SyncAllMark && m.SkillAssignPlans?.Inc?.Value[0].SkillQueue.ContainsKey(0) == true);
             Assert.Equal(13006, loaded.SkillAssignPlans.Inc.Value[0].SkillQueue[0].Inc.SkillId);
 
             await alice.SendGameAsync(SkillService.QueueUpdate, new SkillQueueUpdateReq
-                { Plan = 0, OpType = SkillLoadOperation.SkillLoadOpLoad, QueueIndex = 12,
-                    Info = new SkillData { SkillId = 13006, SkillLevel = 1 } });
+            {
+                Plan = 0, OpType = SkillLoadOperation.SkillLoadOpLoad, QueueIndex = 12,
+                Info = new SkillData { SkillId = 13006, SkillLevel = 1 }
+            });
             Assert.Equal(ErrorCodes.Parameter,
                 (await Next(alice, SkillService.QueueUpdate, SkillQueueUpdateResp.Parser)).Result);
             await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
-                { OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 6,
-                    Info = new SkillData { SkillId = 13006, SkillLevel = 1 } });
+            {
+                OpType = SkillLoadOperation.SkillLoadOpLoad, IsManual = true, SocketNum = 6,
+                Info = new SkillData { SkillId = 13006, SkillLevel = 1 }
+            });
             Assert.Equal(ErrorCodes.Parameter,
                 (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
             await alice.SendGameAsync(SkillService.SkillReset, new SkillResetReq { Plan = 0 });
@@ -357,7 +370,7 @@ public sealed class SkillGrowthTests : IAsyncLifetime
                 QueueLevels = index == 1 ? new Dictionary<int, int> { [0] = 1 } : new(),
             }).ToArray(),
         };
-        Assert.Equal(1, FixtureSql.Execute(app.Services.GetRequiredService<AccountStore>(),
+        Assert.Equal(1, FixtureSql.Execute(_app.Services.GetRequiredService<AccountStore>(),
             "UPDATE role SET skill_plans = $plans WHERE id = $id",
             ("$plans", System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(legacy)), ("$id", roleId)));
 
@@ -377,11 +390,11 @@ public sealed class SkillGrowthTests : IAsyncLifetime
             Assert.Equal(13006, plan.SkillQueue[0].SkillId);
             Assert.Equal(1, plan.SkillQueue[0].SkillLevel);
             Assert.Equal(1300601, loaded.SkillWheel.All.WhellSkills[3].SkillConfigId);
-            Assert.Equal(2, app.Services.GetRequiredService<SessionRegistry>().All()
+            Assert.Equal(2, _app.Services.GetRequiredService<SessionRegistry>().All()
                 .Single(s => s.Role?.Id == roleId).Progress!.Skills[13006]);
         }
 
-        using var persistedDb = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dataDir, "ro3emu.db")}");
+        using var persistedDb = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(_dataDir, "ro3emu.db")}");
         persistedDb.Open();
         using var read = persistedDb.CreateCommand();
         read.CommandText = "SELECT skill_plans FROM role WHERE id = $id";

@@ -14,7 +14,7 @@ namespace Ro3Emu.Server.Game;
 /// </summary>
 public sealed partial class GenreService(
     RoleStore roles, ItemStore items, CharacterService character, SkillService skills, CardService cards,
-    PetService pets, EmblemService emblems, SeasonTalentService talents, TotemService totems,
+    PetService pets, EmblemService emblems, SeasonTalentService talents, TotemService totems, PowerService power,
     FunctionService functions, SessionRegistry sessions, GameData data, ILogger<GenreService> log)
 {
     public const uint GenreSync = 5008;
@@ -131,24 +131,12 @@ public sealed partial class GenreService(
 
     private Dictionary<int, long> Properties(GameSession s, Stage next) => WithProjection(s, next, () => new Dictionary<int, long>(character.Stats(s).Data));
 
-    private PowerUnit Power(GameSession s, Stage next) => WithProjection(s, next, () =>
-    {
-        // SchemeHelper.GetSystemPower reads each child's PowerUnit; Totem power is a derived projection.
-        var skill = next.Skills.SkillAssignPlans[next.Skills.CurrentPlanIndex].Power;
-        var attr = next.Attrs.AllPlanBaseProperty.GetValueOrDefault(next.Attrs.CurPlanIndex)?.Power;
-        var equip = next.Equipment.EquipPlans.GetValueOrDefault(next.Equipment.CurrentEquipPlan)?.Power;
-        var card = next.Cards.StoragePlans.GetValueOrDefault(next.Cards.CurrentPlan)?.Power;
-        var pet = next.Pets.SetupPlans.GetValueOrDefault(next.Pets.CurrentPlan)?.Power;
-        var totem = totems.CurrentPlanPower(s, next.Totems);
-        var echo = emblems.GenrePower(s, next.Echoes);
-        return new PowerUnit
-        {
-            NormalPower = (skill?.NormalPower ?? 0) + (attr?.NormalPower ?? 0) + (equip?.NormalPower ?? 0)
-                + (card?.NormalPower ?? 0) + (pet?.NormalPower ?? 0) + (totem?.NormalPower ?? 0),
-            SeasonPower = (skill?.SeasonPower ?? 0) + (attr?.SeasonPower ?? 0) + (equip?.SeasonPower ?? 0)
-                + (card?.SeasonPower ?? 0) + echo.SeasonPower + (pet?.SeasonPower ?? 0) + (totem?.SeasonPower ?? 0),
-        };
-    });
+    /// <summary>
+    /// The selected children's power: the role's power package for the projected state minus what the client adds
+    /// outside the plans (LC_PlayerInfoHelper.GetPlanOtherPower: base level, title, card suit). The cross-system
+    /// aggregation itself is inferred (docs/genre-implementation.md).
+    /// </summary>
+    private PowerUnit Power(GameSession s, Stage next) => WithProjection(s, next, () => power.GenrePower(s));
 
     private void RefreshPlan(GameSession s, DBGenrePlan plan, IReadOnlyDictionary<int, int> selected)
     {
@@ -183,49 +171,49 @@ public sealed partial class GenreService(
     {
         bool skillChanged = false;
         {
-        using var held = await CharacterService.Lock(s);
-        var state = s.Genre!;
-        var reply = new SwitchGenrePlanResp { IsApply = req.IsApply, TargetPlan = req.TargetPlan };
-        reply.ChildSystem.Add(req.ChildSystem);
-        int code = Gate(s);
-        if (code == 0 && !state.GenreMap.SystemMap.TryGetValue(req.TargetPlan, out _)) code = ErrorCodes.Parameter;
-        var selected = state.GenreMap.SystemMap.TryGetValue(req.TargetPlan, out var preset)
-            ? preset.GenrePlans.ToDictionary(kv => kv.Key, kv => kv.Value) : new Dictionary<int, int>();
-        foreach (var (type, index) in req.ChildSystem) selected[type] = index;
-        var next = new Stage(s, skills);
-        if (code == 0) code = StageSelection(s, next, selected);
-        if (code == 0 && req.IsApply) code = ApplyCooldownError(s, next);
-        if (code == 0)
-        {
-            var genre = state.Clone();
-            var plan = genre.GenreMap.SystemMap[req.TargetPlan];
-            plan.GenrePlans.Clear();
-            foreach (var (type, index) in selected) plan.GenrePlans[type] = index;
-            if (req.IsApply) genre.CurrentPlan = req.TargetPlan;
-            RefreshPlan(s, plan, selected);
-            try
+            using var held = await CharacterService.Lock(s);
+            var state = s.Genre!;
+            var reply = new SwitchGenrePlanResp { IsApply = req.IsApply, TargetPlan = req.TargetPlan };
+            reply.ChildSystem.Add(req.ChildSystem);
+            int code = Gate(s);
+            if (code == 0 && !state.GenreMap.SystemMap.TryGetValue(req.TargetPlan, out _)) code = ErrorCodes.Parameter;
+            var selected = state.GenreMap.SystemMap.TryGetValue(req.TargetPlan, out var preset)
+                ? preset.GenrePlans.ToDictionary(kv => kv.Key, kv => kv.Value) : new Dictionary<int, int>();
+            foreach (var (type, index) in req.ChildSystem) selected[type] = index;
+            var next = new Stage(s, skills);
+            if (code == 0) code = StageSelection(s, next, selected);
+            if (code == 0 && req.IsApply) code = ApplyCooldownError(s, next);
+            if (code == 0)
             {
-                if (req.IsApply)
+                var genre = state.Clone();
+                var plan = genre.GenreMap.SystemMap[req.TargetPlan];
+                plan.GenrePlans.Clear();
+                foreach (var (type, index) in selected) plan.GenrePlans[type] = index;
+                if (req.IsApply) genre.CurrentPlan = req.TargetPlan;
+                RefreshPlan(s, plan, selected);
+                try
                 {
-                    bool changed = next.Skills.CurrentPlanIndex != s.SkillPlans!.CurrentPlanIndex;
-                    await CommitAsync(s, next, genre);
-                    skillChanged = changed;
+                    if (req.IsApply)
+                    {
+                        bool changed = next.Skills.CurrentPlanIndex != s.SkillPlans!.CurrentPlanIndex;
+                        await CommitAsync(s, next, genre);
+                        skillChanged = changed;
+                    }
+                    else await SaveGenreAsync(s, genre);
                 }
-                else await SaveGenreAsync(s, genre);
+                catch (Exception e) when (e is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException)
+                {
+                    log.LogError(e, "Genre build change failed for role {Role}", s.Role!.Id);
+                    code = ErrorCodes.Unknown;
+                }
             }
-            catch (Exception e) when (e is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException)
+            reply.Result = code;
+            await s.SendGameAsync(82806, reply);
+            if (code == 0)
             {
-                log.LogError(e, "Genre build change failed for role {Role}", s.Role!.Id);
-                code = ErrorCodes.Unknown;
+                await SyncAsync(s);
+                if (req.IsApply) await PublishSyncAsync(s);
             }
-        }
-        reply.Result = code;
-        await s.SendGameAsync(82806, reply);
-        if (code == 0)
-        {
-            await SyncAsync(s);
-            if (req.IsApply) await PublishSyncAsync(s);
-        }
         }
         // Skill observers (including cart capacity) may acquire StateLock after the atomic commit.
         if (skillChanged) await skills.OnActivePlanChangedAsync(s);
@@ -254,8 +242,11 @@ public sealed partial class GenreService(
         roles.SavePets(role, next.Pets.ToByteArray(), tx);
         roles.SaveSeasonTalent(role, next.Talents.ToByteArray(), tx);
         tx.WithEconomy(character.FamilyEconomy(s, "cd13b/genre-apply", [], [],
-            new { Version = 1, Genre = genre.ToByteArray(), Cards = next.Cards.ToByteArray(),
-                Totems = next.Totems.ToByteArray(), Emblems = next.Echoes }));
+            new
+            {
+                Version = 1, Genre = genre.ToByteArray(), Cards = next.Cards.ToByteArray(),
+                Totems = next.Totems.ToByteArray(), Emblems = next.Echoes
+            }));
         await roles.CommitAsync(tx, "cd13b/genre-apply", receipts =>
         {
             ItemSnapshotWritePlan.ApplyGuids(next.Items, (long[])receipts[itemReceipt]!);

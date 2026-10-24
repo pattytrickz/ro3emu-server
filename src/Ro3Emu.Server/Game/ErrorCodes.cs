@@ -84,6 +84,15 @@ public static class ErrorCodes
     public const int DungeonTeamSize = 3507;    // "Not enough party Members."
     public const int DungeonDataMissing = 3720; // "Dungeon data not found."
     public const int DungeonBusy = 7107;        // "Already in an instance"
+    public const int NotPartyLeader = 274;      // "The Party Leader must open the party instance." (ERR_EnterDungeonNotLeader)
+    // Rift Crisis / Hidden Vault: ErrorCodeConfig 6751-6759 (Localization_en 10630001101-10630001109).
+    public const int RiftMemberIneligible = 6751; // "Player is not eligible to Enter Dungeon: Hidden Vault"
+    public const int RiftStoneTaken = 6753;       // "The Hidden Vault Dungeon is under attack by another player..."
+    public const int RiftPartyTooLarge = 6754;    // "Too many party Members"
+    public const int RiftPartyTooSmall = 6755;    // "The party does not meet the required number of players."
+    public const int RiftNoParty = 6757;          // "You must be in a party to enter this mode." (ERR_EnterOnepieceNoTeam)
+    public const int RiftMemberLocked = 6758;     // "A party Member does not meet the Hidden Vault Unlock Requirement"
+    public const int RiftMemberInVault = 6759;    // "A party Member is already in the Hidden Treasure Dungeon..."
 
     // Quests (texts carry the quest name as ${1})
     public const int TaskMissing = 100;         // "Quest [${1}] does not exist"
@@ -206,6 +215,9 @@ public static class ErrorCodes
     public const int GuildApplicationLimit = 468, GuildApplicationListFull = 469;
     // Guild League (ErrorCodeConfig 516-524).
     public const int LeagueClosed = 516, LeagueTemporary = 517, LeagueElite = 518, LeagueMainFull = 523;
+    // Elite roster (ErrorCodeConfig 10046-10048, 10059): not a member, the roster changed meanwhile, position too low,
+    // too few elites for the quick team.
+    public const int EliteNotMember = 10046, EliteChanged = 10047, ElitePosition = 10048, EliteTeamShort = 10059;
     public const int GuildOfficerKick = 10068, GuildInviteRefused = 10069, GuildTextNumbers = 10066;
     public const int GuildMemberMissing = 454, NotInGuild = 462, GuildFull = 453;
     public const int AlreadyInGuildHome = 550;  // NW_ProtobufDefine.ERR_AlreadyInGuildHome "You are already at the guild base."
@@ -214,6 +226,18 @@ public static class ErrorCodes
     public const int GuildIconLocked = 10003, GuildFrameLocked = 10004, GuildJoinLevel = 10008;
     public const int GuildTextLength = 10027;
     public const int GuildFundsShort = 484, GuildContributeShort = 10040, GuildBuildBusy = 485, GuildHallLow = 486, GuildBuildMax = 487;
+    // Guild voice channels (ErrorCodeConfig 97001-97032, Localization_en): not in a guild, invalid channel, on the
+    // channel's block list, already / not in the channel, not leader nor GuildVoice right, the leader cannot be kicked,
+    // not blocked; Order mode: no mic in Free mode, managers need not apply, already may speak,
+    // already / not applied, not Order mode, reason too long; already in another channel, the leader's mic stays,
+    // cannot kick yourself.
+    public const int GuildVoiceNotInGuild = 97001, GuildVoiceBadChannel = 97002, GuildVoiceBlocked = 97003;
+    public const int GuildVoiceAlreadyInChannel = 97004, GuildVoiceNotInChannel = 97005, GuildVoiceNoPermission = 97006;
+    public const int GuildVoiceCannotKickLeader = 97007, GuildVoiceNotBlocked = 97008;
+    public const int GuildVoiceFreeMode = 97016, GuildVoiceManagerNeedsNoApply = 97017, GuildVoiceAlreadyCanSpeak = 97018;
+    public const int GuildVoiceAlreadyApplied = 97019, GuildVoiceNotApplied = 97020, GuildVoiceNotOrderMode = 97021;
+    public const int GuildVoiceReasonTooLong = 97024, GuildVoiceInAnotherChannel = 97029, GuildVoiceLeaderCannotMute = 97030;
+    public const int GuildVoiceCannotKickSelf = 97032;
     // Guild Caravan: ErrorCodeConfig 489-504; exact RPC-to-code selection is (inferred).
     public const int CaravanLoaded = 489, CaravanExpired = 490, CaravanOrderExpired = 491;
     public const int CaravanNotAsking = 492, CaravanCannotAsk = 493, CaravanRequestMissing = 494;
@@ -244,6 +268,12 @@ public static class ErrorCodes
     public const int SlotEmpty = 1810;          // "There is no card in this slot"
     public const int SlotSealed = 1811;         // "Card slot has not been unsealed"
     public const int AlreadyUnlocked = 1813;    // "Already unlocked"
+    public const int CardSameName = 1816;       // "Only one card with the same name can be socketed"
+    public const int CardSameElement = 1818;    // "Only one card that changes armor elemental properties can be socketed"
+    // Codex and Growth Classroom (ErrorCodeConfig; the request mapping is inferred).
+    public const int CodexUnavailable = 3802;   // "Unable to view the Codex."
+    public const int UnlockRequirement = 3355;  // "Unlock Requirement not met." (a locked Codex theme, inferred)
+    public const int NoRankReward = 3900;       // "No Rank Reward available to Claim."
 
     // Pets (ErrorCodeConfig 1848..1880, Localization_en 10630000526..555).
     public const int PetFastRoomLevel = 1848;   // "Hatchery level too low for Quick Hatch"

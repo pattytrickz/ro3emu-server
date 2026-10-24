@@ -11,7 +11,13 @@ public sealed record MonsterTemplate(
     int NpcId, int Level, long MaxHp, long MaxSp, long Atk, long Matk, long Def, long Mdef, long Hit, long Flee, long Cri,
     int SpeedCm, int Element, int Race, int Size, int Camp,
     bool Aggressive, float RoamDistance, int RoamTimeMs, float ViewRange, float LeashDistance,
-    int NormalSkill, int SkillMs, float HitPointSeconds, int SwingIntervalMs, float AttackRange, int BodyRemainMs);
+    int NormalSkill, int SkillMs, float HitPointSeconds, int SwingIntervalMs, float AttackRange, int BodyRemainMs)
+{
+    /// <summary>The boss's special skills (BossSkillSets); null: only the normal attack.</summary>
+    public BossSkillBook? Skills { get; init; }
+    /// <summary>AttriMonsterConfig cast speed (116), retained for live chant modifiers.</summary>
+    public long CastSpeed { get; init; }
+}
 
 /// <summary>A live monster on a map (entityType 1): HP, home point, current walk segment and AI state.</summary>
 public sealed class MonsterUnit : WorldUnit
@@ -38,8 +44,9 @@ public sealed class MonsterUnit : WorldUnit
     /// <summary>Temporary strongest movement slow (basis points), with an absolute server-millisecond expiry.</summary>
     public int SlowMovementBp { get; set; }
     public long SlowMovementExpireMs { get; set; }
-    public int SpeedCm(long nowMs) => SlowMovementExpireMs > nowMs
-        ? (int)Math.Max(1, Template.SpeedCm * (10000L - SlowMovementBp) / 10000L) : Template.SpeedCm;
+    public int? BuffSpeedCm { get; set; }
+    public int SpeedCm(long nowMs) => Math.Min(BuffSpeedCm ?? Template.SpeedCm, SlowMovementExpireMs > nowMs
+        ? (int)Math.Max(1, Template.SpeedCm * (10000L - SlowMovementBp) / 10000L) : int.MaxValue);
 
     // Walk segment in progress: from (FromX, FromZ) to (ToX, ToZ) over [StartMs, EndMs].
     public bool Moving { get; set; }
@@ -58,6 +65,14 @@ public sealed class MonsterUnit : WorldUnit
     /// <summary>A story wave sent at the players: it keeps chasing beyond its AI leash (DungeonService).</summary>
     public bool IgnoresLeash { get; set; }
     public long LastCombatMs { get; set; }
+    /// <summary>Boss special-skill scheduler state, created when the boss first engages (MonsterService.BossSkills).</summary>
+    public BossSkillRuntime? BossSkills { get; set; }
+    /// <summary>A special skill's cast and action run until then: the boss neither walks nor swings.</summary>
+    public long BusyUntilMs { get; set; }
+    /// <summary>No other special before then (the gap after the previous one); shared with MvpService's own plans.</summary>
+    public long NextSpecialMs { get; set; }
+    /// <summary>MvpService paces this boss's specials from its own tick (its plans first, then the generic ones).</summary>
+    public bool SpecialsOwnedByMvp { get; set; }
     /// <summary>Live boss skill cooldowns for 31125/31127, keyed by actual cast row.</summary>
     public Dictionary<int, long> BossSkillCds { get; } = new();
 
@@ -65,6 +80,12 @@ public sealed class MonsterUnit : WorldUnit
     public long StatusBits { get; set; }
 
     public MonsterBrain? Brain { get; init; }
+
+    /// <summary>Unit custom data a gameplay attaches (31018 on change; carried in the AOI entity), e.g. Guild League IsFlag.</summary>
+    public List<CustomData> CustomData { get; } = new();
+
+    /// <summary>Extra snapshot state an owner adds to the 31037 base (MVP bosses and minions: their live buffs).</summary>
+    public Action<EntityBase>? EntityExtras { get; set; }
 
     public override void Tick(MapInstance map, GameTime time) => Brain?.Tick(this, map);
 
@@ -115,6 +136,8 @@ public sealed class MonsterUnit : WorldUnit
                      (102, Template.MaxSp), (2001, Template.MaxSp),
                  })
             entity.Property.Add(new AoIProperty { Idx = idx, Data = value, BaseData = value });
+        if (CustomData.Count > 0) entity.CustomDatas.Add(CustomData.Select(c => c.Clone()));
+        EntityExtras?.Invoke(entity);
         return entity;
     }
 

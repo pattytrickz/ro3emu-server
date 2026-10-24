@@ -4,6 +4,7 @@ using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 
 namespace Ro3Emu.Server.Game;
@@ -17,17 +18,17 @@ public sealed class MountService : IGameTicker
 {
     public const uint Sync = 5012, SetConfig = 32743, ScoreAward = 32744, Ride = 32745, Unlock = 32747;
     public const uint EtchantRefresh = 32748, EtchantSave = 32749, EtchantPlan = 32750;
-    private readonly GameData data;
-    private readonly CharacterService character;
-    private readonly RoleStore roles;
-    private readonly FunctionService functions;
-    private readonly World world;
-    private readonly GameLoop loop;
-    private readonly SessionRegistry sessions;
-    private readonly Deadlines deadlines;
-    private readonly TimeProvider clock;
-    private readonly WardrobeService wardrobe;
-    private TimeSpan lastTick;
+    private readonly GameData _data;
+    private readonly CharacterService _character;
+    private readonly RoleStore _roles;
+    private readonly FunctionService _functions;
+    private readonly World _world;
+    private readonly GameLoop _loop;
+    private readonly SessionRegistry _sessions;
+    private readonly Deadlines _deadlines;
+    private readonly TimeProvider _clock;
+    private readonly WardrobeService _wardrobe;
+    private TimeSpan _lastTick;
     private const string ExpiryKey = "mount-expiry";
 
     /// <summary>5012 plus durable claim/preview/quest state not carried by that dataset (inferred storage layout).</summary>
@@ -43,9 +44,9 @@ public sealed class MountService : IGameTicker
         World world, GameLoop loop, SessionRegistry sessions, SceneService scenes, Deadlines deadlines, TimeProvider clock,
         WardrobeService wardrobe)
     {
-        this.wardrobe = wardrobe;
-        this.data = data; this.character = character; this.roles = roles; this.functions = functions;
-        this.world = world; this.loop = loop; this.sessions = sessions; this.deadlines = deadlines; this.clock = clock;
+        this._wardrobe = wardrobe;
+        this._data = data; this._character = character; this._roles = roles; this._functions = functions;
+        this._world = world; this._loop = loop; this._sessions = sessions; this._deadlines = deadlines; this._clock = clock;
         character.ExtraAttributes.Add(Attributes);
         character.SpecialItemUse.Add(TryUseItemAsync);
         wardrobe.MountGrant = PlanShopGrant;
@@ -55,7 +56,7 @@ public sealed class MountService : IGameTicker
 
     public void Load(GameSession s)
     {
-        s.MountState = roles.LoadMounts(s.Role!.Id) is { } bytes ? JsonSerializer.Deserialize<SavedState>(bytes) ?? new() : new();
+        s.MountState = _roles.LoadMounts(s.Role!.Id) is { } bytes ? JsonSerializer.Deserialize<SavedState>(bytes) ?? new() : new();
         s.Mounts = s.MountState.Info.Length > 0 ? DBMountsInfo.Parser.ParseFrom(s.MountState.Info) : new();
         Normalize(s);
         AdoptBoughtLooks(s);
@@ -70,10 +71,10 @@ public sealed class MountService : IGameTicker
     /// </summary>
     private void AdoptBoughtLooks(GameSession s)
     {
-        if (roles.LoadWardrobe(s.Role!.Id) is not { Length: > 0 } saved) return;
+        if (_roles.LoadWardrobe(s.Role!.Id) is not { Length: > 0 } saved) return;
         foreach (var lit in DBWardRobeInfo.Parser.ParseFrom(saved).AllLightUpAppearances.Values)
         {
-            int id = lit.OverdueTimeMs == 0 ? wardrobe.SystemMount(lit.AppearanceId) : 0;
+            int id = lit.OverdueTimeMs == 0 ? _wardrobe.SystemMount(lit.AppearanceId) : 0;
             if (id != 0 && Config(id) != null) Grant(s.Mounts!, id);
         }
     }
@@ -106,7 +107,7 @@ public sealed class MountService : IGameTicker
         return (0, new WardrobeService.LinkedMountGrant(granted, Convert.ToHexString(SHA256.HashData(saved)),
             tx => tx.RoleBlob(s.Role!.Id, "mounts", saved),
             () => { s.Mounts = next; ArmExpiry(s); },
-            () => LoginAsync(s)));
+            () => PublishOwnedAsync(s)));
     }
 
     public Task LoginAsync(GameSession s) => CharacterService.SyncAsync(s, Sync, s.Mounts!.Clone());
@@ -115,11 +116,14 @@ public sealed class MountService : IGameTicker
     {
         state ??= s.MountState;
         // A copy prevents a failed payment from publishing a paid preview or ownership change.
-        return JsonSerializer.SerializeToUtf8Bytes(new SavedState { Info = (info ?? s.Mounts!).ToByteArray(),
-            Claimed = state.Claimed, Previews = state.Previews, QuestMount = state.QuestMount });
+        return JsonSerializer.SerializeToUtf8Bytes(new SavedState
+        {
+            Info = (info ?? s.Mounts!).ToByteArray(),
+            Claimed = state.Claimed, Previews = state.Previews, QuestMount = state.QuestMount
+        });
     }
 
-    private void Save(GameSession s) => roles.SaveMounts(s.Role!.Id, Encode(s));
+    private void Save(GameSession s) => _roles.SaveMounts(s.Role!.Id, Encode(s));
 
     /// <summary>The "mounts" blob for <paramref name="next"/>: a Special Class Item lease selects the battle slot 2.</summary>
     internal byte[] EncodeBlob(GameSession s, DBMountsInfo next) => Encode(s, next);
@@ -127,23 +131,35 @@ public sealed class MountService : IGameTicker
     /// <summary>Publishes a committed 5012 change: the dataset, stats and the rider to self and viewers.</summary>
     internal Task PublishAsync(GameSession s) => ChangedAsync(s);
 
+    /// <summary>After a committed 5012 change, the rider's stats sent (RidingEffects: the ridden mount's buffs).</summary>
+    internal List<Func<GameSession, Task>> RideChanged { get; } = [];
+
+    /// <summary>The ridden mount's _kBindBuff rows (CartRemouldTable or MountsConfig), and its CartRemouldTable
+    /// _iSubType (2 Peco Peco, 4 wolf, 5 Madogear, 6 dragon, 7 gryphon; 0 for any other mount or none).</summary>
+    internal (long[] BindBuffs, long SubType) Ridden(GameSession s)
+    {
+        long id = Rider(s);
+        if (CartRemouldTable.Get(_data, id) is { } battle) return (battle.BindBuff, battle.SubType);
+        return (MountsConfig.Get(_data, id) is { } mount ? mount.BindBuff : [], 0);
+    }
+
     public static long Rider(GameSession s) => s.MountState.QuestMount != 0 ? s.MountState.QuestMount
         : s.Mounts?.MountIds.OrderBy(p => p.Key).FirstOrDefault(p => p.Value.IsRiding).Value?.MountId ?? 0;
 
     private IEnumerable<(long Id, double Value)> Attributes(GameSession s) =>
         Config((int)Rider(s)) is { } row ? GameData.Pairs(row, "_kAttr") : [];
 
-    private JsonElement? Config(long id) => data.Row("MountsConfig", id) ?? data.Row("CartRemouldTable", id);
-    private int Slot(long id) => data.Row("MountsConfig", id) != null ? 1 : data.Row("CartRemouldTable", id) != null ? 2 : 0;
-    private int Param(string name, int fallback) => data.Table("PublicParamConfig").TryGetValue(name, out var v) ? (int)(GameData.Number(v) ?? fallback) : fallback;
-    private long Now => clock.GetUtcNow().ToUnixTimeMilliseconds();
+    private JsonElement? Config(long id) => _data.Row("MountsConfig", id) ?? _data.Row("CartRemouldTable", id);
+    private int Slot(long id) => _data.Row("MountsConfig", id) != null ? 1 : _data.Row("CartRemouldTable", id) != null ? 2 : 0;
+    private int Param(string name, int fallback) => _data.Table("PublicParamConfig").TryGetValue(name, out var v) ? (int)(GameData.Number(v) ?? fallback) : fallback;
+    private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
 
     private void ArmExpiry(GameSession s)
     {
         long next = s.Mounts?.Mounts.Values.Where(m => m.OverdueTimeMs > 0)
             .Select(m => m.OverdueTimeMs).DefaultIfEmpty().Min() ?? 0;
-        if (next == 0) deadlines.Cancel(s, ExpiryKey);
-        else deadlines.Set(s, ExpiryKey, DateTimeOffset.FromUnixTimeMilliseconds(next),
+        if (next == 0) _deadlines.Cancel(s, ExpiryKey);
+        else _deadlines.Set(s, ExpiryKey, DateTimeOffset.FromUnixTimeMilliseconds(next),
             (session, due, lease, ct) => ExpireAsync(session, lease));
     }
 
@@ -154,8 +170,8 @@ public sealed class MountService : IGameTicker
         {
             // The old polling path retried after a failed DB reconcile. Only the still-current
             // deadline may re-arm; detached or superseded work must not resurrect itself.
-            if (deadlines.IsCurrent(session, lease))
-                deadlines.Set(session, ExpiryKey, clock.GetUtcNow().AddSeconds(1),
+            if (_deadlines.IsCurrent(session, lease))
+                _deadlines.Set(session, ExpiryKey, _clock.GetUtcNow().AddSeconds(1),
                     (current, due, next, ct) => ExpireAsync(current, next));
             throw;
         }
@@ -180,7 +196,7 @@ public sealed class MountService : IGameTicker
         if (s.Dead) return ErrorCodes.MountStateInvalid;
         if (s.SceneLoading) return ErrorCodes.SwitchingScenes;
         if (slot == 1 && (s.StatusBits & (1L << 15)) != 0) return ErrorCodes.MountCombat;
-        if (data.Row("MapConfig", s.SceneEntry) is { } map && map.TryGetProperty("_kRiderForbidden", out var flags)
+        if (_data.Row("MapConfig", s.SceneEntry) is { } map && map.TryGetProperty("_kRiderForbidden", out var flags)
             && flags.ValueKind == JsonValueKind.Array)
         {
             int index = slot == 2 ? 0 : 1;
@@ -193,7 +209,7 @@ public sealed class MountService : IGameTicker
     {
         using var gate = await CharacterService.Lock(s);
         int slot = (int)req.Tp == 0 ? 1 : (int)req.Tp;
-        int error = !functions.IsOpen(s, 27) ? ErrorCodes.FunctionLocked : slot is < 1 or > 2 ? ErrorCodes.Parameter
+        int error = !_functions.IsOpen(s, 27) ? ErrorCodes.FunctionLocked : slot is < 1 or > 2 ? ErrorCodes.Parameter
             : req.MountId != 0 && Slot(req.MountId) != slot ? ErrorCodes.MountConfig
             : req.MountId != 0 ? OwnedError(s, req.MountId) : 0;
         bool riding = s.Mounts!.MountIds.TryGetValue(slot, out var old) && old.IsRiding;
@@ -214,7 +230,7 @@ public sealed class MountService : IGameTicker
         int tp = (int)req.Tp, slot = tp < 2 ? 1 : 2;
         bool on = tp is 1 or 3;
         var selected = s.Mounts!.MountIds.GetValueOrDefault(slot);
-        int error = tp is < 0 or > 3 ? ErrorCodes.Parameter : on && !functions.IsOpen(s, 27) ? ErrorCodes.FunctionLocked
+        int error = tp is < 0 or > 3 ? ErrorCodes.Parameter : on && !_functions.IsOpen(s, 27) ? ErrorCodes.FunctionLocked
             : on ? OwnedError(s, selected?.MountId ?? 0) : 0;
         if (error == 0 && on) error = RidingError(s, selected!.MountId, slot);
         if (error == 0)
@@ -233,31 +249,42 @@ public sealed class MountService : IGameTicker
     {
         state ??= s.MountState;
         var before = s.Wardrobe;
-        var tx = roles.NewTransaction();
+        var tx = _roles.NewTransaction();
         tx.ItemDelta(s.Role!.Id, s.Items, s.Items);
         tx.RoleBlob(s.Role.Id, "mounts", Encode(s, next, state));
         if (look != null) tx.RoleBlob(s.Role.Id, "wardrobe", look.ToByteArray());
-        tx.WithEconomy(character.FamilyEconomy(s, "cd13b/mount-state", [], [],
+        tx.WithEconomy(_character.FamilyEconomy(s, "cd13b/mount-state", [], [],
             new { StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, next, state))) }));
-        await roles.CommitAsync(tx, "mount/state", _ =>
+        await _roles.CommitAsync(tx, "mount/state", _ =>
         {
             s.Mounts = next; s.MountState = state;
-            if (look != null) wardrobe.AdoptCommitted(s, look);
+            if (look != null) _wardrobe.AdoptCommitted(s, look);
         });
         await ChangedAsync(s);
-        if (look != null) await wardrobe.PublishCommittedAsync(s, before!);
+        if (look != null) await _wardrobe.PublishCommittedAsync(s, before!);
+    }
+
+    /// <summary>After a committed 5012 change (ownership, riding): BuffService adds or drops mount energy meters.</summary>
+    public List<Func<GameSession, Task>> Changed { get; } = new();
+
+    /// <summary>5012 after a committed change, then the <see cref="Changed"/> listeners.</summary>
+    private async Task PublishOwnedAsync(GameSession s)
+    {
+        await LoginAsync(s);
+        foreach (var handler in Changed) await handler(s);
     }
 
     private async Task ChangedAsync(GameSession s)
     {
         ArmExpiry(s);
-        await LoginAsync(s);
-        await character.RefreshStatsAsync(s);
+        await PublishOwnedAsync(s);
+        await _character.RefreshStatsAsync(s);
+        foreach (var handler in RideChanged) await handler(s);
         var entity = RoleSessionService.PlayerEntity(s);
         entity.NotifyType = EntityBase.Types.NotifyType.Rider;
         await s.SendGameAsync(CharacterService.EntityBaseChange, entity);
         if (!s.Owners!.AllowsPresentation(s)) return;
-        foreach (var viewer in world.Viewers(s))
+        foreach (var viewer in _world.Viewers(s))
         {
             if (!s.Owners!.AllowsPresentation(s)) break;
             await viewer.SendGameAsync(CharacterService.EntityBaseChange, entity);
@@ -281,30 +308,30 @@ public sealed class MountService : IGameTicker
         return changed;
     }
 
-    public Task ReconcileAsync(GameSession s) => loop.IsOnLoop
-        ? ReconcileCoreAsync(s, deadlines.Capture(s))
-        : loop.InvokeAsync(() => ReconcileCoreAsync(s, deadlines.Capture(s)));
+    public Task ReconcileAsync(GameSession s) => _loop.IsOnLoop
+        ? ReconcileCoreAsync(s, _deadlines.Capture(s))
+        : _loop.InvokeAsync(() => ReconcileCoreAsync(s, _deadlines.Capture(s)));
 
     private async Task ReconcileCoreAsync(GameSession s, DeadlineLease lease)
     {
         if (s.Mounts == null) return;
         using var gate = await CharacterService.Lock(s);
-        if (!deadlines.IsCurrent(s, lease) || s.Mounts == null) return;
+        if (!_deadlines.IsCurrent(s, lease) || s.Mounts == null) return;
         var next = s.Mounts.Clone();
         // A timed mount and its appearance share one deadline; drop both in the expiry commit.
-        if (Normalize(s, next)) await CommitAsync(s, next, look: wardrobe.WithoutExpired(s));
+        if (Normalize(s, next)) await CommitAsync(s, next, look: _wardrobe.WithoutExpired(s));
     }
 
     public void Tick(GameTime time)
     {
-        if (time.Now - lastTick < TimeSpan.FromSeconds(1)) return;
-        lastTick = time.Now;
+        if (time.Now - _lastTick < TimeSpan.FromSeconds(1)) return;
+        _lastTick = time.Now;
         // Combat/death can invalidate riding without a MountService event. Preserve that small gate for
         // riders only; expiry itself is handled by the removable deadline above.
-        foreach (var s in sessions.All().Where(s => s.Role != null && s.Mounts != null && Rider(s) != 0))
+        foreach (var s in _sessions.All().Where(s => s.Role != null && s.Mounts != null && Rider(s) != 0))
         {
-            var lease = deadlines.Capture(s);
-            loop.PostOwned(s, () => ReconcileCoreAsync(s, lease));
+            var lease = _deadlines.Capture(s);
+            _loop.PostOwned(s, () => ReconcileCoreAsync(s, lease));
         }
     }
 
@@ -326,23 +353,26 @@ public sealed class MountService : IGameTicker
             InitializeEtchants(mount);
             next.Mounts[id] = mount;
             // The wardrobe Mount tab lights only from 5034, so the appearance commits with the ownership.
-            var look = wardrobe.WithMount(s, mount);
-            if (await character.ExchangeLockedAsync(s, [], [], new Dictionary<long, int> { [item.Guid] = 1 }, popup: false,
+            var look = _wardrobe.WithMount(s, mount);
+            if (await _character.ExchangeLockedAsync(s, [], [], new Dictionary<long, int> { [item.Guid] = 1 }, popup: false,
                 persist: tx =>
                 {
                     tx.RoleBlob(s.Role!.Id, "mounts", Encode(s, next));
                     if (look != null) tx.RoleBlob(s.Role!.Id, "wardrobe", look.ToByteArray());
-                    tx.WithEconomy(character.FamilyEconomy(s, "cd13b/mount-unlock", [(item.Entry, 1L)], [],
-                        new { Item = item.Entry, Mount = id,
-                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, next))) }));
+                    tx.WithEconomy(_character.FamilyEconomy(s, "cd13b/mount-unlock", [(item.Entry, 1L)], [],
+                        new
+                        {
+                            Item = item.Entry, Mount = id,
+                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, next)))
+                        }));
                 }, committed: () =>
                 {
                     s.Mounts = next; ArmExpiry(s);
-                    if (look != null) wardrobe.AdoptCommitted(s, look);
+                    if (look != null) _wardrobe.AdoptCommitted(s, look);
                 }, asyncCommit: true) == null) error = ErrorCodes.ItemsShort;
             else
             {
-                await LoginAsync(s);
+                await PublishOwnedAsync(s);
                 // 5034 only: 32747 already pops the unlock tip; 31189 would show a second reward tip (LC_DAL_Fashion:253-265).
                 if (look != null) await CharacterService.SyncAsync(s, WardrobeService.WardrobeSync, s.Wardrobe!.Clone());
                 await s.SendGameAsync(Unlock, new PlayerMountUnLockNtf { RiderId = id, EndTime = expiry });
@@ -351,7 +381,7 @@ public sealed class MountService : IGameTicker
         return error;
     }
 
-    private IEnumerable<JsonElement> Etchants(long mount, int part) => data.Table("AppearanceEtchConfig").Values
+    private IEnumerable<JsonElement> Etchants(long mount, int part) => _data.Table("AppearanceEtchConfig").Values
         .Where(r => GameData.Int(r, "_iAppearanceID") == mount && (part == 0 || GameData.Int(r, "_iPart") == part));
 
     private void InitializeEtchants(DBMount mount)
@@ -385,14 +415,17 @@ public sealed class MountService : IGameTicker
             foreach (var row in candidates) if ((roll -= GameData.Int(row, "_iWeight")) < 0) { selected = (int)GameData.Int(row, "_iID"); break; }
             var state = JsonSerializer.Deserialize<SavedState>(Encode(s))!;
             state.Previews[PreviewKey(req.MountId, req.PlanId, req.Part)] = selected;
-            if (await character.ExchangeLockedAsync(s, cost, [], popup: false, persist: tx =>
+            if (await _character.ExchangeLockedAsync(s, cost, [], popup: false, persist: tx =>
                 {
                     tx.RoleBlob(s.Role!.Id, "mounts", Encode(s, state: state));
-                    tx.WithEconomy(character.FamilyEconomy(s, "cd13b/mount-etchant-refresh", cost, [],
-                        new { Mount = req.MountId, Part = req.Part, Selected = selected,
-                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, state: state))) }));
+                    tx.WithEconomy(_character.FamilyEconomy(s, "cd13b/mount-etchant-refresh", cost, [],
+                        new
+                        {
+                            Mount = req.MountId, Part = req.Part, Selected = selected,
+                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, state: state)))
+                        }));
                 }, committed: () => s.MountState = state, asyncCommit: true) == null)
-                error = character.ShortageOf(s, cost);
+                error = _character.ShortageOf(s, cost);
         }
         await s.SendGameAsync(EtchantRefresh, new MountEtchantRefreshResp { Result = error, CfgId = error == 0 ? selected : 0, Req = req });
     }
@@ -432,11 +465,11 @@ public sealed class MountService : IGameTicker
     {
         using var gate = await CharacterService.Lock(s);
         var resp = new PlayerGetMountScoreAwardResp();
-        long score = s.Mounts!.Mounts.Values.Where(m => m.OverdueTimeMs == 0).Sum(m => data.Row("WardRobeConfig", m.MountId) is { } r ? GameData.Int(r, "_iFashionScore") : 0);
+        long score = s.Mounts!.Mounts.Values.Where(m => m.OverdueTimeMs == 0).Sum(m => _data.Row("WardRobeConfig", m.MountId) is { } r ? GameData.Int(r, "_iFashionScore") : 0);
         var goods = new List<(int Entry, int Count)>();
         foreach (long index in req.Index)
         {
-            var row = data.Table("MountsSpecialConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iSLev") == index);
+            var row = _data.Table("MountsSpecialConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iSLev") == index);
             if (row.ValueKind != JsonValueKind.Object) { resp.Result = ErrorCodes.RewardMissing; break; }
             if (s.MountState.Claimed.Contains(index)) { resp.Result = ErrorCodes.RewardClaimed; break; }
             if (GameData.Int(row, "_iSValue") > score) { resp.Result = ErrorCodes.PurchaseRequirements; break; }
@@ -447,12 +480,15 @@ public sealed class MountService : IGameTicker
         {
             var state = JsonSerializer.Deserialize<SavedState>(Encode(s))!;
             state.Claimed.UnionWith(req.Index);
-            if (await character.ExchangeLockedAsync(s, [], goods, persist: tx =>
+            if (await _character.ExchangeLockedAsync(s, [], goods, persist: tx =>
                 {
                     tx.RoleBlob(s.Role!.Id, "mounts", Encode(s, state: state));
-                    tx.WithEconomy(character.FamilyEconomy(s, "cd13b/mount-score", [], goods,
-                        new { Indices = req.Index.ToArray(),
-                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, state: state))) }));
+                    tx.WithEconomy(_character.FamilyEconomy(s, "cd13b/mount-score", [], goods,
+                        new
+                        {
+                            Indices = req.Index.ToArray(),
+                            StateHash = Convert.ToHexString(SHA256.HashData(Encode(s, state: state)))
+                        }));
                 }, committed: () => s.MountState = state, asyncCommit: true) == null)
                 resp.Result = ErrorCodes.ItemNoConfig;
             else resp.Index.Add(req.Index);

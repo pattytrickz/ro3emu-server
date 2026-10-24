@@ -84,7 +84,8 @@ public sealed class DbWriteGuardTests : IDisposable
                 }
                 catch (SqliteException error) { code = error.SqliteErrorCode; }
                 catch (Exception error) { unexpected = error; }
-            }) { IsBackground = true };
+            })
+            { IsBackground = true };
             thread.Start();
             if (!thread.Join(TimeSpan.FromSeconds(10))) throw new TimeoutException("D1 wrong-thread probe did not finish.");
             if (unexpected != null) throw unexpected;
@@ -117,13 +118,13 @@ public sealed class DbWriteGuardTests : IDisposable
     }
 #endif
 
-    [ClientDataFact]
+    [Fact]
     public async Task HttpMicroGameLoopTimerAndBackupHaveZeroNonWriterWritesAfterStartup()
     {
         var (http, micro, game) = TestPorts.FreePorts();
         await using var app = ServerHost.Create([], o =>
         {
-            o.DataDir = _dir; o.HttpPort = http; o.MicroGatePort = micro; o.GameGatePort = game;
+            o.DataDir = _dir; o.GameDataDir = SyntheticData.Dir; o.HttpPort = http; o.MicroGatePort = micro; o.GameGatePort = game;
         });
         await app.StartAsync();
         try

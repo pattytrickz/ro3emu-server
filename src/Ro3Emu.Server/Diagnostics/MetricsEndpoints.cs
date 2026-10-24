@@ -8,8 +8,8 @@ public static class MetricsEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/ro3emu/metrics", (HttpContext context, ServerMetrics metrics, SessionRegistry sessions, PublicLineManager lines) =>
-            Local(context) ? Results.Json(metrics.Snapshot(sessions, lines)) : Results.NotFound());
+        app.MapGet("/ro3emu/metrics", (HttpContext context, ServerMetrics metrics, SessionCensus census, PublicLineManager lines) =>
+            Local(context) ? Results.Json(metrics.Snapshot(census.Current, lines)) : Results.NotFound());
         app.MapPost("/ro3emu/metrics/reset", (HttpContext context, ServerMetrics metrics) =>
             Local(context) ? Results.Json(new { epoch = metrics.Reset() }) : Results.NotFound());
         // Slowest game messages by total loop time (MessageRoutes, audit F4.1).
@@ -19,9 +19,12 @@ public static class MetricsEndpoints
         app.MapGet("/ro3emu/metrics/persistence", (HttpContext context, Accounts.AccountStore accounts,
             Game.Persistence.PositionPersistence positions, Game.Persistence.SettingsPersistence settings,
             IEnumerable<IHostedService> hosted) => Local(context)
-            ? Results.Json(new { snapshots = accounts.Snapshots.Snapshot(), skippedWrites = accounts.Snapshots.SkippedWrites,
+            ? Results.Json(new
+            {
+                snapshots = accounts.Snapshots.Snapshot(), skippedWrites = accounts.Snapshots.SkippedWrites,
                 positions = positions.Snapshot(), settings = settings.Snapshot(), vectorCacheHits = accounts.VectorCacheHits, vectorCacheRetries = accounts.VectorCacheRetries,
-                unchangedSaves = accounts.Snapshots.PersistedSkips, backup = hosted.OfType<Accounts.DatabaseBackup>().SingleOrDefault()?.Snapshot(), loopWaits = accounts.AccessMetrics.LoopWaits(40) })
+                unchangedSaves = accounts.Snapshots.PersistedSkips, backup = hosted.OfType<Accounts.DatabaseBackup>().SingleOrDefault()?.Snapshot(), loopWaits = accounts.AccessMetrics.LoopWaits(40)
+            })
             : Results.NotFound());
         app.MapGet("/ro3emu/metrics/public-key", (HttpContext context, GateCrypto crypto) =>
             Local(context) ? Results.Text(crypto.PublicKeyPem, "text/plain") : Results.NotFound());

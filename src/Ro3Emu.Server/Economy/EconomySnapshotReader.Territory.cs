@@ -46,29 +46,30 @@ public static partial class EconomySnapshotReader
                 int rowNumber = 0;
                 while (r.Read())
                 {
-                    Guard("territory_wars_seasons/row/" + rowNumber++, () => {
-                    string epoch = SqlText(r, 0), key = "territory_wars_seasons/" + epoch;
-                    byte[] bytes = SqlBlob(r, 1); Measure("territory_wars_seasons", bytes.Length, true);
-                    Guard(key, () =>
+                    Guard("territory_wars_seasons/row/" + rowNumber++, () =>
                     {
-                        using var doc = Json(bytes);
-                        if (String(doc.RootElement, "Epoch") != epoch) throw new FormatException("Territory archive epoch mismatch.");
-                        DecodeWarsWorld(doc.RootElement, key, true);
-                    });
+                        string epoch = SqlText(r, 0), key = "territory_wars_seasons/" + epoch;
+                        byte[] bytes = SqlBlob(r, 1); Measure("territory_wars_seasons", bytes.Length, true);
+                        Guard(key, () =>
+                        {
+                            using var doc = Json(bytes);
+                            if (String(doc.RootElement, "Epoch") != epoch) throw new FormatException("Territory archive epoch mismatch.");
+                            DecodeWarsWorld(doc.RootElement, key, true);
+                        });
                     });
                 }
             }
             ScanJsonEvidence("territory_escort", "id", "state", DecodeEscort);
         }
 
-        private readonly HashSet<string> activeWarsEpochs = [];
+        private readonly HashSet<string> _activeWarsEpochs = [];
         private void DecodeWarsWorld(JsonElement state, string key, bool archived)
         {
             Fields(state, "Epoch LastStage Owners Rounds Battles Results SiegeHistory SiegeRuns Donations RuleResults WorldDrops NextWorldDropId WorldActivityRespawns WorldActivityOccurrences WorldPickupOccurrences");
             string epoch = String(state, "Epoch");
-            if (archived && (epoch.Length == 0 || activeWarsEpochs.Contains(epoch)))
+            if (archived && (epoch.Length == 0 || _activeWarsEpochs.Contains(epoch)))
             { Issue(EconomyIssueKind.Coverage, key, "Archive epoch absent or duplicates active state."); return; }
-            if (!archived && epoch.Length > 0) activeWarsEpochs.Add(epoch);
+            if (!archived && epoch.Length > 0) _activeWarsEpochs.Add(epoch);
             if (Try(state, "WorldActivityOccurrences", out var activityOccurrences))
                 foreach (var occurrence in Properties(activityOccurrences))
                 {
@@ -187,21 +188,23 @@ public static partial class EconomySnapshotReader
                 int rowNumber = 0;
                 while (r.Read())
                 {
-                    Guard("festival_reward/row/" + rowNumber++, () => {
-                    string key = $"festival_reward/{SqlLong(r, 0)}/{SqlLong(r, 1)}/{SqlLong(r, 2)}";
-                    Measure("festival_reward", 0);
-                    if (SqlLong(r, 4) == 0)
+                    Guard("festival_reward/row/" + rowNumber++, () =>
                     {
-                        if (frozen && !r.IsDBNull(5)) ReadFrozenGrants(SqlBlob(r, 5), SqlLong(r, 1), key);
-                        else Issue(EconomyIssueKind.RecoveryDebt, key,
-                            $"Unclaimed earned AwardId {SqlLong(r, 3)}; random contents cannot be resolved at read time.");
-                    }
-                    else if (SqlLong(r, 4) != 1) Issue(EconomyIssueKind.Corruption, key, "Invalid claim status.");
+                        string key = $"festival_reward/{SqlLong(r, 0)}/{SqlLong(r, 1)}/{SqlLong(r, 2)}";
+                        Measure("festival_reward", 0);
+                        if (SqlLong(r, 4) == 0)
+                        {
+                            if (frozen && !r.IsDBNull(5)) ReadFrozenGrants(SqlBlob(r, 5), SqlLong(r, 1), key);
+                            else Issue(EconomyIssueKind.RecoveryDebt, key,
+                                $"Unclaimed earned AwardId {SqlLong(r, 3)}; random contents cannot be resolved at read time.");
+                        }
+                        else if (SqlLong(r, 4) != 1) Issue(EconomyIssueKind.Corruption, key, "Invalid claim status.");
                     });
                 }
             }
             if (Has("mvp_award_obligation")) Guard("mvp_award_obligation", () => ReadEventMvp(null));
             if (Has("timed_battle_obligation")) Guard("timed_battle_obligation", () => ReadEventTimedBattle(null));
+            if (Has("casual_battle_obligation")) Guard("casual_battle_obligation", ReadCasualBattle);
             if (Has("guild_challenge_clear") && new[] { "id", "pending", "state" }.All(Columns("guild_challenge_clear").ContainsKey))
             {
                 using var cmd = Command("SELECT id,pending,state FROM guild_challenge_clear ORDER BY id");
@@ -209,37 +212,38 @@ public static partial class EconomySnapshotReader
                 int rowNumber = 0;
                 while (r.Read())
                 {
-                    Guard("guild_challenge_clear/row/" + rowNumber++, () => {
-                    string key = "guild_challenge_clear/" + SqlText(r, 0); byte[] blob = SqlBlob(r, 2);
-                    Measure("guild_challenge_clear", blob.Length, true);
-                    Guard(key, () =>
+                    Guard("guild_challenge_clear/row/" + rowNumber++, () =>
                     {
-                        using var doc = Json(blob);
-                        var root = doc.RootElement;
-                        Fields(root, "Id Guild Cycle Season PlayBook OpenDay Challenge Difficulty Stage StageTimeMs PassTimeMs NewRecord Personal Delivered AuctionPublished AuctionEntries");
-                        if (String(root, "Id") != SqlText(r, 0)) throw new FormatException("Guild clear identity mismatch.");
-                        long pending = SqlLong(r, 1);
-                        if (pending is not (0 or 1)) throw new FormatException("Invalid guild challenge pending status.");
-                        var delivered = Try(root, "Delivered", out var settled)
-                            ? Elements(settled).Select(x => x.GetInt64()).ToHashSet() : new HashSet<long>();
-                        if (Try(root, "Personal", out var personal)) foreach (var grant in Properties(personal))
+                        string key = "guild_challenge_clear/" + SqlText(r, 0); byte[] blob = SqlBlob(r, 2);
+                        Measure("guild_challenge_clear", blob.Length, true);
+                        Guard(key, () =>
                         {
-                            long role = long.Parse(grant.Name, CultureInfo.InvariantCulture);
-                            if (delivered.Contains(role)) continue;
-                            if (pending == 0) Issue(EconomyIssueKind.Corruption, key + "/" + role,
-                                "Undelivered personal clear has terminal pending marker.");
-                            int index = 0;
-                            foreach (var good in Elements(grant.Value))
+                            using var doc = Json(blob);
+                            var root = doc.RootElement;
+                            Fields(root, "Id Guild Cycle Season PlayBook OpenDay Challenge Difficulty Stage StageTimeMs PassTimeMs NewRecord Personal Delivered AuctionPublished AuctionEntries");
+                            if (String(root, "Id") != SqlText(r, 0)) throw new FormatException("Guild clear identity mismatch.");
+                            long pending = SqlLong(r, 1);
+                            if (pending is not (0 or 1)) throw new FormatException("Invalid guild challenge pending status.");
+                            var delivered = Try(root, "Delivered", out var settled)
+                                ? Elements(settled).Select(x => x.GetInt64()).ToHashSet() : new HashSet<long>();
+                            if (Try(root, "Personal", out var personal)) foreach (var grant in Properties(personal))
                             {
-                                Fields(good, "Entry Count Bind");
-                                Entry(Long(good, "Entry"), Long(good, "Count"), Role(role, key),
+                                long role = long.Parse(grant.Name, CultureInfo.InvariantCulture);
+                                if (delivered.Contains(role)) continue;
+                                if (pending == 0) Issue(EconomyIssueKind.Corruption, key + "/" + role,
+                                "Undelivered personal clear has terminal pending marker.");
+                                int index = 0;
+                                foreach (var good in Elements(grant.Value))
+                                {
+                                    Fields(good, "Entry Count Bind");
+                                    Entry(Long(good, "Entry"), Long(good, "Count"), Role(role, key),
                                     EconomyCompartment.Pending, key + "/" + role + "/" + index++,
                                     GrantFingerprint(Long(good, "Bind")));
+                                }
                             }
-                        }
-                        if (pending == 1) Issue(EconomyIssueKind.RecoveryDebt, key,
-                            "Earned guild challenge clear has undelivered goods or auction publication.");
-                    });
+                            if (pending == 1) Issue(EconomyIssueKind.RecoveryDebt, key,
+                                "Earned guild challenge clear has undelivered goods or auction publication.");
+                        });
                     });
                 }
             }
@@ -343,6 +347,10 @@ public static partial class EconomySnapshotReader
                                     Prop(season.Value, "End").GetDateTime();
                                 }
                             }
+                            break;
+                        case "multi_dungeon_server":
+                            // Realm of the Gods first clears (hall of fame, Sacred Blessing unlocks): records, no balance.
+                            ValidateProto(Convert.FromBase64String(value), DBMultiDungeonServerInfo.Descriptor);
                             break;
                         default:
                             Issue(EconomyIssueKind.UnknownSchema, key, "Unclassified server_state key.");

@@ -18,7 +18,7 @@ public sealed partial class SkillCombatTests
 
     private Task Hurt(string name) => Loop.InvokeAsync(() => { Session(name).CurrentHp = 1; Session(name).CurrentSp = 0; return Task.CompletedTask; });
 
-    private void LevelUpRefill(bool on) => app.Services.GetRequiredService<IOptions<ServerOptions>>().Value.LevelUpRefill = on;
+    private void LevelUpRefill(bool on) => _app.Services.GetRequiredService<IOptions<ServerOptions>>().Value.LevelUpRefill = on;
 
     /// <summary>ServerOptions.LevelUpRefill (house rule, off by default): a base level-up refills HP and SP.</summary>
     [ClientDataFact]
@@ -49,7 +49,7 @@ public sealed partial class SkillCombatTests
         var before = await Vitals("alice");
         var session = await Loop.InvokeAsync(() => Task.FromResult(Session("alice")));
 
-        await Loop.InvokeAsync(() => app.Services.GetRequiredService<OwnerRegistry>().RunAsync("kill exp",
+        await Loop.InvokeAsync(() => _app.Services.GetRequiredService<OwnerRegistry>().RunAsync("kill exp",
             [ReservationKey.Role(session.Role!.Id)], async () =>
             {
                 using var state = await Ro3Emu.Server.Game.CharacterService.Lock(session);

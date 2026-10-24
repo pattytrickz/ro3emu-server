@@ -16,7 +16,7 @@ public sealed partial class GuildLeagueService
     /// <summary>GuildSettingConfig GuildLeagueSceneID [2210101, 2220101] (LC_GuildLeagueHelper.lua:318-349).</summary>
     public long MainScene => SceneOf(0, 2210101);
     public long SubScene => SceneOf(1, 2220101);
-    private long SceneOf(int index, long fallback) => data.Table("GuildSettingConfig").TryGetValue("GuildLeagueSceneID", out var row)
+    private long SceneOf(int index, long fallback) => _data.Table("GuildSettingConfig").TryGetValue("GuildLeagueSceneID", out var row)
         && row.TryGetProperty("_kValue", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Array && v.GetArrayLength() > index
         && GameData.Number(v[index]) is { } n ? (long)n : fallback;
 
@@ -86,12 +86,21 @@ public sealed partial class GuildLeagueService
         public long Heal { get; set; }
         public long DeadUntil { get; set; }
         public long NextHold { get; set; }
+        /// <summary>The circle unit the fighter stands in, as last sent in dungeon var 10103.</summary>
+        public long InCircle { get; set; }
         public Dictionary<long, long> HitBy { get; } = new();
     }
 
     internal sealed class Point
     {
         public required MapRegion Area { get; init; }
+        /// <summary>The OccupationCircle unit (NPCConfig 4800000) that shows the point; Circle is its CustomData 16.</summary>
+        public long Uid { get; init; }
+        public int Circle { get; init; }
+        public MapPoint At { get; init; }
+        public int Blue { get; set; }
+        public int Red { get; set; }
+        public string Shown { get; set; } = "";
         public long Owner { get; set; }
         public long Challenger { get; set; }
         public long Since { get; set; }
@@ -145,15 +154,15 @@ public sealed partial class GuildLeagueService
         public Field FieldOf(long scene) => scene == Main.Scene ? Main : Sub;
     }
 
-    private readonly Dictionary<string, Match> matches = new();
-    private readonly HashSet<GameSession> switching = new();
-    internal IReadOnlyCollection<Match> Matches => matches.Values;
+    private readonly Dictionary<string, Match> _matches = new();
+    private readonly HashSet<GameSession> _switching = new();
+    internal IReadOnlyCollection<Match> Matches => _matches.Values;
     private static string MatchKey(int index, int round, int tier, int order, int pair) => $"{index}:{round}:{tier}:{order}:{pair}";
 
     private (Match Match, Field Field)? Locate(GameSession s)
     {
         if (s.InstanceId == 0) return null;
-        foreach (var m in matches.Values)
+        foreach (var m in _matches.Values)
         {
             if (m.Main.Room?.Id == s.InstanceId) return (m, m.Main);
             if (m.Sub.Room?.Id == s.InstanceId) return (m, m.Sub);
@@ -161,18 +170,18 @@ public sealed partial class GuildLeagueService
         return null;
     }
 
-    private long GuildOf(GameSession s) => s.Role == null ? 0 : s.Guild is { GuildId: > 0 } g ? g.GuildId : guilds.ForRole(s.Role.Id)?.Id ?? 0;
+    private long GuildOf(GameSession s) => s.Role == null ? 0 : s.Guild is { GuildId: > 0 } g ? g.GuildId : _guilds.ForRole(s.Role.Id)?.Id ?? 0;
 
     private void HookBattle()
     {
-        scene.Loaded.Add(LoadedAsync);
-        scene.Leaving.Add(LeavingAsync);
-        combat.PlayerDied.Add(DiedAsync);
-        combat.ReviveInfoOwners.Add(s => Locate(s) != null);
-        combat.PvpDealtAsync.Add(PvpAsync);
-        combat.HealedAsync.Add(HealedAsync);
-        combat.EventDamageRecorded.Add(MonsterDamagedAsync);
-        combat.Killed.Add(MonsterKilledAsync);
+        _scene.Loaded.Add(LoadedAsync);
+        _scene.Leaving.Add(LeavingAsync);
+        _combat.PlayerDied.Add(DiedAsync);
+        _combat.ReviveInfoOwners.Add(s => Locate(s) != null);
+        _combat.PvpDealtAsync.Add(PvpAsync);
+        _combat.HealedAsync.Add(HealedAsync);
+        _combat.EventDamageRecorded.Add(MonsterDamagedAsync);
+        _combat.Killed.Add(MonsterKilledAsync);
     }
 
     // ---- admission -----------------------------------------------------------------------------------------------------
@@ -180,9 +189,9 @@ public sealed partial class GuildLeagueService
     /// <summary>
     /// 30400 for either battlefield (UI_Sys_GuildLeague_BattleWidgetCtrl.lua:750-800). The guild must have an undecided
     /// match in the round whose window is open. Temporary members are refused (ErrorCodeConfig 517, GuildTemporaryRegularTime);
-    /// the Main Battlefield admits positions GuildSettingConfig GuildLeagueMainSceneNeedPosition (518) and 40 per guild
-    /// (PublicParamConfig GuildLeagueMaxPlayerNumber, 523). With no elite roster (32302/32303 are not served) the first 40
-    /// entrants are the guild's elites, the "auto fill" of 10140100124 (inferred).
+    /// the Main Battlefield admits the guild's elite roster (GuildService.LeagueElite) in positions GuildSettingConfig
+    /// GuildLeagueMainSceneNeedPosition (518) and 40 per guild (PublicParamConfig GuildLeagueMaxPlayerNumber, 523). A roster
+    /// short of GuildLeagueEliteNum is filled when the round opens (<see cref="FillElitesAsync"/>).
     /// </summary>
     public async Task<bool> TryEnterAsync(GameSession s, EnterDungeonReq req)
     {
@@ -196,10 +205,10 @@ public sealed partial class GuildLeagueService
         var (match, field) = target!.Value;
         long guild = GuildOf(s);
         bool joined;
-        if (field.Room is { Closed: false } room) joined = instances.AddParticipant(room, s, continuation: current != null);
+        if (field.Room is { Closed: false } room) joined = _instances.AddParticipant(room, s, continuation: current != null);
         else
         {
-            field.Room = instances.Create(field.Scene, [s]);
+            field.Room = _instances.Create(field.Scene, [s]);
             field.Actors.Clear(); field.Hitters.Clear();
             if (field == match.Main) match.Boss = null; // the old room took its Boss with it
             joined = true;
@@ -211,10 +220,10 @@ public sealed partial class GuildLeagueService
         s.EventFaction = match.Camp(guild);
         bool entered;
         // A move between the two battlefields keeps the camp through the old room's departure (LeavingAsync).
-        if (current != null) switching.Add(s);
-        try { entered = await instances.EnterAsync(field.Room!, s, 0); }
+        if (current != null) _switching.Add(s);
+        try { entered = await _instances.EnterAsync(field.Room!, s, 0); }
         catch { s.EventFaction = priorFaction; throw; }
-        finally { switching.Remove(s); }
+        finally { _switching.Remove(s); }
         if (!entered) { s.EventFaction = Locate(s) is { } still ? still.Match.Camp(guild) : 0; return true; }
         Enlist(field, s, guild);
         await SpawnAsync(match, field);
@@ -225,15 +234,15 @@ public sealed partial class GuildLeagueService
     {
         target = null;
         if (s.Role == null || s.Progress == null || s.Dead || s.SceneLoading) return ErrorCodes.Parameter;
-        if (!functions.IsOpen(s, Function)) return ErrorCodes.FeatureUnavailable;
-        if (data.Row("DungeonConfig", sceneEntry) is { } dungeon && s.Progress.Level < GameData.Int(dungeon, "_iDLoadLv"))
+        if (!_functions.IsOpen(s, Function)) return ErrorCodes.FeatureUnavailable;
+        if (_data.Row("DungeonConfig", sceneEntry) is { } dungeon && s.Progress.Level < GameData.Int(dungeon, "_iDLoadLv"))
             return ErrorCodes.FeatureUnavailable;
-        var guild = guilds.ForRole(s.Role.Id);
+        var guild = _guilds.ForRole(s.Role.Id);
         if (guild == null || !guild.Members.TryGetValue(s.Role.Id, out var member)) return ErrorCodes.NotInGuild;
         if (Temporary(member)) return ErrorCodes.LeagueTemporary;
         long now = Now;
-        var t = calendar.Current(now);
-        var cup = state.Cup;
+        var t = _calendar.Current(now);
+        var cup = _state.Cup;
         int round = t == null ? 0 : GuildLeagueCalendar.OpenRound(t, now);
         if (round == 0 || cup == null || cup.Index != t!.Index || cup.SettledRound < round - 1) return ErrorCodes.LeagueClosed;
         var group = GroupOf(guild.Id);
@@ -247,7 +256,8 @@ public sealed partial class GuildLeagueService
         if (sceneEntry == match.Main.Scene)
         {
             long[] positions = SettingArray("GuildLeagueMainSceneNeedPosition");
-            if (positions.Length > 0 && !positions.Contains(member.Official)) return ErrorCodes.LeagueElite;
+            if (!GuildService.IsLeagueElite(guild, s.Role.Id) || positions.Length > 0 && !positions.Contains(member.Official))
+                return ErrorCodes.LeagueElite;
             long[] limits = Param("GuildLeagueMaxPlayerNumber");
             long limit = limits.Length > match.Camp(guild.Id) - 1 && match.Camp(guild.Id) > 0 ? limits[match.Camp(guild.Id) - 1] : 40;
             int inside = match.Main.Room?.ActiveMembers.Count(m => m.Session != s && GuildOf(m.Session) == guild.Id) ?? 0;
@@ -262,23 +272,31 @@ public sealed partial class GuildLeagueService
     private bool Temporary(GuildStore.Member member) => member.Official == 20
         && Now - member.EnterTime / 1000 < Setting("GuildTemporaryRegularTime", 3600);
 
-    private long[] SettingArray(string name) => data.Table("GuildSettingConfig").TryGetValue(name, out var row)
+    private long[] SettingArray(string name) => _data.Table("GuildSettingConfig").TryGetValue(name, out var row)
         && row.TryGetProperty("_kValue", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Array
         ? v.EnumerateArray().Select(x => (long)(GameData.Number(x) ?? 0)).ToArray() : [];
 
     private Match MatchFor(Cup cup, Group group, int round, int pair, GuildLeagueBracket.Pair guildsOf, GuildLeagueCalendar.Window window)
     {
         string key = MatchKey(cup.Index, round, group.Tier, group.Order, pair);
-        if (matches.TryGetValue(key, out var match)) return match;
-        match = new Match { Key = key, Index = cup.Index, Round = round, Tier = group.Tier, Order = group.Order, Pair = pair,
+        if (_matches.TryGetValue(key, out var match)) return match;
+        match = new Match
+        {
+            Key = key, Index = cup.Index, Round = round, Tier = group.Tier, Order = group.Order, Pair = pair,
             Blue = guildsOf.Blue, Red = guildsOf.Red, Start = window.Start, End = window.End,
-            Main = new Field(MainScene), Sub = new Field(SubScene) };
+            Main = new Field(MainScene), Sub = new Field(SubScene)
+        };
         foreach (long g in new[] { match.Blue, match.Red }) { match.Points[g] = 0; match.Morale[g] = 0; match.MainKills[g] = 0; }
-        if (maps.Map(MainScene) is { } map)
+        if (_maps.Map(MainScene) is { } map)
             foreach (int id in CapturePoints)
-                if (map.Regions.TryGetValue(id, out var region)) match.Main.Points[id] = new Point { Area = region };
+                if (map.Regions.TryGetValue(id, out var region))
+                    match.Main.Points[id] = new Point
+                    {
+                        Area = region, Uid = CircleUidBase | Interlocked.Increment(ref _circleSerial),
+                        Circle = CircleId(id), At = map.Grounded(new MapPoint(region.X, region.Y, region.Z, 0))
+                    };
         match.Bosses = 0;
-        matches[key] = match;
+        _matches[key] = match;
         return match;
     }
 
@@ -295,13 +313,14 @@ public sealed partial class GuildLeagueService
         if (Locate(s) is not { } at || s.Role == null) return;
         var (match, field) = at;
         long guild = GuildOf(s);
-        if (match.Camp(guild) == 0 || match.Ended && Now >= match.EndedAt + EndGrace) { await instances.LeaveAsync(s); return; }
+        if (match.Camp(guild) == 0 || match.Ended && Now >= match.EndedAt + EndGrace) { await _instances.LeaveAsync(s); return; }
         s.EventFaction = match.Camp(guild);
         Enlist(field, s, guild);
         await s.SendGameAsync(DungeonService.BaseInfo, BaseInfo(match, field));
         await s.SendGameAsync(SyncNotify, new SyncPlayerGuildLeagueDungeonNtf { Info = MatchInfo(match) });
+        if (field == match.Main) await ShowCirclesAsync(s, match);
         if (CampPoint(match, field, guild) is { } point && field == match.Sub && match.Camp(guild) == 2)
-            await scene.TeleportInMapAsync(s, point);
+            await _scene.TeleportInMapAsync(s, point);
         await MoraleBuffAsync(s, match, guild);
     }
 
@@ -310,16 +329,17 @@ public sealed partial class GuildLeagueService
     {
         if (Locate(s) == null) return false;
         await s.SendGameAsync(DungeonService.Leave, new LeaveDungeonRsp());
-        await instances.LeaveAsync(s);
+        await _instances.LeaveAsync(s);
         return true;
     }
 
     private async Task LeavingAsync(GameSession s)
     {
         if (Locate(s) is not { } at || s.Role == null) return;
-        if (!switching.Contains(s)) s.EventFaction = 0;
+        if (!_switching.Contains(s)) s.EventFaction = 0;
         at.Match.Carriers.Remove(s.Role.Id); // (inferred) a carried flag is lost with its carrier
-        foreach (var buff in s.Buffs.Where(b => MoraleBuffs.Contains(b.ConfigId)).ToArray()) await buffs.RemoveAsync(s, buff);
+        s.WorldState.CustomData.Remove(FlagStateKey);
+        foreach (var buff in s.Buffs.Where(b => MoraleBuffs.Contains(b.ConfigId)).ToArray()) await _buffs.RemoveAsync(s, buff);
     }
 
     /// <summary>Main: no camp teleport (both guilds enter at the "Spawn" born point 14); revival goes to the camp's side
@@ -328,7 +348,7 @@ public sealed partial class GuildLeagueService
     {
         int camp = match.Camp(guild);
         int point = field == match.Main ? (camp == 1 ? 22 : 21) : (camp == 1 ? 17 : 15);
-        return maps.Map(field.Scene) is { } map && map.Points.TryGetValue(point, out var p) ? map.Grounded(p) : null;
+        return _maps.Map(field.Scene) is { } map && map.Points.TryGetValue(point, out var p) ? map.Grounded(p) : null;
     }
 
     private GuildLeagueMatchInfo MatchInfo(Match m) => new()
@@ -339,12 +359,21 @@ public sealed partial class GuildLeagueService
     private DungeonBaseInfoNotify BaseInfo(Match m, Field field)
     {
         int stage = m.Ended ? 3 : 2;
-        var info = new DungeonBaseInfoNotify { DungeonEntry = field.Scene, DungeonId = field.Room?.Id ?? 0, Stage = stage, Level = 1,
-            InitData = new DungeonInitData { GuildLeagueInitStr = new GuildLeagueInitStr { Info = MatchInfo(m), CurStage = m.Round },
-                PlaybookId = seasons.PlayBook },
-            StageModuleData = new DungeonStageModuleData { MapState = stage, Stage = stage, StageStartTime = m.Start * 1000,
-                StageEndTime = m.End * 1000, MapStateStartTime = m.Start * 1000, MapStateEndTime = m.End * 1000 },
-            ChangeType = (DungeonBaseInfoNotify.Types.eChangeType)2 };
+        var info = new DungeonBaseInfoNotify
+        {
+            DungeonEntry = field.Scene, DungeonId = field.Room?.Id ?? 0, Stage = stage, Level = 1,
+            InitData = new DungeonInitData
+            {
+                GuildLeagueInitStr = new GuildLeagueInitStr { Info = MatchInfo(m), CurStage = m.Round },
+                PlaybookId = _seasons.PlayBook
+            },
+            StageModuleData = new DungeonStageModuleData
+            {
+                MapState = stage, Stage = stage, StageStartTime = m.Start * 1000,
+                StageEndTime = m.End * 1000, MapStateStartTime = m.Start * 1000, MapStateEndTime = m.End * 1000
+            },
+            ChangeType = (DungeonBaseInfoNotify.Types.eChangeType)2
+        };
         info.Vars.Add(Vars(m));
         return info;
     }
@@ -375,7 +404,7 @@ public sealed partial class GuildLeagueService
         {
             try { await s.SendGameAsync(id, msg); }
             catch (Exception e) when (e is IOException or ObjectDisposedException or System.Net.Sockets.SocketException)
-            { log.LogDebug(e, "Guild League notice {Message} not delivered to {Role}", id, s.Role?.Id); }
+            { _log.LogDebug(e, "Guild League notice {Message} not delivered to {Role}", id, s.Role?.Id); }
         });
     }
 
@@ -423,9 +452,9 @@ public sealed partial class GuildLeagueService
     {
         int wanted = MoraleBuff(m, guild);
         foreach (var buff in s.Buffs.Where(b => MoraleBuffs.Contains(b.ConfigId) && b.ConfigId != wanted).ToArray())
-            await buffs.RemoveAsync(s, buff);
+            await _buffs.RemoveAsync(s, buff);
         if (wanted != 0 && !s.Dead && s.Buffs.All(b => b.ConfigId != wanted))
-            await buffs.AddAsync(s, wanted, (int)Math.Clamp((m.End - Now) * 1000, 1000, int.MaxValue), s.Role!.Id);
+            await _buffs.AddAsync(s, wanted, (int)Math.Clamp((m.End - Now) * 1000, 1000, int.MaxValue), s.Role!.Id);
     }
 
     /// <summary>
@@ -434,14 +463,17 @@ public sealed partial class GuildLeagueService
     /// </summary>
     private async Task TitleAsync(Field field, Fighter f, int titleId)
     {
-        if (data.Row("BattleEventPointConfig", titleId) is not { } row) return;
+        if (_data.Row("BattleEventPointConfig", titleId) is not { } row) return;
         if (row.TryGetProperty("_kScore", out var score) && score.ValueKind == System.Text.Json.JsonValueKind.Array
             && score.GetArrayLength() >= 2 && GameData.Number(score[0]) == 3) f.Score += (long)(GameData.Number(score[1]) ?? 0);
         var msg = new GuildLeagueBattlePointTitleNtf { TitleId = titleId, PlayerGuid = f.Role };
         if (row.TryGetProperty("_iName", out var name) && name.ValueKind == System.Text.Json.JsonValueKind.Array)
             foreach (var p in name.EnumerateArray().Skip(1))
-                msg.ParamList.Add(new GuildLeagueBattlePointTitleParam { StringValue = p.ValueKind == System.Text.Json.JsonValueKind.String
-                    ? p.GetString() ?? "" : p.ToString(), IntValue = int.TryParse(p.ToString(), out int n) ? n : 0 });
+                msg.ParamList.Add(new GuildLeagueBattlePointTitleParam
+                {
+                    StringValue = p.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? p.GetString() ?? "" : p.ToString(), IntValue = int.TryParse(p.ToString(), out int n) ? n : 0
+                });
         await SendAllAsync(Present(field), TitleNotify, msg);
     }
 
@@ -493,9 +525,13 @@ public sealed partial class GuildLeagueService
         if (Locate(s) is not { } at || s.Role == null || !at.Field.Fighters.TryGetValue(s.Role.Id, out var f)) return;
         f.Deaths++;
         f.DeadUntil = Now + ReviveSeconds;
-        at.Match.Carriers.Remove(s.Role.Id); // (inferred) the flag is lost when its carrier falls
-        await s.SendGameAsync(CombatService.ReviveInfo, new SyncClientPlayerReviveInfoNtf { BDead = true, ReviveTime = f.DeadUntil,
-            SceneEntry = s.SceneEntry });
+        if (at.Match.Carriers.Remove(s.Role.Id)) // (inferred) the flag is lost when its carrier falls
+            PostFlag(s);
+        await s.SendGameAsync(CombatService.ReviveInfo, new SyncClientPlayerReviveInfoNtf
+        {
+            BDead = true, ReviveTime = f.DeadUntil,
+            SceneEntry = s.SceneEntry
+        });
     }
 
     /// <summary>31013 from a league battlefield: allowed once the countdown is over (the client sends none by itself).</summary>
@@ -510,16 +546,16 @@ public sealed partial class GuildLeagueService
 
     private async Task ReviveAtCampAsync(GameSession s)
     {
-        if (Locate(s) is not { } at || !s.Dead || !combat.TryClaimRevive(s)) return;
+        if (Locate(s) is not { } at || !s.Dead || !_combat.TryClaimRevive(s)) return;
         try
         {
-            if (!combat.CommitReviveClaim(s)) return;
+            if (!_combat.CommitReviveClaim(s)) return;
             await s.SendGameAsync(CombatService.Relive, new EntityReliveAck { Result = 0, EntityID = (ulong)s.Role!.Id });
-            await combat.PublishReviveAsync(s, CampPoint(at.Match, at.Field, GuildOf(s)));
-            await buffs.AddAsync(s, RespawnProtection, 5000, s.Role.Id);
+            await _combat.PublishReviveAsync(s, CampPoint(at.Match, at.Field, GuildOf(s)));
+            await _buffs.AddAsync(s, RespawnProtection, 5000, s.Role.Id);
             await MoraleBuffAsync(s, at.Match, GuildOf(s));
         }
-        finally { combat.ReleaseReviveClaim(s); }
+        finally { _combat.ReleaseReviveClaim(s); }
     }
 
     private Task MonsterDamagedAsync(GameSession s, MonsterUnit monster, long amount)
@@ -549,7 +585,7 @@ public sealed partial class GuildLeagueService
         if (spawned.Kind == Kind.Courtyard)
         {
             m.Boss = null;
-            if (m.Carriers.Add(killer.Role)) { killer.GetFlags++; killer.Score += PersonalFlagTaken; }
+            if (m.Carriers.Add(killer.Role)) { killer.GetFlags++; killer.Score += PersonalFlagTaken; PostFlag(s); }
             await TitleAsync(field, killer, 1041);
             return;
         }
@@ -574,8 +610,8 @@ public sealed partial class GuildLeagueService
     /// <summary>Per-second match work: spawns, capture points, flags, revivals, the end and the departure grace.</summary>
     private async Task BattleClockAsync(long now)
     {
-        using var scope = loop.Owners is { } owners ? await owners.EnterAsync("guild-league/battle", LeagueKey) : null;
-        foreach (var m in matches.Values.ToArray())
+        using var scope = _loop.Owners is { } owners ? await owners.EnterAsync("guild-league/battle", LeagueKey) : null;
+        foreach (var m in _matches.Values.ToArray())
         {
             if (!m.Ended)
             {
@@ -589,7 +625,7 @@ public sealed partial class GuildLeagueService
                     && f.DeadUntil > 0 && f.DeadUntil <= now))
                 {
                     field.Fighters[s.Role!.Id].DeadUntil = 0;
-                    loop.PostOwned(s, () => ReviveAtCampAsync(s), "guild league revive");
+                    _loop.PostOwned(s, () => ReviveAtCampAsync(s), "guild league revive");
                 }
             if (m.Dirty)
             {
@@ -597,14 +633,14 @@ public sealed partial class GuildLeagueService
                 await PublishVarsAsync(m);
                 // Buffs refresh the role's stats: each change runs in its role's own scope.
                 foreach (var s in Present(m).Where(s => MoraleBuffStale(s, m, GuildOf(s))).ToArray())
-                    loop.PostOwned(s, () => Locate(s)?.Match == m ? MoraleBuffAsync(s, m, GuildOf(s)) : Task.CompletedTask, "guild league morale");
+                    _loop.PostOwned(s, () => Locate(s)?.Match == m ? MoraleBuffAsync(s, m, GuildOf(s)) : Task.CompletedTask, "guild league morale");
             }
             if (m.Ended && now >= m.EndedAt + EndGrace)
             {
                 // The return to the world writes the role: each departure runs in its role's own scope.
                 foreach (var s in Present(m).Where(s => m.Leaving.Add(s.Role!.Id)).ToArray())
-                    loop.PostOwned(s, async () => { if (Locate(s)?.Match == m) await instances.LeaveAsync(s); }, "guild league departure");
-                if (m.Committed && !m.Main.Live && !m.Sub.Live) matches.Remove(m.Key);
+                    _loop.PostOwned(s, async () => { if (Locate(s)?.Match == m) await _instances.LeaveAsync(s); }, "guild league departure");
+                if (m.Committed && !m.Main.Live && !m.Sub.Live) _matches.Remove(m.Key);
             }
         }
     }
@@ -623,7 +659,7 @@ public sealed partial class GuildLeagueService
         m.Ended = true; m.EndedAt = now; m.Dirty = true;
         m.Boss = null;
         foreach (var field in new[] { m.Main, m.Sub })
-            if (field.Room is { Closed: false } room) loop.TrackRuntimeDetached("guild league clear", () => instances.ClearMonstersAsync(room));
+            if (field.Room is { Closed: false } room) _loop.TrackRuntimeDetached("guild league clear", () => _instances.ClearMonstersAsync(room));
     }
 
     /// <summary>
@@ -637,9 +673,13 @@ public sealed partial class GuildLeagueService
         if (!m.Main.Live || now < m.Start) return;
         long stay = Setting("GuildLeagueTriggerStayAreaTime", 6);
         var alive = Present(m.Main).Where(s => !s.Dead && Fights(s, m, m.Main)).ToArray();
+        var where = new Dictionary<long, long>();
         foreach (var (id, p) in m.Main.Points)
         {
             var inside = alive.Where(s => p.Area.Contains(s.Position.X, s.Position.Z)).ToArray();
+            p.Blue = inside.Count(s => GuildOf(s) == m.Blue);
+            p.Red = inside.Count(s => GuildOf(s) == m.Red);
+            foreach (var s in inside) where[s.Role!.Id] = p.Uid;
             var counts = inside.GroupBy(GuildOf).Select(g => (Guild: g.Key, Count: g.Count())).OrderByDescending(g => g.Count).ToArray();
             long leader = counts.Length == 0 || counts.Length > 1 && counts[0].Count == counts[1].Count ? 0 : counts[0].Guild;
             if (now >= p.FortifiedUntil)
@@ -667,11 +707,21 @@ public sealed partial class GuildLeagueService
                 else if (now >= f.NextHold) { f.Score += PersonalHold; f.NextHold = now + PersonalHoldSeconds; }
                 if (m.Carriers.Remove(f.Role))
                 {
+                    PostFlag(s);
                     f.Flags++; f.Score += PersonalFlagDelivered;
                     AddPoints(m, f.Guild, GuildFlag);
                     await EventAsync(m, 1, f.Guild);
                 }
             }
+        }
+        await PublishCirclesAsync(m, now, stay);
+        foreach (var s in Present(m.Main).ToArray())
+        {
+            if (!m.Main.Fighters.TryGetValue(s.Role!.Id, out var f)) continue;
+            long circle = where.GetValueOrDefault(s.Role.Id);
+            if (f.InCircle == circle) continue;
+            f.InCircle = circle;
+            await SendAllAsync([s], DungeonService.Event, OccupyVar(m, circle));
         }
     }
 
@@ -679,7 +729,7 @@ public sealed partial class GuildLeagueService
     /// tag-4800000 Bosses in turn); Sub-Battlefield waves at 0, 5 and 10 minutes, each spawn point once.</summary>
     private async Task SpawnAsync(Match m, Field field)
     {
-        if (!field.Live || field.Spawning || m.Ended || Now < m.Start || maps.Map(field.Scene) is not { } map) return;
+        if (!field.Live || field.Spawning || m.Ended || Now < m.Start || _maps.Map(field.Scene) is not { } map) return;
         field.Spawning = true;
         try
         {
@@ -691,8 +741,13 @@ public sealed partial class GuildLeagueService
                 {
                     m.Bosses = due;
                     int npc = CourtyardBosses[(due - 1) % CourtyardBosses.Length];
-                    if (await instances.SpawnAsync(field.Room!, npc, map.Grounded(at)) is { } boss)
-                    { m.Boss = boss; field.Actors[boss] = (Kind.Courtyard, "boss:" + due); }
+                    if (await _instances.SpawnAsync(field.Room!, npc, map.Grounded(at)) is { } boss)
+                    {
+                        m.Boss = boss; field.Actors[boss] = (Kind.Courtyard, "boss:" + due);
+                        boss.CustomData.Add(LongData(IsFlagKey, 1));
+                        await SendAllAsync(boss.Viewers.ToArray(), WorldCoreService.CustomChange,
+                            new CustomDataChange { EntityId = boss.Uid, CustomDatas = { boss.CustomData } });
+                    }
                 }
                 return;
             }
@@ -708,7 +763,7 @@ public sealed partial class GuildLeagueService
                             || !map.Points.TryGetValue(ids[i], out var point)) continue;
                         var (kind, npc) = groupId == 52 ? (Kind.Boss, SubBoss) : groupId == 51 ? (Kind.Commander, Commanders[i % Commanders.Length])
                             : (Kind.Guard, Guards[i % Guards.Length]);
-                        if (await instances.SpawnAsync(field.Room!, npc, map.Grounded(point)) is { } actor) field.Actors[actor] = (kind, slot);
+                        if (await _instances.SpawnAsync(field.Room!, npc, map.Grounded(point)) is { } actor) field.Actors[actor] = (kind, slot);
                     }
                 }
             m.Wave = wave;
@@ -716,16 +771,16 @@ public sealed partial class GuildLeagueService
         finally { field.Spawning = false; }
     }
 
-    private readonly Dictionary<(long, int), long[]> subGroups = new();
+    private readonly Dictionary<(long, int), long[]> _subGroups = new();
     /// <summary>The point ids of a scene-editor group (m_kGroups itemIdList; its region centres are in m_kAllPoints).</summary>
     private long[] SubGroup(long sceneEntry, int groupId)
     {
-        if (subGroups.TryGetValue((sceneEntry, groupId), out var ids)) return ids;
+        if (_subGroups.TryGetValue((sceneEntry, groupId), out var ids)) return ids;
         ids = [];
-        if (data.Row("DungeonConfig", sceneEntry) is { } row && row.TryGetProperty("_kResSceneEditorName", out var name)
+        if (_data.Row("DungeonConfig", sceneEntry) is { } row && row.TryGetProperty("_kResSceneEditorName", out var name)
             && name.GetString() is { Length: > 0 } file)
         {
-            if (DataFiles.Find(Path.Combine(options.Value.GameDataDir ?? options.Value.DataDir, "sceneeditor"), file + ".json") is { } path)
+            if (DataFiles.Find(Path.Combine(_options.Value.GameDataDir ?? _options.Value.DataDir, "sceneeditor"), file + ".json") is { } path)
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(path));
                 if (doc.RootElement.TryGetProperty("m_kGroups", out var groups)
@@ -734,7 +789,7 @@ public sealed partial class GuildLeagueService
                     ids = list.EnumerateArray().Select(v => (long)(GameData.Number(v) ?? 0)).ToArray();
             }
         }
-        return subGroups[(sceneEntry, groupId)] = ids;
+        return _subGroups[(sceneEntry, groupId)] = ids;
     }
 
     // ---- 30110 ---------------------------------------------------------------------------------------------------------
@@ -763,8 +818,11 @@ public sealed partial class GuildLeagueService
             var info = new DungeonStatisticsInfo { DungeonMapId = field.Scene };
             foreach (var f in field.Fighters.Values)
             {
-                var role = new DungeonRoleInfo { RoleBase = new ObjScoreBaseInfo { Id = f.Role, Name = f.Name, Job = f.Job, Area = 1 },
-                    GuildId = f.Guild, TotalDamage = f.Damage, TotalBeDamage = f.Taken, TotalCure = f.Heal, Totalscore = f.Score };
+                var role = new DungeonRoleInfo
+                {
+                    RoleBase = new ObjScoreBaseInfo { Id = f.Role, Name = f.Name, Job = f.Job, Area = 1 },
+                    GuildId = f.Guild, TotalDamage = f.Damage, TotalBeDamage = f.Taken, TotalCure = f.Heal, Totalscore = f.Score
+                };
                 role.DicParams[6] = f.Kills; role.DicParams[7] = f.Assists; role.DicParams[8] = f.Deaths;
                 role.DicParams[9] = f.MonsterKills; role.DicParams[10] = f.BossKills; role.DicParams[11] = f.Captures;
                 role.DicParams[12] = f.Flags; role.DicParams[14] = f.GetFlags; role.DicParams[16] = f.Revives;

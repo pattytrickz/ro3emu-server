@@ -31,6 +31,7 @@ public sealed class PhonestChannel : IAsyncDisposable
         Channel.CreateUnbounded<(byte[], StreamConvertor?)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Task _writer;
     private readonly MemoryStream _pending = new();
+    private readonly byte[] _inflateScratch = new byte[16 * 1024];
     private long _queuedBytes;
     private int _overflowed;
     private int _closing;
@@ -44,10 +45,16 @@ public sealed class PhonestChannel : IAsyncDisposable
         _socket = socket;
         _log = log;
         Remote = socket.RemoteEndPoint?.ToString() ?? "?";
+        var local = (socket.LocalEndPoint as System.Net.IPEndPoint)?.Address;
+        LocalAddress = local is { IsIPv4MappedToIPv6: true } ? local.MapToIPv4() : local;
         _writer = Task.Run(WriteLoopAsync);
     }
 
     public string Remote { get; }
+
+    /// <summary>This side's address of the connection (the interface the client reached us on); null for a socket
+    /// that is not connected. IPv4-mapped addresses of a dual-mode socket are unwrapped to plain IPv4.</summary>
+    public System.Net.IPAddress? LocalAddress { get; }
     public Diagnostics.ConnectionMetrics? Metrics { get; init; }
 
     /// <summary>Nonblocking close observation while frame dispatch is awaiting game-loop selection.
@@ -94,14 +101,30 @@ public sealed class PhonestChannel : IAsyncDisposable
             if (n == 0) { Volatile.Write(ref _closing, 1); return; }
             if (_inboundConverted)
             {
-                var plain = _convertor!.ConvertInput(buf.AsSpan(0, n), MaxFrame + 6);
-                _pending.Write(plain);
+                await DrainConvertedAsync(buf.AsMemory(0, n), handler, ct);
             }
             else
             {
                 _pending.Write(buf, 0, n);
             }
-            await DrainFramesAsync(handler);
+            await DrainFramesAsync(handler, ct);
+        }
+    }
+
+    private async Task DrainConvertedAsync(ReadOnlyMemory<byte> wire, FrameHandler handler, CancellationToken ct)
+    {
+        _convertor!.BeginInput(wire.Span);
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            // Keep at most one maximum-size incomplete frame, including its length prefix. DrainFramesAsync
+            // checks each header before more output is inflated, so an oversized compressed frame still fails early.
+            int capacity = (int)Math.Min(_inflateScratch.Length, MaxFrame + 4 - _pending.Length);
+            if (capacity <= 0) throw new InvalidDataException("incomplete frame exceeds input buffer limit");
+            int n = _convertor.ReadInput(_inflateScratch, capacity);
+            if (n == 0) return;
+            _pending.Write(_inflateScratch, 0, n);
+            await DrainFramesAsync(handler, ct);
         }
     }
 
@@ -109,7 +132,7 @@ public sealed class PhonestChannel : IAsyncDisposable
     /// Hands every complete frame in <see cref="_pending"/> to the handler, reading with a cursor and compacting the
     /// unread tail once at the end (a burst of N frames is one copy, not N copies of the remainder).
     /// </summary>
-    private async Task DrainFramesAsync(FrameHandler handler)
+    private async Task DrainFramesAsync(FrameHandler handler, CancellationToken ct = default)
     {
         int offset = 0;
         try
@@ -138,7 +161,8 @@ public sealed class PhonestChannel : IAsyncDisposable
                     var rest = _pending.GetBuffer().AsSpan(offset, (int)_pending.Length - offset).ToArray();
                     _pending.SetLength(0);
                     offset = 0;
-                    if (rest.Length > 0) _pending.Write(_convertor!.ConvertInput(rest, MaxFrame + 6));
+                    if (rest.Length > 0) await DrainConvertedAsync(rest, handler, ct);
+                    return; // the nested drain already consumed/compacted the converted tail
                 }
             }
         }
