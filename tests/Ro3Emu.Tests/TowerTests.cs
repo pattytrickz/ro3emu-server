@@ -841,4 +841,40 @@ public sealed class TowerTests : IAsyncLifetime
         await QuestProbe.AtAsync(_app, "alice", 110005, 1);
         await QuestProbe.AtAsync(_app, "alice", 100025, 1);
     }
+
+    /// <summary>
+    /// The Spirit Tower To-Do (DailyActivityConfig 104, _iCount 1) tracks quests 500020 [101007,1] and 500021
+    /// [101008,1] (its _iTaskReceiveAction ["31","2","500020","500021"]); one settled floor attempt delivers 500020
+    /// and the row is done, also after a relogin.
+    /// </summary>
+    [ClientDataFact]
+    public async Task AFloorAttemptCompletesTheSpiritTowerToDo()
+    {
+        long role;
+        await using (var alice = await InWorld("Alice"))
+        {
+            role = (long)alice.Self!.Uuid;
+            await Eligible(alice);
+            await Gm(alice.Account!, "!quest done 10105090"); // opens the To-Do (function 25, condition 2000022)
+            await QuestProbe.AtAsync(_app, "alice", 500020, 0);
+            var entered = await EnterFloor(alice, 1);
+            foreach (var monster in entered.Monsters) await Kill(alice, monster.Uuid);
+            Assert.True((await Next(alice, TowerService.End, ClimTowerEndNotify.Parser)).ClimTowerResult);
+            await QuestProbe.WaitAsync(_app, "alice", 500020, i => i.Status == TaskState.Delivery, "delivered");
+            await TowerToDoDone(alice);
+            await alice.SendGameAsync(TowerService.LeaveDungeon, new LeaveDungeonReq());
+            Assert.Equal(0, (await Next(alice, TowerService.LeaveDungeon, LeaveDungeonRsp.Parser)).Result);
+        }
+        await WaitOffline(role);
+        await using var relog = await InWorld("Alice", create: false);
+        await TowerToDoDone(relog);
+    }
+
+    private async Task TowerToDoDone(BotClient bot) => await OnLoop(() =>
+    {
+        var row = Session(bot).DailyRows!.ActivityData[104];
+        Assert.Equal(1, row.TaskCompleteTimes);
+        Assert.Equal(2, (int)row.ActivityState);
+        return Task.CompletedTask;
+    });
 }
