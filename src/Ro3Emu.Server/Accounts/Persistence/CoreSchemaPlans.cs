@@ -140,6 +140,20 @@ internal sealed class RoleSchemaPlan : DbPlan
         SchemaSql.AddColumn(db, tx, "role", "heroic_spirit", "BLOB");
         // Serialized romsg.DBAreaConcurInfo (Monster Hunt kill counters and claimed stages; AUTO_SYNC 5053).
         SchemaSql.AddColumn(db, tx, "role", "area_concur", "BLOB");
+        // Serialized romsg.DBGrowthClassInfo (Growth Classroom claimed rank rewards; AUTO_SYNC 5045, GrowthClassService).
+        SchemaSql.AddColumn(db, tx, "role", "growth_class", "BLOB");
+        // Serialized romsg.DBFirstHeartTaskActivityData (Seven-Day Goal tasks, score and claims; AUTO_SYNC 5049).
+        SchemaSql.AddColumn(db, tx, "role", "first_heart", "BLOB");
+        // Serialized romsg.DBPersonalInfo (profile card presets and the current one; AUTO_SYNC 5016, PersonalService).
+        SchemaSql.AddColumn(db, tx, "role", "personal", "BLOB");
+        // Serialized romsg.PersonalUpvoteList (who liked this role's profile card and when; PersonalService).
+        SchemaSql.AddColumn(db, tx, "role", "personal_upvote", "BLOB");
+        // Serialized romsg.DBPopularityStar (popularity from received friend gifts, affection from sent ones).
+        SchemaSql.AddColumn(db, tx, "role", "popularity", "BLOB");
+        // Serialized romsg.DBSocialOutfit (chat cosmetics unlocked by items and the worn ones; AUTO_SYNC 5044, SocialOutfitService).
+        SchemaSql.AddColumn(db, tx, "role", "social_outfit", "BLOB");
+        // Serialized romsg.DBEmojiInfo (chat emoticons unlocked by items; AUTO_SYNC 5041, EmojiService).
+        SchemaSql.AddColumn(db, tx, "role", "emoji_info", "BLOB");
         // Unix seconds of a deletion; deleted roles are kept (items, progress) but no longer listed or selectable.
         SchemaSql.AddColumn(db, tx, "role", "deleted_time", "INTEGER NOT NULL DEFAULT 0");
         SchemaSql.Execute(db, tx, """
@@ -341,17 +355,8 @@ internal sealed class AuctionSchemaPlan : DbPlan
             CREATE INDEX IF NOT EXISTS auction_prebuy_role ON auction_prebuy(role_id);
             """;
         cmd.ExecuteNonQuery();
-        foreach (string column in new[] { "requested_id INTEGER NOT NULL DEFAULT 0", "paused INTEGER NOT NULL DEFAULT 0" })
-        {
-            try
-            {
-                using var migration = db.CreateCommand();
-                migration.Transaction = tx;
-                migration.CommandText = $"ALTER TABLE auction_prebuy ADD COLUMN {column}";
-                migration.ExecuteNonQuery();
-            }
-            catch (SqliteException e) when (e.SqliteErrorCode == 1 && e.Message.Contains("duplicate column name")) { }
-        }
+        SchemaSql.AddColumn(db, tx, "auction_prebuy", "requested_id", "INTEGER NOT NULL DEFAULT 0");
+        SchemaSql.AddColumn(db, tx, "auction_prebuy", "paused", "INTEGER NOT NULL DEFAULT 0");
         SchemaSql.Execute(db, tx, """
             INSERT OR IGNORE INTO owner_revision(kind,id,part,revision)
                 SELECT 'auction_item',source_key,'state',0 FROM auction_item;

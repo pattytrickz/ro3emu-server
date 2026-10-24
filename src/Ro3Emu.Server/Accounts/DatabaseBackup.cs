@@ -18,7 +18,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     internal const string Prefix = "ro3emu-", Extension = ".db", PartialExtension = ".partial", CorruptExtension = ".corrupt";
     private const int Keep = 20;
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
-    private readonly object backupGate = new();
+    private readonly object _backupGate = new();
     private string? _lastName;
     private int _sameNameCount;
     private long _backups, _failures, _lastBytes;
@@ -31,12 +31,17 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     /// gate as a backup, so neither the startup backup nor a manual one can meet a half-written file.</summary>
     public override Task StartAsync(CancellationToken ct)
     {
-        lock (backupGate) RemoveStalePartials();
+        lock (_backupGate) RemoveStalePartials();
         return base.StartAsync(ct);
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        if (!options.Value.DatabaseBackups)
+        {
+            log.LogWarning("Database backups are off (Ro3Emu:DatabaseBackups=false)");
+            return;
+        }
         while (!ct.IsCancellationRequested)
         {
             try
@@ -54,7 +59,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     public string Backup()
     {
         // Startup and manual requests serialize the copy, the check and the pruning.
-        lock (backupGate)
+        lock (_backupGate)
         {
             try { return BackupCore(); }
             catch { Interlocked.Increment(ref _failures); throw; }

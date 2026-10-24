@@ -1,3 +1,5 @@
+// Shared with Ro3Emu.ClientHooks, which builds for the client's runtime: keep the block namespace and explicit constructors.
+#pragma warning disable IDE0161, IDE0290
 namespace Ro3Emu.Shared
 {
     /// <summary>

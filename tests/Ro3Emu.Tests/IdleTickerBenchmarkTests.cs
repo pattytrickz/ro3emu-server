@@ -14,10 +14,10 @@ public sealed class IdleTickerBenchmarkTests
 {
     private sealed class Clock : TimeProvider
     {
-        private long ticks = new DateTimeOffset(2026, 10, 9, 10, 13, 0, TimeSpan.Zero).Ticks;
-        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
+        private long _ticks = new DateTimeOffset(2026, 10, 9, 10, 13, 0, TimeSpan.Zero).Ticks;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
-        public void Advance() => Interlocked.Add(ref ticks, TimeSpan.TicksPerMillisecond * 50);
+        public void Advance() => Interlocked.Add(ref _ticks, TimeSpan.TicksPerMillisecond * 50);
     }
 
     [Fact, Trait("Category", "Slow")]
@@ -127,11 +127,14 @@ public sealed class IdleTickerBenchmarkTests
                         });
                         minuteSweeps.Add(await done.Task.WaitAsync(TimeSpan.FromSeconds(30)));
                     }
-                rows.Add(new { service = ticker.GetType().Name, sessions = count, samples = elapsed,
+                rows.Add(new
+                {
+                    service = ticker.GetType().Name, sessions = count, samples = elapsed,
                     meanMsPerSessionPerSecond = elapsed.Average() / count,
                     medianMsPerSessionPerSecond = elapsed.Order().ElementAt(samples / 2) / count,
                     minuteSweepSamplesMs = minuteSweeps,
-                    minuteSweepAmortizedMsPerSessionPerSecond = minuteSweeps.Count == 0 ? (double?)null : minuteSweeps.Average() / 60 / count });
+                    minuteSweepAmortizedMsPerSessionPerSecond = minuteSweeps.Count == 0 ? (double?)null : minuteSweeps.Average() / 60 / count
+                });
             }
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
             var scenes = app.Services.GetRequiredService<SessionRegistry>().All()

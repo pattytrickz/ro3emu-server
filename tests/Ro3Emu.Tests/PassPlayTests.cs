@@ -14,47 +14,47 @@ namespace Ro3Emu.Tests;
 /// </summary>
 public sealed class PassPlayTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-passplay-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-passplay-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
-    private WebApplication app = null!;
-    private string http = "";
-    private readonly TestClock clock = new();
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private WebApplication _app = null!;
+    private string _http = "";
+    private readonly TestClock _clock = new();
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
 
     private sealed class TestClock : TimeProvider
     {
         // A Thursday noon, well inside a game day.
-        private long seconds = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
-        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref seconds));
+        private long _seconds = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref _seconds));
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
-        public void AdvanceDays(int count) => Interlocked.Add(ref seconds, count * 86400L);
+        public void AdvanceDays(int count) => Interlocked.Add(ref _seconds, count * 86400L);
     }
 
     public async Task InitializeAsync()
     {
         var (httpPort, microPort, gamePort) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(ClientData.RepoRoot, "data");
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(ClientData.RepoRoot, "data");
             o.HttpPort = httpPort; o.MicroGatePort = microPort; o.GameGatePort = gamePort;
             o.OpenContent.Enabled = true;
             o.Pass.FreePremium = true;
             o.Pass.Play = true;
-        }, clock);
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{httpPort}";
+        }, _clock);
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{httpPort}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync(); await app.DisposeAsync();
+        await _app.StopAsync(); await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name, bool create = true)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw"); await bot.EnterGateAsync();
         long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
         await bot.EnterWorldAsync(id);
@@ -64,7 +64,7 @@ public sealed class PassPlayTests : IAsyncLifetime
     private async Task Gm(BotClient bot, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
 
     private GameSession Session(BotClient bot) => Service<SessionRegistry>().All().Single(s => s.Account == bot.Account && s.Role != null);
@@ -172,7 +172,7 @@ public sealed class PassPlayTests : IAsyncLifetime
         Assert.Equal(before + 500, play.Earned); // ahead of the first day's pace: no catch-up double
 
         // The next game day draws a new set and resets the day's caps; the week keeps going.
-        clock.AdvanceDays(1);
+        _clock.AdvanceDays(1);
         await Event(alice, []);
         play = await Play(alice);
         Assert.Equal(0, play.KillExpToday);
@@ -182,7 +182,7 @@ public sealed class PassPlayTests : IAsyncLifetime
         Assert.Equal(2, play.WeeklyProgress["w.days"]);
 
         // Monday 05:00 starts a new week.
-        clock.AdvanceDays(4);
+        _clock.AdvanceDays(4);
         await Event(alice, []);
         play = await Play(alice);
         Assert.False(play.WeeklyProgress.ContainsKey("w.kills"));
@@ -214,8 +214,11 @@ public sealed class PassPlayTests : IAsyncLifetime
         await Gm(alice, "!item 132 120000");
         await Service<NewActivityService>().ReconcileAsync(Session(alice));
         Assert.Equal(60, (await Pass(alice)).Level);
-        await OnLoop(() => { var p = Session(alice).ActivityRuntime!.PassPlay ??= new(); p.Earned = 120000;
-            p.Instance = Session(alice).NewActivities!.ActivityInfo[200].ActivityInstance; return 0; });
+        await OnLoop(() =>
+        {
+            var p = Session(alice).ActivityRuntime!.PassPlay ??= new(); p.Earned = 120000;
+            p.Instance = Session(alice).NewActivities!.ActivityInfo[200].ActivityInstance; return 0;
+        });
         // Today's draw would add a daily challenge to some steps; this test checks the sources without it.
         await Event(alice, []);
         await OnLoop(() => { Session(alice).ActivityRuntime!.PassPlay!.Daily.Clear(); return 0; });
@@ -286,6 +289,9 @@ public sealed class PassPlayTests : IAsyncLifetime
             .. NewActivityService.WeeklyChallenges.Select(NewActivityService.TaskIdOf)];
         Assert.Equal(expected.Order(), await Synced());
         await Event(alice, [(NewActivityService.PassGoal.Kills, 100)], kills: 100);
+        // Event returns on the pass commit; the 5027 push (SyncTasksAsync) comes after it in the same detached operation.
+        await Until(() => OnLoop(() => ((DBTaskInfo)Session(alice).Synced[TaskService.TaskInfoSync]).Infos
+            .TryGetValue(NewActivityService.WeeklyTaskBase, out var weekly) && weekly.CompleteNum.Contains(105L)), "the weekly kills in 5027");
         var rows = await OnLoop(() => ((DBTaskInfo)Session(alice).Synced[TaskService.TaskInfoSync]).Infos);
         var weeklyKills = rows[NewActivityService.WeeklyTaskBase];
         Assert.Equal(TaskState.Running, weeklyKills.Status);

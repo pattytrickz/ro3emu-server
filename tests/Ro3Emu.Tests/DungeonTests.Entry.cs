@@ -18,16 +18,19 @@ public sealed partial class DungeonTests
     public async Task MatchedCulvertWaitsForPlayerEngagementBeforeBossDamage(int multi, int npc,
         int level, long maxHp, long attack, bool hard)
     {
-        clock.Advance(TimeSpan.FromDays(8)); // Hard's exported server-day gate remains enforced.
+        _clock.Advance(TimeSpan.FromDays(8)); // Hard's exported server-day gate remains enforced.
         await using var alice = await InWorld("CulvertTester");
         await Gm(alice, "!lvl 99");
         await Gm(alice, "!dungeonsolo on");
-        long beforeQueue = clock.GetUtcNow().ToUnixTimeSeconds();
+        long beforeQueue = _clock.GetUtcNow().ToUnixTimeSeconds();
         await alice.SendGameAsync(DungeonMatchService.StartMatch, new StartMatchReq
         {
             MatchEntryId = 100,
-            MatchData = new MatchData { MultiDungeon = new MultiDungeonMatchData
-            { DungeonId = Scene, MultiDungeonId = multi, MarkId = 1 } },
+            MatchData = new MatchData
+            {
+                MultiDungeon = new MultiDungeonMatchData
+                { DungeonId = Scene, MultiDungeonId = multi, MarkId = 1 }
+            },
         });
         var queued = await Next(alice, DungeonMatchService.StartMatch, StartMatchResp.Parser);
         Assert.Equal(0, queued.Result);

@@ -25,8 +25,8 @@ public sealed partial class CombatService
         if (m.Dead || m.Hp <= 1 || p.Dead || p.Progress == null || p.Role is not { } role
             || attack is not { } row || GameData.Int(row, "_iDmgType") != 1
             || !p.Buffs.Any(b => b.ConfigId == ShieldReflectBuff && b.ExpireMs > Now)) return;
-        int level = skills.Level(p.Progress, ShieldReflectGroup);
-        if (level <= 0 || data.Row("SkillConfig", skills.RealId(ShieldReflectGroup, level)) is not { } skill) return;
+        int level = _skills.Level(p.Progress, ShieldReflectGroup);
+        if (level <= 0 || _data.Row("SkillConfig", _skills.RealId(ShieldReflectGroup, level)) is not { } skill) return;
         var desc = Numbers(skill, "_kDescData"); // [.., ratio %, seconds, per second, metres, flat]
         if (desc.Length < 6 || MonsterService.Distance(m, p) > desc[4] + 0.5f) return;
         var window = reflectWindows.GetOrCreateValue(p);
@@ -36,7 +36,7 @@ public sealed partial class CombatService
         window.Count++;
 
         double def = m.Template.Def;
-        double amount = (character.Stats(p)[103] * desc[1] / 100 + desc[5])
+        double amount = (_character.Stats(p)[103] * desc[1] / 100 + desc[5])
             * (1 - def / (def + 20.0 * Math.Max(1, m.Template.Level)))
             * Math.Clamp(1 + ElementFactor(1, m.Template.Element) / 10000.0, 0.1, 10);
         long damage = Math.Min(m.Hp - 1, Math.Max(1, (long)Math.Round(amount)));
@@ -51,6 +51,6 @@ public sealed partial class CombatService
             Dsts = { new DamageInfo { DstID = m.Uid, Damage = damage, HitResult = DamageHitResult.Normal, DstElement = m.Template.Element } },
         };
         foreach (var viewer in m.Viewers.Append(p).Distinct()) await viewer.SendGameAsync(SkillHit, hit);
-        await world.ToUnitViewersAsync(m, AoiAttrChange, MonsterService.Hp(m));
+        await _world.ToUnitViewersAsync(m, AoiAttrChange, MonsterService.Hp(m));
     }
 }

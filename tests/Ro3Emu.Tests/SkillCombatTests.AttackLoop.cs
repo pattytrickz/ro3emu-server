@@ -15,7 +15,7 @@ public sealed partial class SkillCombatTests
         var target = immobile ? await Loop.InvokeAsync(async () =>
         {
             var s = Session("alice");
-            var monsters = app.Services.GetRequiredService<MonsterService>();
+            var monsters = _app.Services.GetRequiredService<MonsterService>();
             var template = monsters.Template(5000001)! with { RoamDistance = 0, SpeedCm = 0 };
             return (await monsters.SpawnSingleAsync(s.SceneEntry, 5000001,
                 new MapPoint(s.Position.X, s.Position.Y, s.Position.Z, 0), s.InstanceId, customTemplate: template))!;
@@ -31,7 +31,7 @@ public sealed partial class SkillCombatTests
     private Vec3 Beside(float metres)
     {
         var s = Session("alice");
-        var nav = app.Services.GetRequiredService<WorldData>().Map(s.SceneEntry)!.Nav;
+        var nav = _app.Services.GetRequiredService<WorldData>().Map(s.SceneEntry)!.Nav;
         var p = s.Position;
         return Enumerable.Range(0, 16).Select(i => i * MathF.Tau / 16)
             .Select(a => new Vec3 { X = p.X + metres * MathF.Cos(a), Y = p.Y, Z = p.Z + metres * MathF.Sin(a) })

@@ -20,6 +20,9 @@ public sealed partial class AccountStore : IDisposable
     internal EconomyCatalog EscrowCatalog => _escrowCatalog.Value;
     private readonly Lazy<EconomyCatalog> _economyCatalog;
     private readonly Lazy<DbWriter> _writer;
+
+    /// <summary>Generations of the stores' caches over this database, bumped by its writer.</summary>
+    internal CacheGenerations Caches { get; } = new();
     private readonly Lazy<DbReadPool> _readers;
     private readonly Game.GameLoop? _loop;
     private readonly ILogger<AccountStore>? _log;
@@ -40,6 +43,8 @@ public sealed partial class AccountStore : IDisposable
         if (metrics != null) metrics.DbAccess = AccessMetrics;
         _loop = loop;
         _log = log;
+        // A half-done restore may have moved the live file away; opening now would create an empty realm (C/D 19).
+        DatabaseRestore.ThrowIfUnfinished(options.Value.DataDir);
         Directory.CreateDirectory(options.Value.DataDir);
         _databasePath = Path.Combine(options.Value.DataDir, "ro3emu.db");
         _escrowCatalog = new Lazy<EconomyCatalog>(() =>
@@ -70,6 +75,8 @@ public sealed partial class AccountStore : IDisposable
                 salt          BLOB NOT NULL,
                 created_utc   TEXT NOT NULL
             );
+            -- Login finds an account in any letter case (AccountCredentialsRead); not unique, legacy spellings may coexist.
+            CREATE INDEX IF NOT EXISTS account_name_nocase ON account(name COLLATE NOCASE);
             CREATE TABLE IF NOT EXISTS auth_token (
                 token       TEXT PRIMARY KEY,
                 kind        TEXT NOT NULL,
@@ -90,7 +97,8 @@ public sealed partial class AccountStore : IDisposable
             );
             """;
         cmd.ExecuteNonQuery();
-        _writer = new(() => new DbWriter(_connectionString, AccessMetrics, _metrics, _log) { RoleWritesCommitted = Snapshots.Committed });
+        _writer = new(() => new DbWriter(_connectionString, AccessMetrics, _metrics, _log)
+        { RoleWritesCommitted = Snapshots.Committed, Caches = Caches });
         _readers = new(() => new DbReadPool(_databasePath, AccessMetrics, _metrics, _log));
         foreach (var plan in DatabaseSchema.Plans()) WriteSync<int>(plan);
     }

@@ -94,7 +94,7 @@ public sealed class QuestEngineTests : IAsyncLifetime
     /// when every target is tracked; 106602 CheckTenBOSSWin completes when the role fights the listed boss.
     /// </summary>
     [ClientDataFact]
-    public async Task RootlessSideGuidesOpenAtTheirLevelAndABossWinCompletesTheDungeonGuide()
+    public async Task RootlessSideGuidesOpenAtTheirLevel()
     {
         const long AutoBattleGuide = 10200140, Professions = 10200100, JoinGuild = 10200080, Friends = 10200090,
             FivePlayerDungeon = 10200010;
@@ -120,31 +120,44 @@ public sealed class QuestEngineTests : IAsyncLifetime
         Assert.Equal(0, (await State(JoinGuild)).CompleteNum[0]); // not in a guild
         Assert.Equal(0, (await State(Friends)).CompleteNum[0]);
 
-        var combat = Service<CombatService>();
-        var callback = combat.Killed.Single(h => h.Target is TaskService);
-        async Task Kill(int npc) => await Change(async s =>
-        {
-            var monster = new MonsterUnit
-            {
-                Uid = 910000 + npc % 1000, SceneEntry = s.SceneEntry, Dead = true,
-                Template = Service<MonsterService>().Template(npc)!,
-                Home = new SpawnPoint(0, 0, 0, 0, 0, npc), Group = new SpawnGroup(0, false, 1, 0, [], []),
-            };
-            foreach (var handler in combat.Dealt) handler(s, monster, 1);
-            // Real kills stage task progress with their durable reward before publishing Killed.
-            // Calling only the task callback bypasses that path and hid missing objective kinds.
-            await Service<RewardService>().PrepareKilledAsync(s, monster);
-            await callback(s, monster);
-        });
-        await Kill(5000055); // an ordinary monster is no boss win
-        Assert.Equal(0, (await State(FivePlayerDungeon)).CompleteNum[0]);
-        await Kill(43100003); // the Orc Hero: its own line only ("Complete the Golden Thief Bug / Orc Hero / Drake Dungeon")
-        Assert.Equal([0, 1, 0], (await State(FivePlayerDungeon)).CompleteNum);
-        await Kill(4300001);
-        await Kill(43200006);
-        Assert.Equal(TaskState.Delivery, (await State(FivePlayerDungeon)).Status);
+        // The boss-win target (106602) counts a committed clear of a listed TenGameplay boss's dungeon (upstream
+        // TaskService.ParticipationTargets), covered by DungeonTests.ATenGameplayBossClearCountsForTheGrowthTitle...
         var offered = await Read(s => s.Tasks!.Infos.Keys.Where(id => id is >= 10200000 and < 10300000 or 306070 or 306080).OrderBy(id => id).ToList());
         Console.WriteLine("Side guides offered at Base 36: " + string.Join(", ", offered));
+    }
+
+    /// <summary>
+    /// #help "I'm 53/40 and I can't change job": 19991050 "Third Class Advancement" is a main quest with no _kPreTask
+    /// (Base 50: talk to Alphonse, who opens the change-job panel), so no delivery ever offered it and the third job
+    /// had no way in. It opens at Base 50; its follow-up 19991060 completes on the rank-5 job change.
+    /// </summary>
+    [ClientDataFact]
+    public async Task TheThirdJobQuestOpensAtBaseFiftyAndCompletesOnTheThirdJob()
+    {
+        const long ThirdClass = 19991050, ThirdJobChange = 19991060;
+        const int LordKnight = 1300, RuneKnight = 1400;
+        await using var bot = await InWorld();
+        Task<bool> Has(long id) => Read(s => s.Tasks!.Infos.ContainsKey(id));
+        async Task Eventually(Func<Task<bool>> condition, string what)
+        {
+            for (int i = 0; i < 100 && !await condition(); i++) await Task.Delay(50);
+            Assert.True(await condition(), what);
+        }
+
+        await Gm($"!job {LordKnight}");
+        await Gm("!lvl 49 40");
+        await Refresh();
+        Assert.False(await Has(ThirdClass));
+        await Gm("!lvl 50 40");
+        await Eventually(() => Has(ThirdClass), "the third job quest was not offered at Base 50");
+
+        await Gm($"!quest done {ThirdClass}");
+        await Eventually(() => Has(ThirdJobChange), "the third job change step did not follow");
+        Assert.Equal(TaskState.Running, (await State(ThirdJobChange)).Status);
+        await bot.SendGameAsync(CharacterService.PlayerTransformJob, new PlayerTransformJobReq { JobId = RuneKnight });
+        Assert.Equal(0, (await Next(bot, CharacterService.PlayerTransformJob, PlayerTransformJobResp.Parser)).Result);
+        await Eventually(async () => (await State(ThirdJobChange)).Status is TaskState.Finish or TaskState.Delivery,
+            "the third job change did not complete its step");
     }
 
     [ClientDataFact]

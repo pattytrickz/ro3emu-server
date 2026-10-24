@@ -117,12 +117,12 @@ public sealed class EconomyMutation
 
     public static bool IsRewardCommand(string command) => command is
         "monster-kill" or "gather-yield" or "dungeon-reward" or "tower-reward" or "world-revive" or
-        "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/daily-stage" or "cd13e/journey-victory" or
+        "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/growthclass-award" or "cd13e/library-award" or "cd13e/firstheart-award" or "cd13e/daily-stage" or "cd13e/journey-victory" or
         "cd13e/character-exp" or "cd13e/grant" or "cd13e/gm-grant";
 
     public static bool IsOwnedExchangeCommand(string command) => command is
         "cd13e/tower-milestone" or "cd13e/grant" or "cd13e/character-exp" or
-        "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/daily-stage" or "cd13e/journey-victory" or
+        "cd13e/quest-award" or "cd13e/achievement-award" or "cd13e/advguild-award" or "cd13e/monsterhunt-award" or "cd13e/guild-award" or "cd13e/growthclass-award" or "cd13e/library-award" or "cd13e/firstheart-award" or "cd13e/daily-stage" or "cd13e/journey-victory" or
         "cd13e/gm-grant" or "cd13e/daily-reset";
 
     private static EconomyRewardEvidence Freeze(EconomyRewardEvidence value) => value with
@@ -170,10 +170,8 @@ public sealed class EconomyMutation
 }
 
 public sealed class EconomyOperationConflictException(string message) : InvalidOperationException(message);
-public sealed class EconomyOutcomeUnknownException : IOException
+public sealed class EconomyOutcomeUnknownException(string operationId, Exception writeFailure, Exception resolutionFailure) : IOException("Economic operation " + operationId + " has an unresolved commit outcome; owner reload is required.",
+        new AggregateException(writeFailure, resolutionFailure))
 {
-    public string OperationId { get; }
-    public EconomyOutcomeUnknownException(string operationId, Exception writeFailure, Exception resolutionFailure)
-        : base("Economic operation " + operationId + " has an unresolved commit outcome; owner reload is required.",
-            new AggregateException(writeFailure, resolutionFailure)) => OperationId = operationId;
+    public string OperationId { get; } = operationId;
 }

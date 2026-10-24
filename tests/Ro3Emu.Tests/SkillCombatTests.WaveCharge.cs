@@ -14,7 +14,7 @@ public sealed partial class SkillCombatTests
     public async Task AWaveSentAtThePlayerKeepsChasingBeyondItsLeash()
     {
         await using var alice = await InWorld("Alice");
-        var monsters = app.Services.GetRequiredService<MonsterService>();
+        var monsters = _app.Services.GetRequiredService<MonsterService>();
         async Task<MonsterUnit> Far() => await Loop.InvokeAsync(async () =>
         {
             var s = Session("alice");

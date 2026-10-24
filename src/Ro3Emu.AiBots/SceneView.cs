@@ -41,6 +41,11 @@ public sealed record PartyInvite(long InviterId, long TeamId) : ViewEvent;
 public sealed record SceneSwitched(long SceneEntry, long SceneId, int Generation) : ViewEvent;
 /// <summary>Someone left the bot's party (the bot itself when kicked), or the party got a new leader.</summary>
 public sealed record PartyChanged(long Left, long NewLeader) : ViewEvent;
+/// <summary>
+/// The party is asked to ready up for a dungeon and the bot has not answered: the Phantom Realm queue's ready check
+/// (82636, <paramref name="MatchEntryId"/> set) or a party leader's Enter Challenge (42033, MatchEntryId 0).
+/// </summary>
+public sealed record DungeonReadyCheck(int MatchEntryId) : ViewEvent;
 
 /// <summary>
 /// The bot's picture of its scene, built from what the server pushes (AOI view, movement, attributes, hits), and the
@@ -208,6 +213,16 @@ public sealed class SceneView
             case GmCommands.BroadcastNotify:
                 string notice = BroadCastNotify.Parser.ParseFrom(body).Content;
                 lock (_lock) LastNotice = notice;
+                break;
+            case DungeonMatchService.ReadyNotify:
+                var check = MatchReadyNotify.Parser.ParseFrom(body);
+                if (check.MultiDungeonId != 0 && check.ReadyInfos.Any(r => (ulong)r.PlayerId == SelfUid && r.Status == MatchReadyStatus.None))
+                    _events.Writer.TryWrite(new DungeonReadyCheck(check.MatchEntryId));
+                break;
+            case DungeonService.ReadyQueue:
+                var queue = TeamEnterReadyQueueNotify.Parser.ParseFrom(body);
+                if (!queue.Cancel && queue.ReadyQueue.TryGetValue((long)SelfUid, out bool ready) && !ready)
+                    _events.Writer.TryWrite(new DungeonReadyCheck(0));
                 break;
             case TeamService.TeamNotifyInvitee:
                 var invite = NotifyInvitee.Parser.ParseFrom(body);

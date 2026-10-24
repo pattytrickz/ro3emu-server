@@ -40,43 +40,43 @@ public sealed partial class DungeonTests
             switch (t.Kind)
             {
                 case ReconstructedDungeons.TriggerKind.Interaction or ReconstructedDungeons.TriggerKind.Message:
-                {
-                    var (actor, interaction) = await Service<GameLoop>().InvokeAsync(() => Task.FromResult(
-                        Session(alice).DungeonAttempt!.SceneActors.SelectMany(u => catalog.Interactions(u.NpcId)
-                            .Where(i => t.Kind == ReconstructedDungeons.TriggerKind.Interaction ? i == t.Id : catalog.DungeonMessage(i) == t.Id)
-                            .Select(i => (u, i))).First()));
-                    var npc = Service<GameData>().Row("NPCConfig", actor.NpcId)!.Value;
-                    var view = await ClientSees(alice, actor.Uid, step.Actors.First(a => a.NpcId == actor.NpcId && a.Point == actor.Point).Buffs);
-                    // The entity the client creates: its unit class, template and place.
-                    Assert.Equal((int)GameData.Int(npc, "_iNPCType"), view.Entity.EntityType);
-                    Assert.Equal((ulong)actor.NpcId, view.Entity.EntityTemplateID);
-                    // An NPC is shaped like the world NPCs the live client interacts with (portals, Kafras): no born time.
-                    if (view.Entity.EntityType == 2) Assert.Equal(0, view.Entity.BornTimeMs);
-                    var point = map.Points[actor.Point];
-                    Assert.Equal(point.X, view.Entity.MovementInfo.Pos.X, 0.01f);
-                    Assert.Equal(point.Z, view.Entity.MovementInfo.Pos.Z, 0.01f);
-                    // It registers for interaction and offers the step's interaction (directly, or from its dialogue).
-                    Assert.NotEqual(0, catalog.Interactions(actor.NpcId).FirstOrDefault());
-                    int offered = Reachable(actor.NpcId, interaction);
-                    Assert.True(ConditionHolds(offered, view.BuffGroups),
-                        $"interaction {offered} of {actor.NpcId}: NPC condition fails with buff groups [{string.Join(',', view.BuffGroups)}]");
-                    // The GM aid puts the player beside the actor; the client's next 0.2 s check finds it in range and
-                    // possesses it (no other interactive unit is preferred). Where the player is, is the client's own
-                    // view: the teleport counts only if the client applies it to its controlled unit.
-                    await Gm(alice, $"!actors {actor.NpcId}");
-                    long me = Session(alice).Role!.Id;
-                    bool onSurface = MovesOnSurface(scene);
-                    var at = ClientPlayerAt(alice, me, onSurface);
-                    for (int i = 0; i < 100 && (at == null || MonsterService.Distance(at.X, at.Z, actor.X, actor.Z) > 1.5f); i++)
                     {
-                        await Task.Delay(20);
-                        at = ClientPlayerAt(alice, me, onSurface);
+                        var (actor, interaction) = await Service<GameLoop>().InvokeAsync(() => Task.FromResult(
+                            Session(alice).DungeonAttempt!.SceneActors.SelectMany(u => catalog.Interactions(u.NpcId)
+                                .Where(i => t.Kind == ReconstructedDungeons.TriggerKind.Interaction ? i == t.Id : catalog.DungeonMessage(i) == t.Id)
+                                .Select(i => (u, i))).First()));
+                        var npc = Service<GameData>().Row("NPCConfig", actor.NpcId)!.Value;
+                        var view = await ClientSees(alice, actor.Uid, step.Actors.First(a => a.NpcId == actor.NpcId && a.Point == actor.Point).Buffs);
+                        // The entity the client creates: its unit class, template and place.
+                        Assert.Equal((int)GameData.Int(npc, "_iNPCType"), view.Entity.EntityType);
+                        Assert.Equal((ulong)actor.NpcId, view.Entity.EntityTemplateID);
+                        // An NPC is shaped like the world NPCs the live client interacts with (portals, Kafras): no born time.
+                        if (view.Entity.EntityType == 2) Assert.Equal(0, view.Entity.BornTimeMs);
+                        var point = map.Points[actor.Point];
+                        Assert.Equal(point.X, view.Entity.MovementInfo.Pos.X, 0.01f);
+                        Assert.Equal(point.Z, view.Entity.MovementInfo.Pos.Z, 0.01f);
+                        // It registers for interaction and offers the step's interaction (directly, or from its dialogue).
+                        Assert.NotEqual(0, catalog.Interactions(actor.NpcId).FirstOrDefault());
+                        int offered = Reachable(actor.NpcId, interaction);
+                        Assert.True(ConditionHolds(offered, view.BuffGroups),
+                            $"interaction {offered} of {actor.NpcId}: NPC condition fails with buff groups [{string.Join(',', view.BuffGroups)}]");
+                        // The GM aid puts the player beside the actor; the client's next 0.2 s check finds it in range and
+                        // possesses it (no other interactive unit is preferred). Where the player is, is the client's own
+                        // view: the teleport counts only if the client applies it to its controlled unit.
+                        await Gm(alice, $"!actors {actor.NpcId}");
+                        long me = Session(alice).Role!.Id;
+                        bool onSurface = MovesOnSurface(scene);
+                        var at = ClientPlayerAt(alice, me, onSurface);
+                        for (int i = 0; i < 100 && (at == null || MonsterService.Distance(at.X, at.Z, actor.X, actor.Z) > 1.5f); i++)
+                        {
+                            await Task.Delay(20);
+                            at = ClientPlayerAt(alice, me, onSurface);
+                        }
+                        Assert.NotNull(at);
+                        Assert.Equal(actor.Uid, Possessed(alice, at.X, at.Y, at.Z));
+                        Assert.Equal(0, await Interact(alice, actor, (int)interaction));
+                        break;
                     }
-                    Assert.NotNull(at);
-                    Assert.Equal(actor.Uid, Possessed(alice, at.X, at.Y, at.Z));
-                    Assert.Equal(0, await Interact(alice, actor, (int)interaction));
-                    break;
-                }
                 case ReconstructedDungeons.TriggerKind.Plot:
                     await Story(alice, t.Id);
                     // 84012 (the plot's action 150 PlotActingTrigger) completes it as well as 84011 does.
@@ -102,10 +102,10 @@ public sealed partial class DungeonTests
         Assert.True((DungeonService.SceneActorUidBase << 1) <= limit);
         Assert.NotEqual((double)DungeonService.SceneActorUidBase, (double)(DungeonService.SceneActorUidBase | 1));
         // The other dynamic NPC namespaces the client can stand next to (guild campfire seeds: prefix | 24-bit room | 12-bit
-        // point; treasure hunt NPCs: prefix | role id; the One Piece treasure).
+        // point; treasure hunt NPCs: prefix | role id; the Rift Crisis stones below 2^47).
         Assert.True((GuildCampfireService.UidPrefix << 1) <= limit);
         Assert.True((SceneService.TreasureUidPrefix << 1) <= limit);
-        Assert.True(TimedBattleService.TreasureNpcUid < limit);
+        Assert.True(TimedBattleService.IsRiftUid((1L << 47) - 1) && !TimedBattleService.IsRiftUid(1L << 47) && (1L << 47) < limit);
     }
 
     [ClientDataTheory]

@@ -11,8 +11,8 @@ public sealed partial class SkillCombatTests
     {
         await using var bot = await InWorld("Alice");
         var session = Session("alice");
-        var owners = app.Services.GetRequiredService<OwnerRegistry>();
-        var buffs = app.Services.GetRequiredService<BuffService>();
+        var owners = _app.Services.GetRequiredService<OwnerRegistry>();
+        var buffs = _app.Services.GetRequiredService<BuffService>();
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blocker = Loop.InvokeAsync(() => owners.RunAsync("held player", [ReservationKey.Role(session.Role!.Id)], async () =>

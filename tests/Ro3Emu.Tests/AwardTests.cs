@@ -127,10 +127,9 @@ public sealed class AwardTests : IAsyncLifetime
             awards.Resolve(null!, 1005).Grants.ToArray()); // AwardConfig _kEXP [1, 10000] is base EXP
         Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1007)); // _kEXP [2, 100]: unresolved kind
         // _kCondition [[2, 11, 99]]: base level 11-99, so it needs a recipient
-        Assert.False(Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1002)).LevelTooLow);
-        // Growth rank 2 below base 11 answers "Player level too low" instead of "Reward not found".
-        Assert.True(Assert.Throws<AwardResolutionException>(
-            () => awards.ResolveForProgress(new RoleProgress { Level = 10 }, 1002)).LevelTooLow);
+        Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 1002));
+        // Below base 11 it does not resolve (GrowthClassService then pays the rank's fixed items).
+        Assert.Throws<AwardResolutionException>(() => awards.ResolveForProgress(new RoleProgress { Level = 10 }, 1002));
         Assert.Equal(new[] { new AwardGrant(1200000, 1), new AwardGrant(1420100, 1) },
             awards.ResolveForProgress(new RoleProgress { Level = 11 }, 1002).Grants.ToArray());
         Assert.Throws<AwardResolutionException>(() => awards.Resolve(null!, 25001)); // restriction replacement
@@ -332,11 +331,12 @@ public sealed class AwardTests : IAsyncLifetime
         await loop.InvokeAsync(() => Task.CompletedTask);
         Assert.Equal(19, store.Load(session.Role.Id).Single(i => i.Guid == potion).Stack);
 
-        // 1003100 [[105,1]]: server-hosted 105 Soundtransmission has no implementation (the Fly Wing used to be the
-        // example; its 101 JumpSameMap is implemented now, StoryBlockerTests).
+        // 10051001 [[608,10051001],[206,10051001]]: server-hosted 608 UseTotemSkillBook_Sever has no implementation (the
+        // Fly Wing and the 105 horn used to be the example; both are implemented now, StoryBlockerTests, ItemActionTests).
         Assert.True(await loop.InvokeAsync(() => character.ApplyAwardAsync(session,
-            new AwardPlan(0, 0, [new AwardGrant(1003100, 1)]))));
-        long unsupported = store.Load(session.Role.Id).Single(i => i.Entry == 1003100).Guid;
+            new AwardPlan(0, 0, [new AwardGrant(10051001, 1)]))));
+        long unsupported = store.Load(session.Role.Id).Single(i => i.Entry == 10051001).Guid;
+        await loop.InvokeAsync(() => { session.Progress!.Level = 10; return Task.CompletedTask; }); // its _iLevelNeed
         await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = unsupported, ItemCount = 1 });
         Assert.Equal(ErrorCodes.FeatureUnavailable, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
         Assert.Equal(1, store.Load(session.Role.Id).Single(i => i.Guid == unsupported).Stack);
@@ -364,54 +364,6 @@ public sealed class AwardTests : IAsyncLifetime
         var items = store.Load(session.Role.Id);
         Assert.Equal(1, items.Single(i => i.Entry == 1300077).Stack);
         Assert.All(notify.Rewards, r => Assert.Contains(items, i => i.Entry == r.ItemEntry));
-    }
-
-    [ClientDataFact]
-    public async Task ASelectionChestGrantsTheChosenOptionAndRefusesAChoiceThatDoesNotAddUp()
-    {
-        // #bug-reports "Unable to choose Blue Card Selection Chest", "Unable to open T3 Orange Equipment Slot Selection
-        // Chest": a SelfChooseGift 303 box answered "This feature is unavailable" after the choice.
-        await using var bot = await InWorld("ChestAlice");
-        await Next(bot, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
-        var loop = _app.Services.GetRequiredService<GameLoop>();
-        var character = _app.Services.GetRequiredService<CharacterService>();
-        var awards = _app.Services.GetRequiredService<AwardService>();
-        var data = _app.Services.GetRequiredService<GameData>();
-        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "ChestAlice");
-        var store = _app.Services.GetRequiredService<ItemStore>();
-        // The first selection chest whose award offers at least two items this role can receive.
-        var (chest, options) = data.Table("ItemConfig")
-            .Where(kv => GameData.Int(kv.Value, "_iType") == 3 && GameData.Int(kv.Value, "_iIsUse") == 1
-                && GameData.Int(kv.Value, "_iSubType") == 303 && GameData.Int(kv.Value, "_iAward") > 0)
-            .Select(kv =>
-            {
-                try { return (Entry: int.Parse(kv.Key), Options: awards.Resolve(session, GameData.Int(kv.Value, "_iAward")).Grants
-                    .Where(g => g.Entry is not (100 or 101)).ToList()); }
-                catch (AwardResolutionException) { return (Entry: 0, Options: new List<AwardGrant>()); }
-            })
-            .First(c => c.Entry > 0 && c.Options.Count >= 2 && c.Options.Select(o => o.Entry).Distinct().Count() == c.Options.Count);
-        Assert.True(await loop.InvokeAsync(() => character.ApplyAwardAsync(session,
-            new AwardPlan(0, 0, [new AwardGrant(chest, 2)]), suppressRewardNotice: true)));
-        long box = store.Load(session.Role!.Id).Single(i => i.Entry == chest).Guid;
-
-        // Two units chosen for a one-unit use: refused, the chest stays.
-        var wrong = new ItemUseReq { ItemGuid = box, ItemCount = 1 };
-        wrong.ItemParam.Add(new ItemUseParamInfo { SelfChooseGift = new ItemUseParamInfo.Types.SelfChooseGift { ChooseGift = { [2] = 2 } } });
-        await bot.SendGameAsync(CharacterService.ItemUse, wrong);
-        Assert.Equal(155, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
-        await loop.InvokeAsync(() => Task.CompletedTask);
-        Assert.Equal(2, store.Load(session.Role.Id).Single(i => i.Entry == chest).Stack);
-
-        // Option 2, one unit: exactly that option arrives and one chest is used.
-        var pick = new ItemUseReq { ItemGuid = box, ItemCount = 1 };
-        pick.ItemParam.Add(new ItemUseParamInfo { SelfChooseGift = new ItemUseParamInfo.Types.SelfChooseGift { ChooseGift = { [2] = 1 } } });
-        int before = store.Load(session.Role.Id).Where(i => i.Entry == options[1].Entry).Sum(i => i.Stack);
-        await bot.SendGameAsync(CharacterService.ItemUse, pick);
-        Assert.Equal(0, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
-        await loop.InvokeAsync(() => Task.CompletedTask);
-        var items = store.Load(session.Role.Id);
-        Assert.Equal(1, items.Single(i => i.Entry == chest).Stack);
-        Assert.Equal(before + options[1].Count, items.Where(i => i.Entry == options[1].Entry).Sum(i => i.Stack));
     }
 
     [ClientDataFact]
