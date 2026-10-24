@@ -9,7 +9,8 @@ namespace Ro3Emu.Server.Game;
 /// day 36 (its _iLvLimitCorrection scales the EXP gained past the day's cap). Owner decision (2026-10-17): no
 /// day-based cap under the all-open policy; the cap is the table's highest _iBaseLimit, 99, which is also what the
 /// client treats as the end (Lua_CFG_BaseLvLimitConfig.GetMaxBaseLimit; UI_Sys_RoleInfoWidgetCtrl shows "99 == level"
-/// as a full bar). Paragon opens at 99. A role saved above the cap keeps its level: EXP never lowers it.
+/// as a full bar). Paragon opens at 99. A role saved above the cap keeps its level: EXP never lowers it. Owner
+/// decision (2026-10-24): a published house cap schedule instead (ServerOptions.LevelCaps, <see cref="LevelCap"/>).
 /// </para>
 /// <para>
 /// The server ("world") level is BaseLvLimitConfig[10000+day]._iServerLv, day = floor((now - open) / 86400) + 1 as
@@ -44,6 +45,15 @@ public sealed partial class CharacterService
             if (GameData.Int(row, "_iBaseExp") == 0) cap = Math.Min(cap, (int)GameData.Int(row, "_iID"));
         return cap == int.MaxValue ? 100 : cap;
     }
+
+    /// <summary>
+    /// Sol RO3 house rule (ServerOptions.LevelCaps): the highest base level EXP can reach now, never above
+    /// <see cref="MaxLevel"/>. At the cap the role keeps a full bar (ApplyExp), so it levels on its first EXP after a raise.
+    /// </summary>
+    public int LevelCap() => LevelCapAt(options.Value.LevelCaps, MaxLevel, UseClock.GetUtcNow());
+
+    internal static int LevelCapAt(IEnumerable<LevelCapPhase> phases, int max, DateTimeOffset now) =>
+        phases.Where(p => p.From <= now && p.Cap > 0).OrderBy(p => p.From).LastOrDefault() is { } phase ? Math.Min(max, phase.Cap) : max;
 
     /// <summary>BaseLvLimitConfig[10000+day]._iServerLv for the current server day; 0 without a row or a clock.</summary>
     public int ServerLevel() => ServerDay is { } day ? ServerLevelOn(day()) : 0;
