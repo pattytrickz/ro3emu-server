@@ -49,4 +49,55 @@ public sealed partial class DungeonTests
         Assert.True(TaskService.IsDelivered(Session(relog), 703990));
         await QuestProbe.AtAsync(_app, "alice", 704020, 0); // title 4 is offered next
     }
+
+    /// <summary>
+    /// The side quest 10200010 "Clear a Five-Player Dungeon" has one 106602 target per Wildlands boss
+    /// ([106602,1,4300001], [106602,1,43100003], [106602,1,43200006]). A party's clear counts for every member, not only
+    /// for the one who landed the last hit, and only on the target of the boss it cleared.
+    /// </summary>
+    [ClientDataFact]
+    public async Task APartyBossClearCountsTheSideQuestForEveryMember()
+    {
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        await using var carol = await InWorld("Carol");
+        var members = new[] { (alice, "alice"), (bob, "bob"), (carol, "carol") };
+        foreach (var (bot, account) in members)
+        {
+            await Gm(bot, "!lvl 99");
+            await QuestProbe.AcceptAsync(_app, _http, account, 10200010);
+            await QuestProbe.AtAsync(_app, account, 10200010, 0);
+        }
+        await Party(alice, bob, carol);
+
+        await ClearAsParty(members, mark: 1, Scene, Boss);
+        foreach (var (_, account) in members)
+            await QuestProbe.WaitAsync(_app, account, 10200010, i => i.CompleteNum is [1, 0, 0], "first boss only");
+        await ClearAsParty(members, mark: 2, scene: 3120101, boss: 43100003);
+        foreach (var (_, account) in members)
+            await QuestProbe.WaitAsync(_app, account, 10200010, i => i.CompleteNum is [1, 1, 0], "second boss too");
+    }
+
+    private async Task ClearAsParty((BotClient Bot, string Account)[] members, int mark, long scene, int boss)
+    {
+        var leader = members[0].Bot;
+        Assert.Equal(0, await Enter(leader, Request(mark: mark, scene: scene)));
+        foreach (var (bot, _) in members.Skip(1))
+        {
+            await bot.SendGameAsync(DungeonService.Confirm, new ConfirmTeamDungeonReq { IsAgree = true });
+            Assert.Equal(0, (await Next(bot, DungeonService.Confirm, ConfirmTeamDungeonRsp.Parser)).Result);
+        }
+        long instance = await Load(leader, scene);
+        foreach (var (bot, _) in members.Skip(1)) Assert.Equal(instance, await Load(bot, scene));
+        await Kill(leader, await BossIn(instance, boss));
+        foreach (var (bot, _) in members)
+        {
+            Assert.Equal((DungeonRes)1, (await Next(bot, DungeonService.Result, DungeonResNotify.Parser)).Res);
+            await bot.SendGameAsync(DungeonService.Leave, new LeaveDungeonReq());
+            Assert.Equal(0, (await Next(bot, DungeonService.Leave, LeaveDungeonRsp.Parser)).Result);
+            long outside = (await Next(bot, MsgId.SwitchSceneLine, SwitchSceneLineResp.Parser)).SceneEntry;
+            await bot.SendGameAsync(MsgId.SceneLoaded, new SceneLoadedReq { SceneId = outside });
+            Assert.Equal(0, (await Next(bot, MsgId.SceneLoaded, SceneLoadedResp.Parser, m => m.SceneId == outside)).Result);
+        }
+    }
 }
