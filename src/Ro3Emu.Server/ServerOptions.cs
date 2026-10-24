@@ -206,6 +206,19 @@ public sealed class ServerOptions
     public string[] PartyShareExcludedAccounts { get; set; } = [];
 
     /// <summary>
+    /// Accounts (exact, or "prefix*") whose roles the public player count (/ro3emu/status, read by the website and the
+    /// launcher) leaves out, so the AI players ("aibot*") do not show as people online. The admin's /ro3emu/online and
+    /// /ro3emu/metrics still count every session. Empty: every role counts.
+    /// </summary>
+    public string[] StatusExcludedAccounts { get; set; } = [];
+
+    /// <summary>Whether <paramref name="account"/> is on an account list of exact names or "prefix*" entries.</summary>
+    public static bool AccountListed(IEnumerable<string> entries, string? account) =>
+        account != null && entries.Any(e => e.EndsWith('*')
+            ? e.Length > 1 && account.StartsWith(e[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(e, account, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// House rule (Sol RO3, not original behaviour): field MVPs (MvpService) spawn with this percentage of their
     /// configured HP, so a small realm's party can finish one. 100 keeps the config. Dungeon and story bosses are unchanged.
     /// </summary>
