@@ -999,12 +999,8 @@ public sealed class AiBot
             var result = InviteeRespResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10), ct)).Body).Result;
             if (!accept)
             {
-                // Say why, so the inviter is not left wondering whether the bot is away.
-                string? why = !player || !_hub.Options.AcceptPartyInvites ? null
-                    : !free ? "Sorry, I'm already in someone else's party right now."
-                    : PartyRules.LevelDecline(_view.Level, level);
+                // No whisper (owner decision, #99): one invite reached every bot nearby, and each declining one wrote.
                 if (!free || !inRange) _log($"declined a party invite from {invite.InviterId} (level {level?.ToString() ?? "unknown"})");
-                if (why != null) await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1, why, channelIndex: 5));
                 return;
             }
             if (result == ErrorCodes.AlreadyInParty)
@@ -1022,8 +1018,6 @@ public sealed class AiBot
             Volatile.Write(ref _leader, invite.InviterId);
             string name = _view.Find((ulong)invite.InviterId)?.Name ?? invite.InviterId.ToString();
             _log($"joined {name}'s party");
-            string thanks = _talker.Thanks();
-            await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1, thanks, channelIndex: 5));
         }
         catch (Exception e) when (e is not OperationCanceledException) { _log($"party invite failed: {e.Message}"); }
     }

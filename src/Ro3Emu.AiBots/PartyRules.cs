@@ -7,8 +7,9 @@ namespace Ro3Emu.AiBots;
 /// </summary>
 public static class PartyRules
 {
-    /// <summary>Invites are accepted from players within this many base levels of the bot.</summary>
-    public const int LevelRange = 10;
+    /// <summary>Invites are accepted from players within this many base levels of the bot (owner decision: 10 in #58,
+    /// 15 since 24 Oct 2026, so a small realm's players find enough AI party members).</summary>
+    public const int LevelRange = 15;
 
     /// <summary>A player's monster at or below this share of its HP (%) is left for their last hit.</summary>
     public const int SafeHpPercent = 30;
@@ -29,14 +30,6 @@ public static class PartyRules
     /// <summary>Whether the inviter is within <see cref="LevelRange"/> base levels; an unknown level is declined.</summary>
     public static bool InLevelRange(long botLevel, long? inviterLevel) =>
         inviterLevel is > 0 and var level && Math.Abs(level - botLevel) <= LevelRange;
-
-    /// <summary>The whisper that explains a declined invite.</summary>
-    public static string LevelDecline(long botLevel, long? inviterLevel) => inviterLevel switch
-    {
-        null or <= 0 => "Sorry, I can't join a party right now.",
-        var level when level < botLevel => "Sorry, I'm too high level to help you here.",
-        _ => "Sorry, you're too high level for me to keep up with you.",
-    };
 
     /// <summary>
     /// Whether the bot stops hitting a player's monster (one near a player of the party or one they hit) and leaves the
