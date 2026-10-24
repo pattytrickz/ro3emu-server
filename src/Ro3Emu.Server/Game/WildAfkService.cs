@@ -81,8 +81,9 @@ public sealed class WildAfkService : IGameTicker
 
     private long Param(string key, long fallback) => _data.Table("PublicParamConfig").TryGetValue(key, out var value)
         ? (long)(GameData.Number(value) ?? fallback) : fallback;
-    private long DailySeconds => Param("OnHookDailyFightTime", 60) * 60;
-    private long CapSeconds => Param("OnHookFightTimeLimit", 180) * 60;
+    // ServerOptions.BonusTimeMultiplier (house rule) scales both the daily grant and the banked maximum.
+    private long DailySeconds => Param("OnHookDailyFightTime", 60) * 60 * Math.Max(1, _options.Value.BonusTimeMultiplier);
+    private long CapSeconds => Param("OnHookFightTimeLimit", 180) * 60 * Math.Max(1, _options.Value.BonusTimeMultiplier);
     private long MonitorMs => Param("OnHookConditionMonito", 10) * 1000;
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     // A queued operation may acquire the old role's gate after logout or a role switch replaced this state.
@@ -542,8 +543,8 @@ public sealed class WildAfkService : IGameTicker
         if (!Ordinary(monster)) return false;
         // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field kill, locked panel or not. The
         // house rule also covers the caves, where the panel itself stays refused ("Cannot Enable Bonus in a Dungeon").
-        if (!Field(s)) return _options.Value.BonusExpAlways && Cave(s);
-        bool always = _options.Value.BonusExpAlways;
+        bool always = AlwaysBonus(_options.Value, s.Progress?.Level ?? 0, s.AutoBattle);
+        if (!Field(s)) return always && Cave(s);
         if (!Unlocked(s) || s.WildAfk is not { } state) return always;
         if (BeforeKillGateForTest is { } beforeGate) await beforeGate();
         // A kill waiting behind an old state's gate must not reserve that role and block
@@ -559,6 +560,14 @@ public sealed class WildAfkService : IGameTicker
         return always || s.AutoBattle && !s.Dead && !s.SceneLoading && !MvpAggro(s)
             && state.Info.IsHighMagnification && state.Info.HighMultiplierTimeSeconds > 0;
     }
+
+    /// <summary>
+    /// ServerOptions.BonusExpAlways, banded by BonusExpAlwaysBelowLevel: below that level every ordinary kill pays the
+    /// Bonus Time table; from it up only hands-on kills do, and auto-battle kills fall back to battle time (the original
+    /// rule), so AFK hunting has a daily budget while playing at the keyboard never does.
+    /// </summary>
+    internal static bool AlwaysBonus(ServerOptions o, int level, bool autoBattle) =>
+        o.BonusExpAlways && (o.BonusExpAlwaysBelowLevel <= 0 || level < o.BonusExpAlwaysBelowLevel || !autoBattle);
 
     internal Func<Task>? BeforeKillGateForTest { get; set; }
     internal Action? KillGateWaitingForTest { get; set; }

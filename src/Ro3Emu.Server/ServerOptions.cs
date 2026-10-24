@@ -90,6 +90,27 @@ public sealed class ServerOptions
     public bool BonusExpAlways { get; set; }
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour), with <see cref="BonusExpAlways"/>: from this Base level up,
+    /// auto-battle kills pay the Bonus Time table only while battle time lasts (the original rule), so AFK hunting has
+    /// a daily budget; hands-on kills keep the table at every level. 0: BonusExpAlways covers every level.
+    /// </summary>
+    public int BonusExpAlwaysBelowLevel { get; set; }
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): daily battle time and its banked maximum
+    /// (PublicParamConfig OnHookDailyFightTime 60 minutes, OnHookFightTimeLimit 180) times this. 1 keeps the data's.
+    /// </summary>
+    public int BonusTimeMultiplier { get; set; } = 1;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a published level-cap schedule. The cap in force is the Cap of the
+    /// latest phase whose From has passed (none yet: no house cap). Base EXP stops at the cap with a full bar kept, so
+    /// a raise levels the role at once; a role already above the cap keeps its level. Replaces the original's
+    /// open-day caps (BaseLvLimitConfig), which this realm doesn't apply (CharacterService.LevelRules).
+    /// </summary>
+    public LevelCapPhase[] LevelCaps { get; set; } = [];
+
+    /// <summary>
     /// Hours a settled monster-kill receipt keeps its full payload before <see cref="Accounts.ReceiptCompaction"/>
     /// empties it (0 keeps everything). Only a retry of the same operation, seconds after the kill, reads it.
     /// </summary>
@@ -451,6 +472,13 @@ public sealed class LoginGift
     public string Title { get; set; } = "A gift from the Sol RO3 team";
     /// <summary>Roles below this Base level wait for it until they reach it inside the window.</summary>
     public int MinLevel { get; set; }
+}
+
+/// <summary>One <see cref="ServerOptions.LevelCaps"/> phase: from this UTC time on, Base level stops at Cap.</summary>
+public sealed class LevelCapPhase
+{
+    public DateTimeOffset From { get; set; }
+    public int Cap { get; set; }
 }
 
 /// <summary>House rule: who may play. Existing accounts keep logging in unless blocked.</summary>

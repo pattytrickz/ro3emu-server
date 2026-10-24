@@ -19,7 +19,7 @@ public sealed partial class CharacterService
 
     private JsonElement? JobLvRow(int career, int jobLevel) => data.Row("JobLvConfig", JobRank(career) * 100L + jobLevel);
 
-    private long BaseExpNeed(int level) => data.Row("BaseLvConfig", level) is { } row ? GameData.Int(row, "_iBaseExp") : 0;
+    internal long BaseExpNeed(int level) => data.Row("BaseLvConfig", level) is { } row ? GameData.Int(row, "_iBaseExp") : 0;
 
     private long JobExpNeed(int career, int jobLevel) => JobLvRow(career, jobLevel) is { } row ? GameData.Int(row, "_iJobeExp") : 0;
 

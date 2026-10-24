@@ -379,13 +379,16 @@ public sealed partial class CharacterService
 
     private void ApplyExp(RoleProgress p, long baseExp, long jobExp)
     {
+        int cap = LevelCap();
         p.Exp = checked(p.Exp + baseExp);
-        for (long need; p.Level < MaxLevel && (need = BaseExpNeed(p.Level)) > 0 && p.Exp >= need;)
+        for (long need; p.Level < cap && (need = BaseExpNeed(p.Level)) > 0 && p.Exp >= need;)
         {
             p.Exp -= need;
             p.Level++;
         }
         if (p.Level >= MaxLevel) p.Exp = 0;
+        // House cap (LevelCaps): the bar stops one point short of the next level, and the rest is lost.
+        else if (p.Level >= cap) p.Exp = Math.Min(p.Exp, Math.Max(0, BaseExpNeed(p.Level) - 1));
         p.JobExp = checked(p.JobExp + jobExp);
         SkipFreeJobLevels(p);
         int maxJob = MaxJobLevel(p.Career);
