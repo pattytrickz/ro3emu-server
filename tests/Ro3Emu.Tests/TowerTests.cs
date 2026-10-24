@@ -379,6 +379,31 @@ public sealed class TowerTests : IAsyncLifetime
             Service<TowerService>().FirstPassGm(["firstpass", "clear", "nobody"]));
     }
 
+    /// <summary>
+    /// The milestone eggs a GM's records kept from a player are made good with "!mailto &lt;role&gt; &lt;item&gt; &lt;count&gt;": the
+    /// letter goes to that role even while it is offline, never to the GM.
+    /// </summary>
+    [ClientDataFact]
+    public async Task AGmMailsItemsToAnOfflineRoleByName()
+    {
+        long bobId;
+        await using (var bob = await InWorld("Bob"))
+            bobId = (long)bob.Self!.Uuid;
+        await using var alice = await InWorld("Alice");
+        var roles = Service<RoleStore>();
+        MailService.Mailbox? Box(long id) => roles.LoadMailbox(id) is { } bytes ? JsonSerializer.Deserialize<MailService.Mailbox>(bytes) : null;
+
+        await Gm(alice.Account!, "!mailto bob 1250709 70 Spirit Tower eggs");
+        var letter = Assert.Single(Box(bobId)!.Letters);
+        Assert.Equal("Spirit Tower eggs", letter.Title);
+        Assert.Equal(new MailService.Attachment(1250709, 70), Assert.Single(letter.Attachments));
+        Assert.Empty(Box((long)alice.Self!.Uuid)?.Letters ?? []);
+
+        await Gm(alice.Account!, "!mailto nobody 1250709 70");
+        await Gm(alice.Account!, $"!mailto {bobId} 999999999 1");
+        Assert.Single(Box(bobId)!.Letters);
+    }
+
     [ClientDataFact]
     public async Task BossFirstPassBelongsToFirstWinnerAndOtherPlayersClaimItsMilestoneOnce()
     {
