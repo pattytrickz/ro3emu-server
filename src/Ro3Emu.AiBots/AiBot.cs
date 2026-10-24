@@ -788,7 +788,7 @@ public sealed class AiBot
         bool done = _pathIndex >= _path.Count;
         float dir = (MathF.Atan2(x - fx, z - fz) * 180f / MathF.PI + 360f) % 360f;
         await SendAsync(() => _bot.SendGameAsync(MsgId.Walk, new WalkReq
-            { Pos = new Vec3 { X = x, Y = y, Z = z }, Dir = dir, Face = dir, BStop = done, SpeedRate = 1 }));
+        { Pos = new Vec3 { X = x, Y = y, Z = z }, Dir = dir, Face = dir, BStop = done, SpeedRate = 1 }));
         _view.MovedTo(x, y, z);
         if (done)
         {

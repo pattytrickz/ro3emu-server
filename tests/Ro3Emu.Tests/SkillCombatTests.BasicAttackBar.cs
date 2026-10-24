@@ -30,8 +30,11 @@ public sealed partial class SkillCombatTests
         static int Learned(DBSkillData d, int group) => d.SkillAssignPlans[d.CurrentPlanIndex].SkillAssigns.TryGetValue(group, out var s) ? s.SkillLevel : 0;
         async Task<int> Load(SkillLoadOperation op, int group, int slot)
         {
-            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = op,
-                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 } });
+            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
+            {
+                OpType = op,
+                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 }
+            });
             return (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result;
         }
 

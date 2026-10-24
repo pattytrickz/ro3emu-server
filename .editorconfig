@@ -61,17 +61,17 @@ dotnet_naming_rule.private_fields_are_underscore_camel_case.severity = warning
 # SDK band global.json pins: after an SDK update, run the tool and write the numbers it prints. IDE1006 stays: the
 # fields of DbPlan types and of the values they hold keep their names, because EconomyChildIntent and
 # EventPlanFingerprint write those names into stored receipts (ReceiptFieldNamesTests pins them).
-# 23: types that own disposable fields should be disposable
+# 27: types that own disposable fields should be disposable
 dotnet_diagnostic.CA1001.severity = suggestion
 # 1: declare types in namespaces
 dotnet_diagnostic.CA1050.severity = suggestion
-# 29: do not declare visible instance fields
+# 67: do not declare visible instance fields
 dotnet_diagnostic.CA1051.severity = suggestion
 # 2: CancellationToken parameters must come last
 dotnet_diagnostic.CA1068.severity = suggestion
-# 397: specify IFormatProvider
+# 411: specify IFormatProvider
 dotnet_diagnostic.CA1305.severity = suggestion
-# 55: specify StringComparison for correctness
+# 60: specify StringComparison for correctness
 dotnet_diagnostic.CA1310.severity = suggestion
 # 1: use nameof
 dotnet_diagnostic.CA1507.severity = suggestion
@@ -79,7 +79,7 @@ dotnet_diagnostic.CA1507.severity = suggestion
 dotnet_diagnostic.CA1512.severity = suggestion
 # 1: use the ObjectDisposedException throw helper
 dotnet_diagnostic.CA1513.severity = suggestion
-# 64: identifiers should not contain underscores
+# 69: identifiers should not contain underscores
 dotnet_diagnostic.CA1707.severity = suggestion
 # 1: identifiers should differ by more than case
 dotnet_diagnostic.CA1708.severity = suggestion
@@ -87,15 +87,15 @@ dotnet_diagnostic.CA1708.severity = suggestion
 dotnet_diagnostic.CA1711.severity = suggestion
 # 1: identifiers should have the correct prefix
 dotnet_diagnostic.CA1715.severity = suggestion
-# 3: identifiers should not match keywords
+# 4: identifiers should not match keywords
 dotnet_diagnostic.CA1716.severity = suggestion
-# 4: identifiers should not contain type names
+# 6: identifiers should not contain type names
 dotnet_diagnostic.CA1720.severity = suggestion
-# 16: parameter names should match the base declaration
+# 17: parameter names should match the base declaration
 dotnet_diagnostic.CA1725.severity = suggestion
 # 1: do not initialize unnecessarily
 dotnet_diagnostic.CA1805.severity = suggestion
-# 164: mark members as static
+# 167: mark members as static
 dotnet_diagnostic.CA1822.severity = suggestion
 # 4: use a property instead of a LINQ method
 dotnet_diagnostic.CA1826.severity = suggestion
@@ -109,33 +109,33 @@ dotnet_diagnostic.CA1832.severity = suggestion
 dotnet_diagnostic.CA1836.severity = suggestion
 # 4: prefer Dictionary.Contains methods
 dotnet_diagnostic.CA1841.severity = suggestion
-# 380: use LoggerMessage delegates
+# 405: use LoggerMessage delegates
 dotnet_diagnostic.CA1848.severity = suggestion
 # 5: prefer TryGetValue
 dotnet_diagnostic.CA1854.severity = suggestion
-# 65: use concrete types for performance
+# 69: use concrete types for performance
 dotnet_diagnostic.CA1859.severity = suggestion
 # 1: avoid Enumerable.Any()
 dotnet_diagnostic.CA1860.severity = suggestion
-# 164: avoid constant arrays as arguments
+# 167: avoid constant arrays as arguments
 dotnet_diagnostic.CA1861.severity = suggestion
 # 8: use StringComparison for case-insensitive comparisons
 dotnet_diagnostic.CA1862.severity = suggestion
-# 10: cache and reuse JsonSerializerOptions
+# 11: cache and reuse JsonSerializerOptions
 dotnet_diagnostic.CA1869.severity = suggestion
-# 147: avoid potentially expensive logging
+# 161: avoid potentially expensive logging
 dotnet_diagnostic.CA1873.severity = suggestion
 # 15: instantiate argument exceptions correctly
 dotnet_diagnostic.CA2208.severity = suggestion
-# 778: use a collection initializer or expression
+# 809: use a collection initializer or expression
 dotnet_diagnostic.IDE0028.severity = suggestion
-# 139: use a collection expression for an array
+# 144: use a collection expression for an array
 dotnet_diagnostic.IDE0300.severity = suggestion
-# 13: use a collection expression for an empty collection
+# 16: use a collection expression for an empty collection
 dotnet_diagnostic.IDE0301.severity = suggestion
-# 588: use a collection expression for a fluent call
+# 607: use a collection expression for a fluent call
 dotnet_diagnostic.IDE0305.severity = suggestion
-# 28: naming rule violations (fields persisted by name, see above)
+# 40: naming rule violations (fields persisted by name, see above)
 dotnet_diagnostic.IDE1006.severity = suggestion
 
 # The client projects keep their block-scoped namespaces (built only against a local client).

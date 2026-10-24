@@ -255,8 +255,11 @@ public sealed class SkillService
         bool heldIsNormal = IsNormalAttackGroup(atkGroup);
         var plan = new SkillPlan { IsUnlock = true };
         foreach (int group in skillData.SkillList)
-            plan.SkillAssigns[group] = new SkillData { SkillId = group,
-                SkillLevel = group == atkGroup ? 1 : heldIsNormal && IsNormalAttackGroup(group) ? 0 : Level(p, group) };
+            plan.SkillAssigns[group] = new SkillData
+            {
+                SkillId = group,
+                SkillLevel = group == atkGroup ? 1 : heldIsNormal && IsNormalAttackGroup(group) ? 0 : Level(p, group)
+            };
         plan.SkillQueue[0] = new SkillData(); // the client pairs() it unguarded
         plan.ManualLoadSkill.Add(new SkillData()); // repeated load lists are read by the client even when empty
         plan.AutoLoadSkill.Add(new SkillData());
