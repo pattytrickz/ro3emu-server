@@ -150,6 +150,7 @@ public sealed partial class TaskService
             while (info.CompleteNum.Count < slots) info.CompleteNum.Add(0);
             while (info.CompleteNum.Count > slots) info.CompleteNum.RemoveAt(info.CompleteNum.Count - 1);
         }
+        CompleteStalledPlots(session);
         CountLogin(session); // 106801, before this login's acceptances (they start at 1)
         AcceptReady(session);
         EvaluatePassive(session);
@@ -237,6 +238,34 @@ public sealed partial class TaskService
             && emoji == emojiId && insideRegion(map, region) ? 1 : 0);
 
     /// <summary>84011 PLOT_ACTING_END: target 309002 [plotId] (required = the plot id, the client's describe quirk).</summary>
+    /// <summary>
+    /// Sol RO3 fallback, not original behaviour: a cutscene objective (309002) still open <see cref="StalledPlot"/>
+    /// after its step was accepted counts as watched at the next login. The cutscene runs only on the client, and a
+    /// client that freezes in it (main quest 10105050 "Strange Occurrences" for one player's two roles, 24 Oct 2026)
+    /// replays it on every attempt and never sends 84011, so the role could never move on. A story cutscene grants
+    /// nothing by itself: the step's own rewards still come from its normal delivery.
+    /// </summary>
+    private void CompleteStalledPlots(GameSession session)
+    {
+        long cutoff = _clock.GetUtcNow().Subtract(StalledPlot).ToUnixTimeMilliseconds();
+        foreach (var info in session.Tasks!.Infos.Values.Where(i => i.Status == Running && i.StartTime > 0 && i.StartTime <= cutoff))
+        {
+            var def = Defs()[info.TaskId];
+            for (int i = 0; i < def.Targets.Length && i < info.CompleteNum.Count; i++)
+            {
+                if (def.Targets[i] is not [TPlot, _] || info.CompleteNum[i] >= Required(session, def.Targets[i])) continue;
+                info.CompleteNum[i] = Required(session, def.Targets[i]);
+                LogStalledPlot(_log, session.Role!.Name, info.TaskId, def.Targets[i][1]);
+            }
+        }
+    }
+
+    /// <summary>How long a cutscene step may stay open before a login completes its cutscene (CompleteStalledPlots).</summary>
+    internal static readonly TimeSpan StalledPlot = TimeSpan.FromMinutes(10);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Role}: cutscene {Plot} of task {Task} never reported its end; counted as watched at login")]
+    private static partial void LogStalledPlot(ILogger logger, string role, long task, long plot);
+
     public Task OnPlotEndAsync(GameSession session, PlotActingEndReq req) =>
         ProgressAsync(session, TPlot, t => t.Length >= 2 && t[1] == req.PlotId ? long.MaxValue : 0);
 
