@@ -579,8 +579,10 @@ public sealed partial class TimedBattleService
 
     /// <summary>
     /// OnePieceMonsterConfig pays by star: _iAward (9101-9106) always; _iExtraAward (9201-9206) while RestrictConfig 1020
-    /// has a count left today, each item within its AwardRestricConfig weekly cap. An extra award that grants at least
-    /// one item spends one count (inferred). OnePieceRewardConfig names 9107-9110, which MultiverseGroupConfig does not have.
+    /// has a count left today, each item within its AwardRestricConfig weekly cap. Every clear with a count left spends
+    /// one, also when the weekly caps keep all of its items (inferred: the restriction counts rewarded clears, as the
+    /// "Reward Count" does, apart from the items' own caps). OnePieceRewardConfig names 9107-9110, which
+    /// MultiverseGroupConfig does not have.
     /// </summary>
     private TreasurePay StageTreasureReward(Treasure a, GameSession member)
     {
@@ -607,7 +609,7 @@ public sealed partial class TimedBattleService
                 extraGrants.Add(item.Grant with { Count = count });
                 next.OnePieceWeekItems[item.Grant.Entry] = prior + count;
             }
-            if (extraGrants.Count > 0) next.OnePieceExtraUsed++;
+            next.OnePieceExtraUsed++;
         }
         var grants = baseGrants.Concat(extraGrants).ToArray();
         if (grants.Length == 0) throw new AwardResolutionException("OnePiece has no resolved reward.");

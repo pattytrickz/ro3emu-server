@@ -968,7 +968,8 @@ public sealed class TimedEventTests : IAsyncLifetime
         Assert.Equal(ErrorCodes.RiftPartyTooSmall, await RiftEnterAsync(ada, stone));
         await RiftInviteAsync(ada, team, cid);
 
-        // Cid has no Reward Count left today; Ben has this week's Commendation Gift Box limit.
+        // Cid has no Reward Count left today; Ben has this week's Commendation Gift Box and Standard Compensation Chest
+        // limits, so star 1's extra award gives Ben nothing.
         long day = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.GetUtcNow(), _clock.LocalTimeZone).DateTime.AddHours(-5)).DayNumber;
         long week = day - ((int)DateOnly.FromDayNumber((int)day).DayOfWeek + 6) % 7;
         await OnLoop(() =>
@@ -979,6 +980,7 @@ public sealed class TimedEventTests : IAsyncLifetime
             var capped = Session(ben).TimedBattle!;
             capped.OnePieceWeek = week;
             capped.OnePieceWeekItems[1302002] = 5;
+            capped.OnePieceWeekItems[1302000] = 20;
             return Task.CompletedTask;
         });
         long[] coins = [Service<CharacterService>().CountOf(Session(ada), 2), Service<CharacterService>().CountOf(Session(ben), 2),
@@ -994,17 +996,16 @@ public sealed class TimedEventTests : IAsyncLifetime
         Assert.All(results, r => Assert.Equal((2, 10000), (r.Data.OnePieceData.BaseReward.Single().ItemEntry,
             r.Data.OnePieceData.BaseReward.Single().Stack)));
         Assert.Equal(new[] { 1302002, 1302000 }, results[0].Data.OnePieceData.ExtraReward.Select(i => i.ItemEntry).ToArray());
-        Assert.Equal(new[] { 1302000 }, results[1].Data.OnePieceData.ExtraReward.Select(i => i.ItemEntry).ToArray());
+        Assert.Empty(results[1].Data.OnePieceData.ExtraReward); // UIWords 68034/68035: this week's limit
         Assert.Empty(results[2].Data.OnePieceData.ExtraReward); // UIWords 68002: no additional rewards
         for (int i = 0; i < bots.Length; i++)
             Assert.Equal(coins[i] + 10000, Service<CharacterService>().CountOf(Session(bots[i]), 2));
         Assert.Equal(1, Service<CharacterService>().CountOf(Session(ada), 1302002));
         Assert.Equal(1, Service<CharacterService>().CountOf(Session(ada), 1302000));
         Assert.Equal(0, Service<CharacterService>().CountOf(Session(ben), 1302002));
-        Assert.True(Service<CharacterService>().CountOf(Session(ben), 1302000) >= 1); // the killer may also loot one
         Assert.Equal(0, Service<CharacterService>().CountOf(Session(cid), 1302000));
         Assert.Equal(9, await RiftCountAsync(ada));
-        Assert.Equal(9, await RiftCountAsync(ben));
+        Assert.Equal(9, await RiftCountAsync(ben)); // a rewarded clear spends a count even when the caps kept every item
         Assert.Equal(0, await RiftCountAsync(cid));
         Assert.Equal(1, JsonSerializer.Deserialize<TimedBattleService.State>(
             Service<RoleStore>().LoadTimedBattle((long)ada.Self!.Uuid)!)!.OnePieceExtraUsed);
