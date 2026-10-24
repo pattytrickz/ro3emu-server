@@ -209,7 +209,7 @@ public sealed class WildAfkService : IGameTicker
     {
         var state = s.WildAfk!;
         var info = state.Info;
-        long consumed = 0;
+        long minute = state.ConsumedTodaySeconds / 60;
         bool running = info.IsHighMagnification && !info.IsSuspended;
         // Settle the old day's eligible interval before adding the new allowance, even if the loop crossed 05:00.
         bool reset = Epoch(now) > state.DailyEpoch;
@@ -226,7 +226,7 @@ public sealed class WildAfkService : IGameTicker
             Restore(state, now);
             state.AccountedAtMs = Math.Max(state.AccountedAtMs, state.DailyEpoch * 1000);
         }
-        if (running) consumed = ConsumeUntil(state, now);
+        if (running) ConsumeUntil(state, now);
         state.AccountedAtMs = Math.Max(state.AccountedAtMs, now);
         if (info.HighMultiplierTimeSeconds <= 0)
         {
@@ -240,7 +240,10 @@ public sealed class WildAfkService : IGameTicker
         if (info.IsSuspended && !wasSuspended) info.HighMultiplierPausedAt = now / 1000;
         Save(s);
         if (!publish) return; // Disconnected sockets must not interrupt durable accounting or world cleanup.
-        if ((reset || consumed > 0 || PendingDailyAward(state, s.Daily, s.Tasks, s.DailyRows))
+        // (inferred) The [106901] quests (500130 [106901,3600], 386060 [106901,300]) show and need whole minutes.
+        // A quest settle per consumed second wrote the quest blob and sent 5027 every second, and again on each kill.
+        bool nextMinute = state.ConsumedTodaySeconds / 60 != minute;
+        if ((reset || nextMinute || PendingDailyAward(state, s.Daily, s.Tasks, s.DailyRows))
             && s.Tasks != null && s.DailyReady) await _tasks.RefreshAsync(s);
         await SyncAsync(s);
         if (info.IsSuspended && reason.Length > 0 && reason != state.LastReason)
