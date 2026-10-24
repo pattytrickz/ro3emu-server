@@ -100,4 +100,25 @@ public sealed class HttpStateTests : IAsyncLifetime
         Assert.Equal(0, census.Current.Login);
         Assert.Single(census.Current.Roles);
     }
+
+    /// <summary>The public player count leaves out the AI players (StatusExcludedAccounts); the census keeps every role.</summary>
+    [Fact]
+    public async Task ThePlayerCountLeavesOutExcludedAccounts()
+    {
+        var registry = new SessionRegistry(NullLogger<SessionRegistry>.Instance);
+        long id = 0;
+        foreach (var account in new[] { "player", "aibot07", "AIBOT12" })
+            await registry.RegisterAsync(new GameSession(null!, null!)
+            {
+                Account = account, SceneEntry = 10100,
+                Role = new Role(++id, account, 1, account, 1, 1000, 1, 1, 0, 0, 10100, 0, 0, 0, 0),
+            });
+        var census = new SessionCensus(registry,
+            Microsoft.Extensions.Options.Options.Create(new ServerOptions { StatusExcludedAccounts = ["aibot*"] }));
+
+        census.Tick(new GameTime(TimeSpan.Zero, TimeSpan.Zero));
+        Assert.Equal(3, census.Current.Roles.Count);
+        Assert.Equal(1, census.Current.Players);
+        Assert.Equal(3, SessionCensus.Take(registry).Players);
+    }
 }

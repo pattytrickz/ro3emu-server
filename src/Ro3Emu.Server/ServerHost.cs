@@ -345,7 +345,7 @@ public static class ServerHost
         // Public status for the launcher's online pill: only a count, never account or character names. Read from the
         // loop's census, so anyone polling it adds no work to the loop.
         app.MapGet("/ro3emu/status", (Diagnostics.SessionCensus census) =>
-            Results.Json(new { online = true, players = census.Current.Roles.Count }));
+            Results.Json(new { online = true, players = census.Current.Players }));
         // A clean stop for RO3Emu.exe (loopback only): the same shutdown as Ctrl+C, the loop drains and the database closes.
         app.MapPost("/ro3emu/shutdown", (HttpContext context, IHostApplicationLifetime lifetime) =>
         {
