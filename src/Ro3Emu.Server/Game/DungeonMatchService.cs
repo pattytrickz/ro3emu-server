@@ -1,5 +1,6 @@
 using Romsg;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -219,7 +220,7 @@ public sealed class DungeonMatchService : IGameTicker
             if (GroupAdmission(group) != 0) await RemoveGroupAsync(group, manual: false);
         if (!_queue.TryGetValue(key, out list)
             || FillSeconds is not (> 0 and var wait) || _time.GetUtcNow().ToUnixTimeSeconds() - list[0].StartSeconds < wait) return;
-        int quantity = (int)GameData.Int(_data.Row("MatchConfig", key.Entry)!.Value, "_iStartQuantity");
+        int quantity = (int)MatchConfig.Get(_data, key.Entry)!.Value.StartQuantity;
         var picked = new List<Group>();
         int count = 0;
         foreach (var group in list)
