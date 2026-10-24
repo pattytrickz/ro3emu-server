@@ -23,9 +23,9 @@ public sealed class PetTests : IAsyncLifetime
     private readonly TestClock _clock = new();
     private sealed class TestClock : TimeProvider
     {
-        private long seconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref seconds));
-        public void Advance(long count) => Interlocked.Add(ref seconds, count);
+        private long _seconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref _seconds));
+        public void Advance(long count) => Interlocked.Add(ref _seconds, count);
     }
 
     public async Task InitializeAsync()
@@ -110,8 +110,11 @@ public sealed class PetTests : IAsyncLifetime
         if (info.MoveType != MovementType.MoveTypeWalk) return info.Pos;
         float angle = info.MovementWalk.Dir * MathF.PI / 180f;
         float distance = info.MovementWalk.Speed * info.MoveDuration / 1000f;
-        return new Vec3 { X = info.Pos.X + distance * MathF.Sin(angle), Y = info.MovementWalk.EndHeight,
-            Z = info.Pos.Z + distance * MathF.Cos(angle) };
+        return new Vec3
+        {
+            X = info.Pos.X + distance * MathF.Sin(angle), Y = info.MovementWalk.EndHeight,
+            Z = info.Pos.Z + distance * MathF.Cos(angle)
+        };
     }
 
     private static async Task<EntityBase> FollowSceneChange(BotClient bot)
@@ -250,8 +253,11 @@ public sealed class PetTests : IAsyncLifetime
         foreach (var (x, dir, stop) in new[] { (born.X + 2, 90f, false), (born.X + 4, 90f, false),
                      (born.X + 4, 90f, true), (born.X + 2, 270f, false), (born.X + 2, 270f, true) })
         {
-            var request = new WalkReq { Pos = new Vec3 { X = x, Y = born.Y, Z = born.Z },
-                Dir = dir, Face = dir, SpeedRate = 1, BStop = stop };
+            var request = new WalkReq
+            {
+                Pos = new Vec3 { X = x, Y = born.Y, Z = born.Z },
+                Dir = dir, Face = dir, SpeedRate = 1, BStop = stop
+            };
             await bot.SendGameAsync(MsgId.Walk, request);
             var ownerMove = await Next(viewer, 31081, MovementChangeNtf.Parser, m => m.Uid == ownerUid);
             var ownerPet = await Next(bot, 31081, MovementChangeNtf.Parser, m => m.Uid == petUid);
@@ -603,8 +609,11 @@ public sealed class PetTests : IAsyncLifetime
         await _app.Services.GetRequiredService<GameLoop>().InvokeAsync(async () =>
         {
             using var held = await CharacterService.Lock(Session);
-            Session.Pets!.IncubationSlot[1] = new DBSlotInfo { SlotId = 1, IncubateInfo =
-                { [10001] = new DBIncubateInfo { IncubateTime = _clock.GetUtcNow().ToUnixTimeSeconds() - 600, AwardType = 1, AwardId = 10001, AwardCount = 1 } } };
+            Session.Pets!.IncubationSlot[1] = new DBSlotInfo
+            {
+                SlotId = 1, IncubateInfo =
+                { [10001] = new DBIncubateInfo { IncubateTime = _clock.GetUtcNow().ToUnixTimeSeconds() - 600, AwardType = 1, AwardId = 10001, AwardCount = 1 } }
+            };
             Roles.SavePets(RoleId(bot), Session.Pets.ToByteArray());
         });
         await bot.SendGameAsync(PetService.EggReward, new PetEggRewardReq { RoundId = 10001, SlotIds = { 1 } });
@@ -642,8 +651,11 @@ public sealed class PetTests : IAsyncLifetime
             using var held = await CharacterService.Lock(Session);
             Session.Pets!.IncubationLv = 2;
             Session.Pets.IncubationExp = bar - 10;
-            Session.Pets.IncubationSlot[1] = new DBSlotInfo { SlotId = 1, IncubateInfo =
-                { [10001] = new DBIncubateInfo { IncubateTime = _clock.GetUtcNow().ToUnixTimeSeconds() - 600, AwardType = 2, AwardId = 1610001, AwardCount = 1 } } };
+            Session.Pets.IncubationSlot[1] = new DBSlotInfo
+            {
+                SlotId = 1, IncubateInfo =
+                { [10001] = new DBIncubateInfo { IncubateTime = _clock.GetUtcNow().ToUnixTimeSeconds() - 600, AwardType = 2, AwardId = 1610001, AwardCount = 1 } }
+            };
             Roles.SavePets(RoleId(bot), Session.Pets.ToByteArray());
         });
         var collect = new PetEggRewardReq { RoundId = 10001, SlotIds = { 1 } };
@@ -774,6 +786,45 @@ public sealed class PetTests : IAsyncLifetime
         Assert.Equal(20, _app.Services.GetRequiredService<CharacterService>().CountOf(Session, 1610001));
         Assert.Equal(0, Count(bot, 1250701));
         Assert.Equal(Roles.LoadProgress(RoleId(bot)).Currency[1], Session.Progress!.Currency[1]);
+    }
+
+    /// <summary>
+    /// The FirstHeartScoreConfig row 6 box 1250715 [[204,4,30004,31005,32001,33004]] (ActionConfig 204 SelfChoosePet):
+    /// UI_Com_RewardSelectWidgetCtrl sends 31323 with selfChoosePet.choosePet {option index: pet}. The pick joins the
+    /// roster with 33313 PetChooseNtf; an owned pick turns into its _kDecompose shards; a pet the box does not offer,
+    /// or no pick, keeps the box.
+    /// </summary>
+    [ClientDataFact]
+    public async Task SelfChoosePetBoxGrantsThePickedPetOrItsShards()
+    {
+        await using var bot = await InWorld();
+        await Gm("!item 1250715 2");
+        long Box() => _app.Services.GetRequiredService<ItemStore>().Load(RoleId(bot)).Single(i => i.Entry == 1250715 && i.Grid == 0).Guid;
+        async Task<int> Use(params (int Index, int Pet)[] picks)
+        {
+            var param = new ItemUseParamInfo { SelfChoosePet = new ItemUseParamInfo.Types.SelfChoosePet() };
+            foreach (var (index, pet) in picks) param.SelfChoosePet.ChoosePet[index] = pet;
+            await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = Box(), ItemCount = 1, ItemParam = { param } });
+            return (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result;
+        }
+
+        Assert.Equal(ErrorCodes.Parameter, await Use((0, 31005)));          // option 0 is 30004
+        Assert.Equal(ErrorCodes.Parameter, await Use());                     // no pick
+        Assert.Equal(ErrorCodes.Parameter, await Use((1, 31005), (2, 32001))); // one box, one pet
+        Assert.Equal(2, Count(bot, 1250715));
+
+        Assert.Equal(0, await Use((1, 31005)));
+        Assert.Equal(31005, (await Next(bot, PetService.SelfChoose, PetChooseNtf.Parser)).PetId);
+        await Next(bot, PetService.PetSync, DBPetInfoIncrement.Parser, m => m.ListPet.ContainsKey(31005));
+        Assert.True(Saved(bot).ListPet.ContainsKey(31005));
+        Assert.Equal(1, Count(bot, 1250715));
+        Assert.Equal(0, Count(bot, 1631005));
+
+        Assert.Equal(0, await Use((1, 31005)));
+        Assert.Equal(31005, (await Next(bot, PetService.SelfChoose, PetChooseNtf.Parser)).PetId);
+        Assert.Equal(0, Count(bot, 1250715));
+        Assert.Equal(50, Count(bot, 1631005)); // PetBaseConfig 31005 _kDecompose [1631005,50]
+        Assert.Equal(Saved(bot), Session.Pets);
     }
 
     private static string RepoRoot()

@@ -17,31 +17,31 @@ namespace Ro3Emu.Tests;
 /// </summary>
 public sealed class RankServiceTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-ranks-" + Guid.NewGuid().ToString("N"));
-    private WebApplication app = null!;
-    private string httpUrl = "";
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-ranks-" + Guid.NewGuid().ToString("N"));
+    private WebApplication _app = null!;
+    private string _httpUrl = "";
 
     public async Task InitializeAsync()
     {
         var (http, micro, game) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir;
+            o.DataDir = _dataDir;
             o.GameDataDir = Path.Combine(ClientData.RepoRoot, "data");
             o.HttpPort = http;
             o.MicroGatePort = micro;
             o.GameGatePort = game;
         });
-        await app.StartAsync();
-        httpUrl = $"http://127.0.0.1:{http}";
+        await _app.StartAsync();
+        _httpUrl = $"http://127.0.0.1:{http}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync();
-        await app.DisposeAsync();
+        await _app.StopAsync();
+        await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     [ClientDataFact]
@@ -185,8 +185,11 @@ public sealed class RankServiceTests : IAsyncLifetime
 
         InvItem Equip(long role, long value, bool appraised)
         {
-            var item = new InvItem { Entry = 2010120, Stack = 1, Pack = 1, Sort = 1,
-                Attrs = new() { [3] = appraised ? 1 : 0, [30] = 1, [60] = value } };
+            var item = new InvItem
+            {
+                Entry = 2010120, Stack = 1, Pack = 1, Sort = 1,
+                Attrs = new() { [3] = appraised ? 1 : 0, [30] = 1, [60] = value }
+            };
             items.Insert(role, item);
             return item;
         }
@@ -216,8 +219,11 @@ public sealed class RankServiceTests : IAsyncLifetime
         var local = DateTimeOffset.Now;
         var day = local.AddHours(-5).Date;
         long week = new DateTimeOffset(day.AddDays(-(((int)day.DayOfWeek + 6) % 7)).AddHours(5), local.Offset).ToUnixTimeSeconds();
-        var guild = new GuildStore.State { Name = name, Reputation = reputation, Announce = "Join " + name,
-            CurActivity = activity, ActivityWeek = week };
+        var guild = new GuildStore.State
+        {
+            Name = name, Reputation = reputation, Announce = "Join " + name,
+            CurActivity = activity, ActivityWeek = week
+        };
         guild.Members[leader] = new GuildStore.Member { RoleId = leader, Name = leaderName, Official = 1, Career = 1100, Level = 30 };
         Assert.True(store.Save(guild));
         return guild.Id;
@@ -236,10 +242,10 @@ public sealed class RankServiceTests : IAsyncLifetime
 
     private async Task<BotClient> Reader()
     {
-        var bot = new BotClient(httpUrl, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_httpUrl, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync("rankreader", "pw");
         return bot;
     }
 
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
 }

@@ -16,12 +16,12 @@ namespace Ro3Emu.Tests;
 
 public sealed class GuildChallengeTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-guild-challenge-" + Guid.NewGuid().ToString("N"));
-    private readonly ManualClock clock = new(new DateTimeOffset(2026, 10, 9, 9, 0, 0, TimeSpan.FromHours(2)));
-    private WebApplication app = null!;
-    private string http = "";
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-guild-challenge-" + Guid.NewGuid().ToString("N"));
+    private readonly ManualClock _clock = new(new DateTimeOffset(2026, 10, 9, 9, 0, 0, TimeSpan.FromHours(2)));
+    private WebApplication _app = null!;
+    private string _http = "";
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
     private Task OnLoop(Func<Task> action) => Service<GameLoop>().InvokeAsync(action);
     private GameSession Session(BotClient bot) => Service<SessionRegistry>().All().Single(s => s.Account == bot.Account && s.Role != null);
 
@@ -72,26 +72,26 @@ public sealed class GuildChallengeTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var (hp, mp, gp) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data"); o.SeasonStart = "2026-08-01";
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data"); o.SeasonStart = "2026-08-01";
             o.HttpPort = hp; o.MicroGatePort = mp; o.GameGatePort = gp;
-        }, clock);
-        SureHitRolls.Install(app); // lethal hits are prepared; a FLEE miss would only be noise
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{hp}";
+        }, _clock);
+        SureHitRolls.Install(_app); // lethal hits are prepared; a FLEE miss would only be noise
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{hp}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync(); await app.DisposeAsync();
+        await _app.StopAsync(); await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name, bool create = true)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw"); await bot.EnterGateAsync();
         long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
         await bot.EnterWorldAsync(id); return bot;
@@ -105,13 +105,16 @@ public sealed class GuildChallengeTests : IAsyncLifetime
     private async Task Gm(BotClient bot, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
     private async Task<long> Guild(BotClient leader, params BotClient[] members)
     {
         foreach (var b in members.Prepend(leader)) await Gm(b, "!lvl 99");
-        await leader.SendGameAsync(GuildService.Create, new GuildCreateReq { Name = "Testers",
-            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 } });
+        await leader.SendGameAsync(GuildService.Create, new GuildCreateReq
+        {
+            Name = "Testers",
+            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 }
+        });
         Assert.Equal(0, (await Next(leader, GuildService.Create, GuildCreateResp.Parser)).Result);
         long guild = (await Next(leader, GuildService.Full, GuildFullInfoNtf.Parser, n => n.Guid > 0)).Guid;
         await leader.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)6, AutoAcceptApply = true });
@@ -320,7 +323,7 @@ public sealed class GuildChallengeTests : IAsyncLifetime
         Assert.True(Service<GuildChallengeStore>().Load(guild).Cycle < 0);
         await Gm(alice, "!guildchallenge close");
         Assert.False(Service<TimedTodoSchedule>().IsOpen(125));
-        clock.Now = new DateTimeOffset(2026, 10, 11, 20, 31, 0, TimeSpan.FromHours(2));
+        _clock.Now = new DateTimeOffset(2026, 10, 11, 20, 31, 0, TimeSpan.FromHours(2));
         Assert.True(Service<TimedTodoSchedule>().IsOpen(125));
         Assert.False((await Info(alice)).Data.DataInfo.DifficultyInfo[1].StageReward[1]);
         Assert.Equal(0, await Open(alice)); // the test clear did not consume the real Sunday occurrence
@@ -381,7 +384,7 @@ public sealed class GuildChallengeTests : IAsyncLifetime
         Assert.Equal((1, 1500L, 0L), SourceCurrency("guild-challenge:clear:" + clear.Id, role, 102));
         Assert.Equal(0, SourceCurrency($"guild-challenge:deliver:{clear.Id}:{role}", role, 1).Receipts);
         Trigger(false);
-        await alice.DisposeAsync(); await app.StopAsync(); await app.DisposeAsync();
+        await alice.DisposeAsync(); await _app.StopAsync(); await _app.DisposeAsync();
         await InitializeAsync();
         await using var returned = await InWorld("Alice", create: false);
         // C/D 15: the login requests recovery as its own operation right after the select; wait for that delivery.
@@ -428,7 +431,7 @@ public sealed class GuildChallengeTests : IAsyncLifetime
             long contribution = oldSession.Progress.Currency.GetValueOrDefault(102);
             // SDK login does not replace the game attachment. Gate registration does, and
             // can race the held clear while the old role's durable handover waits for it.
-            var reconnecting = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+            var reconnecting = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
             returned = reconnecting;
             await reconnecting.LoginAsync("alice", "pw");
             accounts.BeforeOwnedCommitForTest = label =>
@@ -513,8 +516,11 @@ public sealed class GuildChallengeTests : IAsyncLifetime
         await using var carol = await InWorld("Carol");
         long oldGuild = await Guild(alice, bob);
         await Gm(carol, "!lvl 99");
-        await carol.SendGameAsync(GuildService.Create, new GuildCreateReq { Name = "Second",
-            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 } });
+        await carol.SendGameAsync(GuildService.Create, new GuildCreateReq
+        {
+            Name = "Second",
+            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 }
+        });
         Assert.Equal(0, (await Next(carol, GuildService.Create, GuildCreateResp.Parser)).Result);
         long newGuild = (await Next(carol, GuildService.Full, GuildFullInfoNtf.Parser, n => n.Guid > 0)).Guid;
         await carol.SendGameAsync(GuildService.Edit, new GuildEditReq
@@ -523,7 +529,7 @@ public sealed class GuildChallengeTests : IAsyncLifetime
 
         var challenge = Service<GuildChallengeService>();
         var gate = (SemaphoreSlim)typeof(GuildChallengeService)
-            .GetField("gate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetField("_gate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(challenge)!;
         var loop = Service<GameLoop>();
         var bobSession = Session(bob);
@@ -618,5 +624,35 @@ public sealed class GuildChallengeTests : IAsyncLifetime
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "Ro3Emu.slnx"))) return dir.FullName;
         throw new DirectoryNotFoundException();
+    }
+
+    /// <summary>103014 CheckGVEJoinCnt counts a settled Ilmata stage attempt for each member present: growth title 6's
+    /// 706070 and the guild activity quest 1602090; an absent member gets nothing. The count survives a relogin.</summary>
+    [ClientDataFact]
+    public async Task IlmataAttemptCountsAsGveParticipationForThePresentMembers()
+    {
+        var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        await using var carol = await InWorld("Carol");
+        await Guild(alice, bob, carol);
+        foreach (var (account, task) in new[] { ("alice", 706070L), ("bob", 1602090L), ("carol", 706070L) })
+            await QuestProbe.AcceptAsync(_app, _http, account, task);
+        await QuestProbe.AtAsync(_app, "alice", 706070, 0);
+        await Gm(alice, "!guildchallenge open");
+        Assert.Equal(0, await Open(alice));
+        Assert.Equal(0, await Enter(alice)); long room = await Load(alice);
+        Assert.Equal(0, await Enter(bob)); Assert.Equal(room, await Load(bob));
+        await Command(alice, "DungeonStart");
+        await Kill(alice);
+        foreach (var b in new[] { alice, bob })
+            Assert.Equal(DungeonRes.Success, (await Next(b, DungeonService.Result, DungeonResNotify.Parser)).Res);
+        await QuestProbe.DoneAsync(_app, "alice", 706070);
+        await QuestProbe.DoneAsync(_app, "bob", 1602090); // delivery waits on its action 115
+        Assert.Equal(0, (await QuestProbe.ReadAsync(_app, "carol", 706070))!.CompleteNum[0]);
+
+        await alice.DisposeAsync();
+        await QuestProbe.OfflineAsync(_app, "alice");
+        await using var again = await InWorld("Alice", create: false);
+        Assert.Equal(1, (await QuestProbe.DoneAsync(_app, "alice", 706070)).CompleteNum[0]);
     }
 }

@@ -14,13 +14,13 @@ public abstract class WorldUnit
     public long InstanceId { get; init; }
     public int LineNumber { get; init; } = 1;
     public RuntimeMapKind RuntimeKind { get; init; }
-    private RuntimeMapKey? runtimeMap;
+    private RuntimeMapKey? _runtimeMap;
     public RuntimeMapKey RuntimeMap
     {
-        get => runtimeMap ?? (InstanceId == 0 ? RuntimeMapKey.Public(SceneEntry, LineNumber)
+        get => _runtimeMap ?? (InstanceId == 0 ? RuntimeMapKey.Public(SceneEntry, LineNumber)
             : RuntimeKind == RuntimeMapKind.Event ? RuntimeMapKey.Event(SceneEntry, InstanceId)
             : RuntimeMapKey.Private(SceneEntry, InstanceId));
-        init => runtimeMap = value;
+        init => _runtimeMap = value;
     }
     public long WorldScene => RuntimeMap.WorldScene;
     public float X { get; set; }
@@ -104,6 +104,22 @@ public sealed class MapInstance(long sceneEntry, World world) : IGameTicker
             for (int cz = z0; cz <= z1; cz++)
                 if (_cells.TryGetValue((cx, cz), out var list))
                     foreach (var u in list) yield return u;
+    }
+
+    /// <summary>Appends the units within <paramref name="r"/> of (x, z) to <paramref name="into"/> without allocating.</summary>
+    public void CollectNear(float x, float z, float r, List<WorldUnit> into)
+    {
+        float r2 = r * r;
+        var (x0, z0) = CellOf(x - r, z - r);
+        var (x1, z1) = CellOf(x + r, z + r);
+        for (int cx = x0; cx <= x1; cx++)
+            for (int cz = z0; cz <= z1; cz++)
+                if (_cells.TryGetValue((cx, cz), out var list))
+                    foreach (var u in list)
+                    {
+                        float dx = u.X - x, dz = u.Z - z;
+                        if (dx * dx + dz * dz <= r2) into.Add(u);
+                    }
     }
 
     public void Tick(GameTime time)

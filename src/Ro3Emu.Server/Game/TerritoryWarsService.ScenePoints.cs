@@ -16,7 +16,7 @@ public sealed partial class TerritoryWarsService
     /// (_iNPCSubType 250), unselectable, no name or HP bar, _iNeedNotifyGlobalData 1.</summary>
     private const int ScenePointNpc = 4905010;
     private const long ScenePointUidBase = 1L << 53;
-    private static long scenePointSerial;
+    private long _scenePointSerial;
 
     /// <summary>
     /// Config/Dungeon/DungeonLua_3030101.lua UIModule_NpcData {spawnPointId: [4905010, eObjectType]}, read by
@@ -55,8 +55,11 @@ public sealed partial class TerritoryWarsService
             {
                 Uuid = (ulong)Uid, EntityTemplateID = ScenePointNpc, EntityType = 1, Face = Face, State = EntityState.Alive,
                 BornTimeMs = BornMs, NotifyType = EntityBase.Types.NotifyType.All, EntityCamp = Template?.Camp ?? 1,
-                MovementInfo = new MovementInfo { Pos = Pos, Face = Face, ServerTime = MonsterService.NowMs,
-                    MoveType = MovementType.MoveTypeNone },
+                MovementInfo = new MovementInfo
+                {
+                    Pos = Pos, Face = Face, ServerTime = MonsterService.NowMs,
+                    MoveType = MovementType.MoveTypeNone
+                },
             };
             if (Template is { } t)
                 foreach (var (idx, value) in new (long, long)[] { (101, t.MaxHp), (2000, t.MaxHp), (2002, t.Level) })
@@ -71,8 +74,11 @@ public sealed partial class TerritoryWarsService
     /// LC_TerritoryWars_GameplayPointHelper.lua:160-190); which objects start unavailable or owned is not exported.
     /// </summary>
     private static Dictionary<int, ScenePoint> DefaultScenePoints(long scene) => scene != StrongholdScene ? new()
-        : StrongholdGameplayPoints.ToDictionary(p => p.Key, p => new ScenePoint { Id = p.Key, Type = p.Value,
-            Status = (int)EnumGlobalScenePoint.Ready });
+        : StrongholdGameplayPoints.ToDictionary(p => p.Key, p => new ScenePoint
+        {
+            Id = p.Key, Type = p.Value,
+            Status = (int)EnumGlobalScenePoint.Ready
+        });
 
     /// <summary>A record saved before 30129 existed has no stored points and reads the defaults.</summary>
     private static IReadOnlyDictionary<int, ScenePoint> ScenePointsOf(BattleState r) =>
@@ -82,8 +88,11 @@ public sealed partial class TerritoryWarsService
     {
         var msg = new GlobalScenePointDataNotify();
         foreach (var p in ScenePointsOf(r).Values.Where(p => only == null || only.Contains(p.Id)).OrderBy(p => p.Id))
-            msg.GlobalPoints[p.Id] = new GlobalScenePointData { PointId = p.Id, Status = (EnumGlobalScenePoint)p.Status,
-                ReadyTime = p.ReadyTime, BelongGuildId = p.Owner };
+            msg.GlobalPoints[p.Id] = new GlobalScenePointData
+            {
+                PointId = p.Id, Status = (EnumGlobalScenePoint)p.Status,
+                ReadyTime = p.ReadyTime, BelongGuildId = p.Owner
+            };
         return msg;
     }
 
@@ -116,9 +125,12 @@ public sealed partial class TerritoryWarsService
         {
             if (only != null && !only.Contains(pointId) || !points.TryGetValue(pointId, out var p)) continue;
             long hp = unit.Template?.MaxHp ?? 1;
-            msg.GlobalDatas[unit.Uid] = new GlobalObjectData { GlobalObjId = unit.Uid, ConfigId = ScenePointNpc,
+            msg.GlobalDatas[unit.Uid] = new GlobalObjectData
+            {
+                GlobalObjId = unit.Uid, ConfigId = ScenePointNpc,
                 Pos = new Vec3 { X = unit.X, Y = unit.Y, Z = unit.Z }, Hp = hp, MaxHp = hp, DungeonPointId = pointId,
-                BelongGuild = p.Owner };
+                BelongGuild = p.Owner
+            };
         }
         return msg.GlobalDatas.Count == 0 ? Task.CompletedTask : Send(s, GlobalObjectNotify, msg);
     }
@@ -131,18 +143,18 @@ public sealed partial class TerritoryWarsService
     /// </summary>
     private async Task SpawnScenePointsAsync(Battle b)
     {
-        if (b.Room.Closed || b.State.Settled || maps.Map(b.State.Scene) is not { } map) return;
+        if (b.Room.Closed || b.State.Settled || _maps.Map(b.State.Scene) is not { } map) return;
         var added = new List<int>();
         foreach (var pointId in ScenePointsOf(b.State).Keys.Order())
         {
             if (b.ScenePointActors.ContainsKey(pointId) || !map.Points.TryGetValue(pointId, out var at)) continue;
             var unit = new ScenePointUnit
             {
-                Uid = ScenePointUidBase | Interlocked.Increment(ref scenePointSerial), SceneEntry = b.Room.SceneEntry,
+                Uid = ScenePointUidBase | Interlocked.Increment(ref _scenePointSerial), SceneEntry = b.Room.SceneEntry,
                 InstanceId = b.Room.Id, X = at.X, Y = at.Y, Z = at.Z, Face = at.Face, PointId = pointId,
-                Template = monsters.Template(ScenePointNpc), BornMs = MonsterService.NowMs,
+                Template = _monsters.Template(ScenePointNpc), BornMs = MonsterService.NowMs,
             };
-            if (!await instances.AddPropAsync(b.Room, unit)) return;
+            if (!await _instances.AddPropAsync(b.Room, unit)) return;
             b.ScenePointActors[pointId] = unit;
             added.Add(pointId);
         }
@@ -178,7 +190,9 @@ public sealed partial class TerritoryWarsService
             throw new ArgumentException("point unready|ready|complete [readySeconds] [owner|self]");
         var status = args[1].ToLowerInvariant() switch
         {
-            "unready" => EnumGlobalScenePoint.UnReady, "ready" => EnumGlobalScenePoint.Ready, _ => EnumGlobalScenePoint.Complete,
+            "unready" => EnumGlobalScenePoint.UnReady,
+            "ready" => EnumGlobalScenePoint.Ready,
+            _ => EnumGlobalScenePoint.Complete,
         };
         long seconds = args.Length > 2 ? long.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 0;
         using var reservation = await EnterGateAsync("territory/scene point gm", s);
@@ -190,10 +204,10 @@ public sealed partial class TerritoryWarsService
                 return $"No gameplay point {pointId} here: {string.Join(" ", ScenePointsOf(b.State).Keys.Order())}";
             long owner = args.Length < 4 ? current.Owner : args[3].Equals("self", StringComparison.OrdinalIgnoreCase)
                 ? Own(s)?.Id ?? 0 : long.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
-            long readyTime = seconds > 0 ? (clock.Now + seconds) * 1000 : 0;
+            long readyTime = seconds > 0 ? (_clock.Now + seconds) * 1000 : 0;
             await SetScenePointAsync(b, pointId, status, readyTime, owner);
             return $"Point {pointId}: {status}, readyTime {readyTime}, owner {owner}.";
         }
-        finally { stagedTerritoryState.Dispose(); gate.Release(); reservation?.Dispose(); }
+        finally { stagedTerritoryState.Dispose(); _gate.Release(); reservation?.Dispose(); }
     }
 }

@@ -153,11 +153,21 @@ Timeline and go/no-go:
   - Data loss or duplication (items, currencies, claims): stop the server, restore the pre-release backup, start the old
     build, and post what happened.
   - Anything else: fix forward in the next release.
+- **Spirit Tower clean-up, right after the cutover** (owner's request, Sat 24 Oct): a GM's test run took the server-first
+  record on Spirit Tower floors, so no player can be first there. From an admin account in game (or the loopback
+  `/ro3emu/gm` tool on the box), run `!tower firstpass` to list who holds the floors, then
+  `!tower firstpass clear <that GM's role name or id>`. It removes only that role's records; milestones players already
+  claimed stay claimed. Post a short note in `#announcements` that the server-first floors are open again.
 - **After**: turn the automation back on with the new base; recreate or rebase open fix branches (`fix/new-report-followup` is
   Codex's); post patch notes in the usual format. Then start the weekly upstream syncs ([upstream-merge-plan.md](upstream-merge-plan.md), "Staying close").
 
 ## Things to know
 
+- **Publisher state on Sat 24 Oct morning**: the publisher shipped release **140079** (2026.10.23.1) on 23 Oct, newer than
+  the 140076 picked in step 1, so a fresh install now gets 140079. Their main download host `update.genesis3.is` was not
+  resolving in DNS (its name servers refuse queries); the Linode mirror still served the signed manifests, which our
+  launcher verifies and falls back to. New players reported "Can't reach the official Ragnarok Online 3 download servers"
+  in `#help`. Check whether 140079 logs in on the patched client before deciding `maxGameRelease`.
 - **How to work with the release automation**: it ships `v1.0.0-fixes` every 4 hours from 2 am Central, posts the countdown,
   patch notes and a `news.ts` snippet for the website. When writing a PR for it, put the **News draft above the Patch notes
   draft and end the body with nothing after it**: it copies a PR section to the end of the description, and the last ship
@@ -183,9 +193,100 @@ Timeline and go/no-go:
 
 ## Record (fill in as you go)
 
-- Client chosen / evidence:
-- Finland staging address, ports, who has access:
-- Rollback proven (date, build):
-- Bots / load-test results:
-- Human pass result:
-- Cutover go/no-go and time:
+- **Client chosen / evidence (23 Oct, local session):** keep the releases players already have; do **not** move to
+  140076. Correction to an earlier note: the deployed Sol launcher's `maxGameRelease` 140072 does not put everyone on
+  140072. The launcher can only install the publisher's newest release, so while that is above the ceiling (140078 on
+  23 Oct) it leaves the game where it is ("Release 140078 isn't supported by Sol RO3 yet, so the game stays on release
+  140065"). Players run 140065 to 140072. The merged patcher and hooks, built against the owner's 140065 client
+  (`RO3Emu.exe check`: "patch targets and every hook reference found"), fit it, and the patched client reached staging. The staging join tool
+  is `G:\RO3Emu-staging\RO3Emu.exe` (hooks/loc built from this branch against that client's original DLLs).
+  `prebuilt/client` is **not** rebuilt yet: `pack.ps1` needs PowerShell 7, which this PC lacks; the Sol launcher build
+  compiles the hooks from source anyway. Not yet proven: a real login (human pass below).
+- **Finland staging address, ports, who has access:** `95.217.239.53`, HTTP **5480**, micro **20100**, game **33200**;
+  ufw allows only the owner's IP (24.78.173.215). systemd `ro3emu-staging` (user `ro3staging`, MemoryMax 3G,
+  CPUQuota 200%, Restart=no), binary `/srv/solro3-staging/current` -> `bin-new` (this branch) or `bin-old` (live
+  `aa9075c`). DataDir `/srv/solro3-staging/data`: a `VACUUM INTO` copy of production backup `ro3emu-20261023-091006`
+  (4.5 GB, sha checked). GameDataDir is production's export (fingerprint 2d94b90d…, same as Ashburn). House-rule options
+  copied from production except `MinLauncherVersion` (so the join tool can log in). New option
+  `Ro3Emu:DatabaseBackups=false` (commit "Add a switch to turn off database backups for a test realm"): the disk
+  (94% used) cannot hold a second copy. The untouched pre-migration copy stays on Ashburn at `/root/staging/staging.db`.
+- **Rollback proven (23 Oct 10:51-10:54 UTC):** the new build started clean on the copy (no warnings besides the backup
+  switch), 20 AI bots logged in and fought; then the **old** build `aa9075c` started on the same migrated copy
+  (backups dir made read-only so its startup backup fails harmlessly): 20 logins, 73 kills in 3 minutes, no errors
+  besides that backup. Back on the new build afterwards. So a failed cutover can roll back to the old binary without a
+  database restore. The Growth Classroom migration logs only for roles with old claims; the bots have none, so it is
+  checked at the human pass.
+- **Tests (local Windows, this branch + the backup switch, data exported 20 Oct):** 2,098 tests, 2,080 passed, 13 failed.
+  Rerun alone, 10 pass (timing), `CardCrashRecoveryTests.ProcessCrash…` fails only on Windows (the crash child keeps
+  `ro3emu.db-shm` open), `SkillCombatTests.NotInterruptSkill…` is the known baseline, and
+  **`FirstHeartTests.SyncStartsAtItsOpenLevel…` fails: a First Heart claim below the open level is accepted (0, expected
+  ActivityClosed 3902)**. It passed in the cloud on 22 Oct. **Explained (data, not code):** the test assumes First Heart
+  opens at Base 30 (LC_ConditionList 21000012 in the 21 Oct client the cloud exported), but the export players' clients
+  match (140065 to 140072) has 21000012 = Base **10**, so its "Base 29 is still closed" step fails. The server reads the
+  condition from the data, so live players see First Heart from Base 10, as their client does. `QuestWalkTests.ChapterOneCanBeWalkedToTheEnd` failed after 7.5 minutes in
+  the full run and passes alone (7 min 5 s): timing under the full suite's load.
+- **23 Oct production incident and hotfix (merged here as `4b00532`):** live players could not connect. Expired buffs
+  queued a realm-wide job every tick (70,000 outstanding operations), and a coalesced receive over 1 MiB after inflate
+  was refused as one frame. The hotfix `d690f7b` (PR #64) went live at 15:52 UTC; this branch carries it, adapted to
+  upstream's field names and its new periodic, halo and decay ticks. Full suite afterwards: 2,091 passed, 6 failed:
+  - CardCrash (Windows only), First Heart (data, above) and NotInterrupt (the baseline);
+  - NewActivity defense and PassPlay premium are timing (they pass alone, PassPlay 5 times in a row);
+  - **`PowerTests.ChangesPublishAndTheHistoryIsKeptAcrossRelog` fails every run, before the hotfix too.** The power
+    record is saved after the 5021 notify, and a logout straight after it keeps the older current power (3600, not 600).
+    Login recomputes the power, so only the stored number is stale. Not a cutover blocker; fix after.
+- **Small-population lobbies (23 Oct, owner asked for strategy items in this release):** house rule `SurvivorPlayers`/
+  `SurvivorTeamSize` and `DragonIslandPlayers`/`DragonIslandTeamSize` (`ae28377`), GM test aid `!arena open|close
+  survivor|dragon` (`3e07679`). On staging: Survivor 20 in teams of 4, Dragon Island 10 in squads of 5, Guild League
+  minimum 10. The live runner queued 20 and 10 bots and both matches fired their ready check and moved everyone in
+  (28/28). **At cutover, add to the production unit** (the owner approved these sizes on 23 Oct):
+  `Ro3Emu__SurvivorPlayers=20`, `Ro3Emu__SurvivorTeamSize=4`, `Ro3Emu__DragonIslandPlayers=10`,
+  `Ro3Emu__DragonIslandTeamSize=5`, `Ro3Emu__GuildLeagueMinMembers=10`, and (owner decisions 23 Oct, `ec7531f`,
+  `c7d193a`) `Ro3Emu__PartyShareExcludedAccounts__0=aibot*` (AI members take no share of a player's kill) and
+  `Ro3Emu__FieldMvpHpPercent=50` (field MVPs at half HP). Load test 23 Oct, 60 AI bots for 20 min on this build:
+  backlog steady at about one operation per bot, no stuck work, no inflate disconnects; the largest realm waiter is
+  now `timer/card library sync` (a candidate for the same once-a-second treatment). Windows stay the original weekday evenings
+  (Survivor days 2/4/7, Dragon 1/3/6, 18:30-19:55 realm time) and Base 49+.
+- **Phantom Realm entry for a small population (23 Oct evening, player suggestion, owner: go with the recommendation):**
+  house rule `DungeonMatchFillSeconds` (`a9f27d2`): once the oldest party has waited that long, the queue starts with
+  whoever is queued for that boss, down to one player (the boss is not scaled down). AI bots (`8a32fd0`) now ready up
+  for their party's dungeon, follow the leader in and leave with them. Live on the PTR (`1.1.0-ptr.6`, bots from
+  `/home/solro3/aibots-staging/bin-ptr`): solo and player + AI runs both passed (ready check after 30 s, both loaded into
+  3120401, bot left with the leader). A member changing map or line while queued still cancels the queue (original
+  rule), so a player should give a freshly invited bot a few seconds to reach them. **At cutover, add**
+  `Ro3Emu__DungeonMatchFillSeconds=30`, and after the server is up **publish `src/Ro3Emu.AiBots` from this branch**
+  (`dotnet publish -r linux-x64 --self-contained false -p:ErrorOnDuplicatePublishOutputFiles=false`, `chmod +x` the
+  apphost) into `/home/solro3/aibots/bin` (keep a `bin.bak-…` copy) and restart the production bot loop.
+- **Evening stalls, 23 Oct (production, hotfix `2f6c7bd`, live as `1.0.0-casefix.33.3` at 21:11 UTC):** lookups of
+  `operation_source` by `source_key` scanned the whole table (1M rows, ~110 ms per kill, growing), and
+  `SeasonTalentService.Effect` scanned all 779 talent effect rows on every stats recompute (70-80% of the game loop in
+  a CPU profile). The index was created by hand on production at 20:33; both fixes are on this branch (`df44475`).
+  After the restart: loop busy 11% (was 89%), 20 ticks/s, lock waiting 0.7 s/min (was up to 580 s).
+- **Bots / load-test results:** a second AI runner (`/home/solro3/aibots-staging`, tmux `aibots-staging`, 20 bots, LLM
+  chat off) plays on staging. Load test not run yet.
+- **Live fixes on the merged line (23 Oct, owner asked for a bot pass instead of a human one):**
+  - Every test the live PRs #6 to #62 added (108) passes on this branch, and so do upstream's own tests for the areas
+    where upstream's code replaced live's (Double Attack, choice boxes, boss-clear quest targets). Three live tests were
+    dropped in the merge. Each was restored locally and run (not committed):
+    - the selection chest test passes for an eligible role. Upstream now enforces ItemConfig `_iLevelNeed` and
+      `_kJobNeed` (exact career, like the client's `LC_ItemHelper.CanUseByInfo`). The 10 job-limited boxes are held by no
+      real player on the copy;
+    - the side-guide "boss win" now counts a dungeon clear, not a field kill of the boss (upstream's rule, its test passes);
+    - the Double Attack test relied on live-only hooks; upstream's test covers the Dagger hit and the Katar CRIT.
+  - A wire-level runner (`.loadtest-temp/StagingCheck`, not committed; on Finland `/srv/solro3-staging/check`, run with
+    the staging bots stopped because it uses their roster) passed 26/26 on staging:
+    - all 20 migrated bot characters log in and enter the world;
+    - Zeny Shop potions and fire arrows, and the arrow switch;
+    - selection chest (an invalid pick is refused, a valid pick pays) and the Old Card Album gift box;
+    - Dodo's wheel (one turn spends a gem and names its slot);
+    - Growth Classroom: a role seeded with live-style claims [1,2] logged "keeps its claimed ranks 1,2", and both
+      claims answered 2062 (already claimed).
+  - EconomyProbe compare (opening sequence 966141 to 966854): verdict Fail, all from history the old production build
+    wrote:
+    - 598,772 monster-kill receipts before seq 732352 have no outcome payload;
+    - 247 cd13e daily-stage and quest-award receipts are older than the opening;
+    - 489 Coverage items are on families the probe lists as uncovered (newactivity, monster-kill progress).
+    No Corruption issue comes from a receipt written on staging. Summary at `/srv/solro3-staging/compare-summary.md`.
+- **Human pass result:** the owner's 140065 client was patched with the join tool and fetched the staging gate key; the
+  owner asked for the checks to be done with bots instead (above).
+- **Cutover go/no-go and time:** the owner chose **Sat 24 Oct 10:00 Central (15:00 UTC)**. Announced in `#announcements`
+  on 23 Oct (message 1563158477654859851).

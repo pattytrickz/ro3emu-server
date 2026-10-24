@@ -54,12 +54,12 @@ namespace Ro3Emu.ClientHooks
                 }
                 else if (t[0] == MapKill && t.Length == 3 && t[1] > 0 && t[2] > 0)
                 {
-                    objectives.Add(new Objective { Index = i, Monsters = new long[0], Required = t[2] });
+                    objectives.Add(new Objective { Index = i, Monsters = Array.Empty<long>(), Required = t[2] });
                     if (map == 0) map = t[1];
                 }
                 else if (t[0] == KillOnMap && t.Length == 3 && t[1] > 0 && t[2] > 0)
                 {
-                    objectives.Add(new Objective { Index = i, Monsters = new long[0], Required = t[1] });
+                    objectives.Add(new Objective { Index = i, Monsters = Array.Empty<long>(), Required = t[1] });
                     if (map == 0) map = t[2];
                 }
             }

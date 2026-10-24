@@ -21,29 +21,52 @@ public sealed class SeasonTalentTests
 
     private sealed class ServerFixture : IAsyncDisposable
     {
-        private readonly string dir = Path.Combine(Path.GetTempPath(), "ro3emu-talent-" + Guid.NewGuid().ToString("N"));
-        private WebApplication app = null!;
-        private string http = "";
+        private readonly string _dir = Path.Combine(Path.GetTempPath(), "ro3emu-talent-" + Guid.NewGuid().ToString("N"));
+        private WebApplication _app = null!;
+        private string _http = "";
 
-        public GameSession Session => app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role != null);
-        public CharacterService Character => app.Services.GetRequiredService<CharacterService>();
-        public AccountStore Accounts => app.Services.GetRequiredService<AccountStore>();
-        public Ro3Emu.Server.Data.GameData Data => app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>();
-        public GameLoop Loop => app.Services.GetRequiredService<GameLoop>();
-        public MapPoint TaskPoint(long scene, long point) => app.Services.GetRequiredService<WorldData>().Map(scene)!.Points[point];
-        public string DatabaseFile => Path.Combine(dir, "state", "ro3emu.db");
-        public string StateDir => Path.Combine(dir, "state");
-        public string GameDataDir => Path.Combine(dir, "game");
+        public GameSession Session => _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role != null);
+        public CharacterService Character => _app.Services.GetRequiredService<CharacterService>();
+        public AccountStore Accounts => _app.Services.GetRequiredService<AccountStore>();
+        public Ro3Emu.Server.Data.GameData Data => _app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>();
+        public RoleStore Roles => _app.Services.GetRequiredService<RoleStore>();
+        public MapPoint TaskPoint(long scene, long point) => _app.Services.GetRequiredService<WorldData>().Map(scene)!.Points[point];
+        public string DatabaseFile => Path.Combine(_dir, "state", "ro3emu.db");
+        public string StateDir => Path.Combine(_dir, "state");
+        public string GameDataDir => Path.Combine(_dir, "game");
+        public GameLoop Loop => _app.Services.GetRequiredService<GameLoop>();
+        public SeasonTalentService Talents => _app.Services.GetRequiredService<SeasonTalentService>();
+
+        public async Task PrepareFirstProfessionChoice(BotClient bot)
+        {
+            await Gm("alice", "!job 1200");
+            await Gm("alice", "!lvl 50");
+            await Gm("alice", "!quest done 10101170");
+            await Gm("alice", "!quest done 10103160");
+            await Gm("alice", "!item 1250900 100000");
+            await Gm("alice", "!item 2 1000000");
+            Assert.False(Session.SeasonTalent!.UnlockedNode[10102003]);
+            var data = _app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>();
+            foreach (var row in data.Table("SeasonTalentConfig").Values
+                .OrderBy(r => Ro3Emu.Server.Data.GameData.Int(r, "_iId")))
+            {
+                long id = Ro3Emu.Server.Data.GameData.Int(row, "_iId");
+                if (Ro3Emu.Server.Data.GameData.Int(row, "_iTalentTreeID") != 10101 && id is not (10102001 or 10102002)) continue;
+                // Reach the choice through real paid protocol upgrades, without seeding node levels.
+                for (int level = 0; level < Ro3Emu.Server.Data.GameData.Int(row, "_iMaxLevel"); level++)
+                    Assert.Equal(0, await Upgrade(bot, (int)id));
+            }
+        }
 
         public async Task StartAsync(int playbook = 101, bool removeLevelTwo = false, bool extraMemberAttr = false,
             bool oathOpen = false, bool missingGraph = false, bool jobSpecificRow = false)
         {
-            string config = Path.Combine(dir, "game", "config");
+            string config = Path.Combine(_dir, "game", "config");
             Directory.CreateDirectory(config);
             foreach (var file in Directory.EnumerateFiles(Path.Combine(RepoRoot(), "data", "config"), "*.json"))
                 File.Copy(file, Path.Combine(config, Path.GetFileName(file)));
             // The quest unlock test reports a real nearby task NPC; include that map's authoritative points.
-            string sceneEditor = Path.Combine(dir, "game", "sceneeditor");
+            string sceneEditor = Path.Combine(_dir, "game", "sceneeditor");
             Directory.CreateDirectory(sceneEditor);
             File.Copy(Path.Combine(RepoRoot(), "data", "sceneeditor", "sc_izlude_001_sceneeditor.json"),
                 Path.Combine(sceneEditor, "sc_izlude_001_sceneeditor.json"));
@@ -89,22 +112,22 @@ public sealed class SeasonTalentTests
             }
 
             var (httpPort, microPort, gamePort) = TestPorts.FreePorts();
-            app = ServerHost.Create([], o =>
+            _app = ServerHost.Create([], o =>
             {
-                o.DataDir = Path.Combine(dir, "state");
-                o.GameDataDir = Path.Combine(dir, "game");
+                o.DataDir = Path.Combine(_dir, "state");
+                o.GameDataDir = Path.Combine(_dir, "game");
                 o.HttpPort = httpPort;
                 o.MicroGatePort = microPort;
                 o.GameGatePort = gamePort;
                 o.PlayBook = playbook;
             });
-            await app.StartAsync();
-            http = $"http://127.0.0.1:{httpPort}";
+            await _app.StartAsync();
+            _http = $"http://127.0.0.1:{httpPort}";
         }
 
         public async Task<BotClient> InWorld(string name, bool create = true)
         {
-            var bot = new BotClient(http, File.ReadAllText(Path.Combine(dir, "state", "gate_rsa_public.pem")));
+            var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dir, "state", "gate_rsa_public.pem")));
             await bot.LoginAsync(name.ToLowerInvariant(), "pw");
             await bot.EnterGateAsync();
             long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
@@ -115,7 +138,7 @@ public sealed class SeasonTalentTests
         public async Task Gm(string account, string line)
         {
             using var httpClient = new HttpClient();
-            var resp = await httpClient.PostAsync($"{http}/ro3emu/gm?account={account}", new StringContent(line));
+            var resp = await httpClient.PostAsync($"{_http}/ro3emu/gm?account={account}", new StringContent(line));
             resp.EnsureSuccessStatusCode();
         }
 
@@ -129,9 +152,9 @@ public sealed class SeasonTalentTests
 
         public async ValueTask DisposeAsync()
         {
-            if (app != null) { await app.StopAsync(); await app.DisposeAsync(); }
+            if (_app != null) { await _app.StopAsync(); await _app.DisposeAsync(); }
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            try { Directory.Delete(dir, true); } catch (IOException) { }
+            try { Directory.Delete(_dir, true); } catch (IOException) { }
         }
     }
 
@@ -146,6 +169,38 @@ public sealed class SeasonTalentTests
     {
         await bot.SendGameAsync(SeasonTalentService.Upgrade, new SeasonTalentUpgradeReq { TalentId = node });
         return (await Next(bot, SeasonTalentService.Upgrade, SeasonTalentUpgradeResp.Parser)).Result;
+    }
+
+    [ClientDataFact]
+    public async Task FirstProfessionChoiceCommitsItsPathAndReplacesOnlyItsOwnPlan()
+    {
+        await using var fixture = new ServerFixture();
+        await fixture.StartAsync();
+        var alice = await fixture.InWorld("Alice");
+        await fixture.PrepareFirstProfessionChoice(alice);
+        Assert.True(fixture.Session.SeasonTalent!.UnlockedNode[10102003]);
+        Assert.Equal(0, await Upgrade(alice, 10102102)); // Rapid Pierce; client submits the leaf.
+        var state = fixture.Session.SeasonTalent!;
+        Assert.Equal(1, state.Plan[0].TalentNodes[10102003].CurrentLevel);
+        Assert.Equal(1, state.Plan[0].TalentNodes[10102101].CurrentLevel);
+        Assert.Equal(1, state.Plan[0].TalentNodes[10102102].CurrentLevel);
+        Assert.Equal(0, state.Plan[1].TalentNodes[10102102].CurrentLevel);
+        Assert.Equal(0, await Upgrade(alice, 10102106)); // Switch to Swift Sword / Critical Attack.
+        state = fixture.Session.SeasonTalent!;
+        Assert.Equal(0, state.Plan[0].TalentNodes[10102101].CurrentLevel);
+        Assert.Equal(0, state.Plan[0].TalentNodes[10102102].CurrentLevel);
+        Assert.Equal(1, state.Plan[0].TalentNodes[10102105].CurrentLevel);
+        Assert.Equal(1, state.Plan[0].TalentNodes[10102106].CurrentLevel);
+        var saved = DBSeasonTalent.Parser.ParseFrom(fixture.Roles.LoadSeasonTalent(fixture.Session.Role!.Id)!);
+        Assert.Equal(state, saved);
+        await alice.DisposeAsync();
+        await using var again = await fixture.InWorld("Alice", create: false);
+        await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
+        var restored = fixture.Session.SeasonTalent!.Plan[0];
+        Assert.Equal(0, restored.TalentNodes[10102102].CurrentLevel);
+        Assert.Equal(1, restored.TalentNodes[10102105].CurrentLevel);
+        Assert.Equal(1, restored.TalentNodes[10102106].CurrentLevel);
+        Assert.True(restored.TalentNodes[10102106].IsActivated);
     }
 
     [ClientDataFact]
@@ -485,14 +540,14 @@ public sealed class SeasonTalentTests
         });
 
         Assert.Equal(ErrorCodes.TalentLocked, await Upgrade(player, After)); // the gate blocks the rest of the tree
-        Assert.Equal(ErrorCodes.Parameter, await Upgrade(player, SonicOption)); // an option with choices is not a pick
+        Assert.NotEqual(0, await Upgrade(player, SonicOption)); // an option with choices is not a pick
         Assert.Equal(0, await Upgrade(player, SonicChoice));
         var picked = fixture.Session.SeasonTalent!.Plan[0].TalentNodes;
         Assert.Equal([1, 1, 1], new[] { Gate, SonicOption, SonicChoice }.Select(n => picked[n].CurrentLevel));
         Assert.True(fixture.Session.SeasonTalent.UnlockedNode[After]);
-        Assert.Equal(ErrorCodes.SkillMaxLevel, await Upgrade(player, SonicChoice));
+        Assert.Equal(0, await Upgrade(player, SonicChoice)); // choosing the same path again changes nothing
         Assert.Equal([SonicOptionBuff, SonicChoiceBuff],
-            session.Buffs.Where(b => b.IsTalentOwned).Select(b => b.ConfigId).Order());
+            session.TalentProcBuffs.Select(b => (int)b.Buff).Order());
         // The passives reach casts: Sonic Blow's (15102) damage parameters carry the option's and the choice's modifiers.
         Assert.Contains(SkillParameterRules.Active(session, fixture.Data), m => m.Group == 15102 && m.Type == 29);
 
@@ -500,8 +555,8 @@ public sealed class SeasonTalentTests
         picked = fixture.Session.SeasonTalent!.Plan[0].TalentNodes;
         Assert.Equal([0, 0, 1, 1, 1],
             new[] { SonicOption, SonicChoice, OtherOption, OtherChoice, Gate }.Select(n => picked[n].CurrentLevel));
-        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
-        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned && b.ConfigId is SonicChoiceBuff or SonicOptionBuff);
+        Assert.Contains(session.TalentProcBuffs, b => b.Buff == OtherChoiceBuff);
+        Assert.DoesNotContain(session.TalentProcBuffs, b => b.Buff is SonicChoiceBuff or SonicOptionBuff);
         Assert.NotEqual(ErrorCodes.TalentLocked, await Upgrade(player, After)); // open: an ordinary paid node now
 
         await player.DisposeAsync();
@@ -509,7 +564,7 @@ public sealed class SeasonTalentTests
         var saved = await Next(again, SeasonTalentService.TalentSync, DBSeasonTalentIncrement.Parser);
         Assert.Equal(1, saved.Plan[0].All.TalentNodes[OtherChoice].CurrentLevel);
         Assert.Equal(0, saved.Plan[0].All.TalentNodes[SonicChoice].CurrentLevel);
-        Assert.Contains(fixture.Session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+        Assert.Contains(fixture.Session.TalentProcBuffs, b => b.Buff == OtherChoiceBuff);
     }
 
     [ClientDataFact]
@@ -539,9 +594,9 @@ public sealed class SeasonTalentTests
         Assert.Equal([0, 0, 0], new[] { Gate, SonicOption, SonicChoice }.Select(n => state.Plan[1].TalentNodes[n].CurrentLevel));
         Assert.True(state.UnlockedNode[Gate]); // the bought path to the gate is the same in every plan
         Assert.False(state.UnlockedNode[After]); // but this plan has not picked at the gate
-        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned);
+        Assert.Empty(session.TalentProcBuffs);
         Assert.Equal(0, await Upgrade(player, OtherChoice));
-        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+        Assert.Contains(session.TalentProcBuffs, b => b.Buff == OtherChoiceBuff);
 
         await Task.Delay(TimeSpan.FromSeconds(3.1));
         await player.SendGameAsync(SeasonTalentService.SetPlan, new SeasonTalentSetCurPlanReq { PlanId = 0 });
@@ -549,8 +604,8 @@ public sealed class SeasonTalentTests
         state = session.SeasonTalent!;
         Assert.Equal(1, state.Plan[0].TalentNodes[SonicChoice].CurrentLevel);
         Assert.Equal(0, state.Plan[0].TalentNodes[OtherChoice].CurrentLevel);
-        Assert.Contains(session.Buffs, b => b.IsTalentOwned && b.ConfigId == SonicChoiceBuff);
-        Assert.DoesNotContain(session.Buffs, b => b.IsTalentOwned && b.ConfigId == OtherChoiceBuff);
+        Assert.Contains(session.TalentProcBuffs, b => b.Buff == SonicChoiceBuff);
+        Assert.DoesNotContain(session.TalentProcBuffs, b => b.Buff == OtherChoiceBuff);
     }
 
     /// <summary>
@@ -632,7 +687,7 @@ public sealed class SeasonTalentTests
     public async Task JobTalentPicksCountTowardTheNextTreesTotal()
     {
         // #bug-reports "Job II-1 Talent Tree unable to allocate points": trees I and II hold 40 + 80 ordinary levels,
-        // II+-1 (10103) needs 126 and a rank-4 job. Two picked job talents (gate, option, choice: 3 levels each)
+        // II+-1 (10103) needs 126 and a rank-4 job. Three picked job talents (option and choice: 2 levels each)
         // complete it, as the client counts them.
         const int TreeTwoPlus = 10103, Start = 10103001;
         await using var fixture = new ServerFixture();
@@ -653,10 +708,13 @@ public sealed class SeasonTalentTests
             return Task.CompletedTask;
         });
 
-        Assert.Equal(0, await Upgrade(player, 10102107)); // gate 10102003: 3 levels, 123
+        // The client's grade leaves the SkillPoint gates out (UI_Sys_Skill_SeasonTalentPanelCtrl._buildGradeNodeIDs):
+        // a pick is its option and choice, 2 levels.
+        Assert.Equal(0, await Upgrade(player, 10102107)); // gate 10102003: 122
+        Assert.Equal(0, await Upgrade(player, 10102119)); // gate 10102006: 124
         Assert.False(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
         Assert.False(session.SeasonTalent.UnlockedNode[Start]);
-        Assert.Equal(0, await Upgrade(player, 10102119)); // gate 10102006: 126
+        Assert.Equal(0, await Upgrade(player, 10102126)); // gate 10102010: 126
         Assert.True(session.SeasonTalent!.UnlockedTrees[TreeTwoPlus]);
         Assert.True(session.SeasonTalent.UnlockedNode[Start]);
     }
@@ -694,7 +752,9 @@ public sealed class SeasonTalentTests
 
         Assert.Equal(0, await Upgrade(player, QuickHands)); // its option Cold-Blooded comes with it
         var picked = await Sheet();
-        Assert.Equal(16, picked.Agi - before.Agi); // +8 per learned mastery
+        // "Learning [Katar Mastery] and [Dual-Wield Mastery] grants an Extra 8 AGI": once (upstream's reading of its
+        // two ops, one per mastery).
+        Assert.Equal(8, picked.Agi - before.Agi);
         Assert.True(picked.Patk - before.Patk >= 15, $"Cold-Blooded: {before.Patk} -> {picked.Patk}");
 
         Assert.Equal(0, await Upgrade(player, WeaponMasteryChoice)); // its option Weapon Mastery comes with it
@@ -708,8 +768,13 @@ public sealed class SeasonTalentTests
         });
         var held = await Sheet();
         Assert.True(held.Patk - bare.Patk >= 20, $"Weapon Mastery: {bare.Patk} -> {held.Patk}"); // plus the dagger's own PATK
-        await fixture.Loop.InvokeAsync(() => { session.Progress!.Skills.Remove(15107); return Task.CompletedTask; });
-        Assert.True(held.Agi - (await Sheet()).Agi >= 8); // Quick Hands' 8, plus whatever the mastery gives itself
+        await fixture.Loop.InvokeAsync(() =>
+        {
+            session.Progress!.Skills.Remove(15107);
+            session.Progress.Skills.Remove(15101);
+            return Task.CompletedTask;
+        });
+        Assert.True(held.Agi - (await Sheet()).Agi >= 8); // Quick Hands' 8, plus whatever the masteries give themselves
     }
 
     private static string RepoRoot()

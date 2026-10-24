@@ -281,15 +281,17 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             s.DungeonSoloMatch = a[0].Equals("on", StringComparison.OrdinalIgnoreCase);
             await ReplyAsync(s, $"Dungeon solo TEST AID {(s.DungeonSoloMatch ? "ON" : "OFF")} for this role session. "
                 + "Click Enter Challenge again. This is not original matchmaking behavior.");
-        }),
+        }
+        ),
         ["dungeon"] = ("<sceneEntry> (test aid: the client's 30400 Enter for a solo story dungeon)", async (s, a) =>
         {
             if (a.Length != 1 || !long.TryParse(a[0], out long scene)) throw new ArgumentException("<sceneEntry>");
             // The same entry the client's story step sends; admission, loading and settlement stay the server's own.
             await services.GetRequiredService<DungeonService>().EnterAsync(s, new Romsg.EnterDungeonReq { SceneEntry = scene });
             await ReplyAsync(s, $"Dungeon {scene}: entry requested (test aid).");
-        }),
-        ["chicken"] = ("shape <players> <team>|shape reset|skip (Survivor Battle test aids)", async (s, a) =>
+        }
+        ),
+        ["chicken"] = ("shape <players> <team>|shape reset|skip|rank <n> (Survivor Battle test aids)", async (s, a) =>
         {
             // Test aids, not original behaviour: a small Survivor Battle lobby, and skipping a pre-battle stage.
             var battles = services.GetRequiredService<TimedBattleService>();
@@ -305,8 +307,21 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
                 await ReplyAsync(s, "Survivor Battle shape from the config again.");
             }
             else if (a.Length == 1 && a[0] == "skip") await ReplyAsync(s, await battles.SkipStageAsync(s));
-            else throw new ArgumentException("shape <players> <team> (players a multiple of team, more than one team) | shape reset | skip");
-        }),
+            else if (a.Length == 2 && a[0] == "rank" && int.TryParse(a[1], out int rank))
+                await ReplyAsync(s, await battles.SetChickenRankAsync(s, rank));
+            else throw new ArgumentException("shape <players> <team> (players a multiple of team, more than one team) | shape reset | skip | rank <n>");
+        }
+        ),
+        ["arena"] = ("open|close survivor|dragon (test aid: the timed PvP window for 30 minutes)", async (s, a) =>
+        {
+            // Test aid, not original behaviour: Survivor Battle (todo 114) and Dragon Coffin Island (126) open on fixed
+            // weekday evenings only; this opens or closes the window in memory so a lobby can be tried at any time.
+            if (a.Length != 2 || a[0] is not ("open" or "close") || a[1] is not ("survivor" or "dragon"))
+                throw new ArgumentException("open|close survivor|dragon");
+            services.GetRequiredService<TimedBattleService>().TestWindow(a[1] == "survivor" ? 114 : 126, a[0] == "open");
+            await ReplyAsync(s, $"{(a[1] == "survivor" ? "Survivor Battle" : "Dragon Coffin Island")} test window {a[0]} (in memory).");
+        }
+        ),
         ["online"] = ("", Online),
         ["announce"] = ("<message> (every online player's marquee)", async (s, a) =>
         {
@@ -344,14 +359,26 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
                 }
             }
             await ReplyAsync(s, reply);
-        }),
+        }
+        ),
+        ["tower"] = ("firstpass [clear <role id|name>] (Spirit Tower server-first floor records)", async (s, a) =>
+            await ReplyAsync(s, a.Length > 0 && a[0] == "firstpass"
+                ? services.GetRequiredService<TowerService>().FirstPassGm(a)
+                : "usage: !tower firstpass [clear <role id|name>]")),
+        ["boss"] = ("spawn <npcId> | skills [npcId] | phase <n> | cast <skillId> | kill (boss skill test aids: the nearest boss within 40 m)", async (s, a) =>
+        {
+            string reply = await services.GetRequiredService<MonsterService>().BossGmAsync(s, a);
+            foreach (string line in reply.Split('\n')) await ReplyAsync(s, line);
+        }
+        ),
         ["season"] = ("[playbook]", async (s, a) =>
         {
             var seasons = services.GetRequiredService<SeasonService>();
             await ReplyAsync(s, a.Length == 0 ? seasons.Describe() : seasons.OpenContent.Enabled
                 ? "OpenContent keeps playbook 101 (the only playbook with its own content); switching would hide content"
                 : await seasons.SetPlayBookAsync(I(a[0])));
-        }),
+        }
+        ),
         ["siege"] = ("open|close|state|seed <city> <attackGuild> <defenseGuild> (test aid)", async (s, a) =>
             await ReplyAsync(s, await services.GetRequiredService<TerritoryWarsService>().SiegeGmAsync(a))),
         ["twpoint"] = ("<point> unready|ready|complete [readySeconds] [owner|self] (test aid: 30129 stronghold gameplay point)", async (s, a) =>
@@ -363,7 +390,8 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             await services.GetRequiredService<GuildChallengeService>().TestWindowAsync(a[0] == "open");
             await ReplyAsync(s, a[0] == "open" ? "Guild Challenge test window open for 90 minutes; close or restart restores the real schedule."
                 : "Guild Challenge test window closed; real schedule restored.");
-        }),
+        }
+        ),
         // Test aid: activity 3303's occurrence starts now (in memory), so the Hunting Challenge runs its 1074 phases.
         ["guildhunt"] = ("open|close (test aid)", async (s, a) =>
         {
@@ -371,7 +399,8 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             services.GetRequiredService<GuildHuntingService>().TestWindow(a[0] == "open");
             await ReplyAsync(s, a[0] == "open" ? "Hunting Challenge test window open: candidates now, combat in 2 minutes."
                 : "Hunting Challenge test window removed; real schedule restored.");
-        }),
+        }
+        ),
         // stage 0 = full-clear shortcut to the final stage's real drop pool, not the preview-only base award.
         ["guildauction"] = ("[challengeId=1001] [stage=0]", async (s, a) =>
         {
@@ -380,7 +409,8 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             int code = await services.GetRequiredService<AuctionService>().PublishGuildChallengeAsync(
                 "gm:" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), guild.Id, challenge, stage, [s.Role.Id]);
             await ReplyAsync(s, code == 0 ? $"guild auction published (challenge {challenge}, stage {stage})" : $"guild auction failed: {code}");
-        }),
+        }
+        ),
         // Test aids, not original behaviour: system World lots, and Event lots with the GM as the dividend participant.
         ["worldauction"] = ("open [itemId...] | close (test aid)", async (s, a) =>
             await ReplyAsync(s, await services.GetRequiredService<AuctionService>().WorldGmAsync(a))),
@@ -394,8 +424,10 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
             // A rollover archives and resets season-keyed state; under OpenContent there are no seasons to roll.
             await ReplyAsync(s, seasons.OpenContent.Enabled ? "OpenContent: there is no season rollover"
                 : await seasons.AdvanceCycleAsync(I(a[0]), start));
-        }),
-        ["hp"] = ("<hp> [sp]",async (s, a) => { await character.SetHpSpAsync(s, L(a[0]), a.Length > 1 ? L(a[1]) : null); await ReplyAsync(s, $"HP {a[0]}"); }),
+        }
+        ),
+        ["hp"] = ("<hp> [sp]", async (s, a) => { await character.SetHpSpAsync(s, L(a[0]), a.Length > 1 ? L(a[1]) : null); await ReplyAsync(s, $"HP {a[0]}"); }
+        ),
     };
 
     /// <summary>Asks the client hook (Ro3Emu.ClientHooks Diagnostics, msg 77012) to inspect itself into Player.log.</summary>

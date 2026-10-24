@@ -14,27 +14,39 @@ public sealed class PlayerEnergyState
 
 public sealed partial class BuffService
 {
-    /// <summary>31334 on role entry, only for EnergyConfig._iBelongJob matching the selected job (inferred).</summary>
+    /// <summary>
+    /// 31334 on role entry, for EnergyConfig._iBelongJob matching the selected job (inferred) and for _iBelongMount
+    /// naming a mount the role owns: 3112301, the Luxury Dragon's meter (mount 60060010, PublicParamConfig.MountDragonId),
+    /// pays skill 3112301's cost [8,3112301,0,12] and has no _iBelongJob. *(inferred)* Ownership, not riding, keeps the
+    /// meter: the row keeps its value on death, cut scenes and offline (_iDeadSave/_iCutSceneSave/_iOfflineSave 1).
+    /// </summary>
     public async Task InitializeEnergyAsync(GameSession p)
     {
         if (p.Role == null || p.Progress == null) return;
         p.Energy.Clear();
         p.EnergyCareer = 0;
+        p.EnergyMounts = 0;
         await ReconcileEnergyAsync(p);
     }
 
-    /// <summary>On job change preserve shared job meters; ordinary same-job level progression never refills them.</summary>
+    /// <summary>
+    /// On job change preserve shared job meters; ordinary same-job level progression never refills them. A mount
+    /// ownership change (MountService.Changed) adds or drops the mount's meters.
+    /// </summary>
     public async Task ReconcileEnergyAsync(GameSession p)
     {
-        if (p.Role == null || p.Progress == null || p.EnergyCareer == p.Progress.Career) return;
+        if (p.Role == null || p.Progress == null) return;
+        int mounts = OwnedEnergyMounts(p);
+        if (p.EnergyCareer == p.Progress.Career && p.EnergyMounts == mounts) return;
         int career = p.Progress.Career;
-        var applicable = data.Table("EnergyConfig").Values
-            .Where(row => BelongsToJob(row, career))
+        var applicable = _data.Table("EnergyConfig").Values
+            .Where(row => BelongsToJob(row, career) || BelongsToOwnedMount(row, p))
             .Select(row => (Id: (int)GameData.Int(row, "_iID"), Row: row))
             .Where(x => x.Id > 0).ToList();
         var ids = applicable.Select(x => x.Id).ToHashSet();
         foreach (int id in p.Energy.Keys.Where(id => !ids.Contains(id)).ToList()) p.Energy.Remove(id);
         p.EnergyCareer = career;
+        p.EnergyMounts = mounts;
         long now = MonsterService.NowMs;
         foreach (var (id, row) in applicable)
         {
@@ -49,9 +61,30 @@ public sealed partial class BuffService
         }
     }
 
+    /// <summary>MountService.Changed: a role whose meters are not initialized yet waits for InitializeEnergyAsync.</summary>
+    public Task MountsChangedAsync(GameSession p) => p.EnergyCareer == 0 ? Task.CompletedTask : ReconcileEnergyAsync(p);
+
     private static bool BelongsToJob(JsonElement row, int career) =>
         row.TryGetProperty("_iBelongJob", out var jobs) && jobs.ValueKind == JsonValueKind.Array
         && jobs.EnumerateArray().Any(j => GameData.Number(j) == career);
+
+    private static bool BelongsToOwnedMount(JsonElement row, GameSession p) =>
+        GameData.Int(row, "_iBelongMount") is var mount and > 0 && p.Mounts?.Mounts.ContainsKey(mount) == true;
+
+    /// <summary>How many EnergyConfig mounts the role owns (a change makes the reconcile run; no allocation).</summary>
+    private int OwnedEnergyMounts(GameSession p)
+    {
+        if (p.Mounts == null || p.Mounts.Mounts.Count == 0) return 0;
+        int owned = 0;
+        foreach (long mount in EnergyMounts())
+            if (p.Mounts.Mounts.ContainsKey(mount)) owned++;
+        return owned;
+    }
+
+    private long[]? _energyMounts;
+
+    private long[] EnergyMounts() => _energyMounts ??= _data.Table("EnergyConfig").Values
+        .Select(row => GameData.Int(row, "_iBelongMount")).Where(id => id > 0).Distinct().ToArray();
 
     /// <summary>
     /// SkillConfig._kCost type 8 [8,energyConfigId,ratioOfMax,minimumFlat].
@@ -68,7 +101,7 @@ public sealed partial class BuffService
             if (GameData.Number(entry[0]) != 8) continue;
             if (entry.GetArrayLength() < 4) return false;
             int id = (int)(GameData.Number(entry[1]) ?? 0);
-            if (id <= 0 || data.Row("EnergyConfig", id) is not { } config) return false;
+            if (id <= 0 || _data.Row("EnergyConfig", id) is not { } config) return false;
             long limit = GameData.Int(config, "_iLimitValue");
             double? ratio = GameData.Number(entry[2]), minimum = GameData.Number(entry[3]);
             if (limit < 0 || ratio is null or < 0 || minimum is null or < 0) return false;
@@ -106,7 +139,7 @@ public sealed partial class BuffService
             || hit.GetArrayLength() < 2) return;
         int id = (int)(GameData.Number(hit[0]) ?? 0);
         long amount = (long)(GameData.Number(hit[1]) ?? 0);
-        if (amount <= 0 || !p.Energy.TryGetValue(id, out var meter) || data.Row("EnergyConfig", id) is not { } config) return;
+        if (amount <= 0 || !p.Energy.TryGetValue(id, out var meter) || _data.Row("EnergyConfig", id) is not { } config) return;
         meter.Value = Math.Clamp(meter.Value + amount, 0, GameData.Int(config, "_iLimitValue"));
         await SendEnergyAsync(p, id, (EPlayerEnergyChangeReason)2);
     }
@@ -116,7 +149,7 @@ public sealed partial class BuffService
         if (p.Role == null) return;
         foreach (var (id, meter) in p.Energy.ToArray())
         {
-            if (meter.NextRecoverMs == 0 || meter.NextRecoverMs > now || data.Row("EnergyConfig", id) is not { } row) continue;
+            if (meter.NextRecoverMs == 0 || meter.NextRecoverMs > now || _data.Row("EnergyConfig", id) is not { } row) continue;
             long interval = GameData.Int(row, "_iAutoRecoverInterval");
             if (interval <= 0) { meter.NextRecoverMs = 0; continue; }
             long ticks = 1 + (now - meter.NextRecoverMs) / interval;

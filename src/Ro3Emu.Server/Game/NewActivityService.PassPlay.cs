@@ -66,7 +66,7 @@ public sealed partial class NewActivityService
     {
         if (!session.PassChallengeRows || session.ActivityRuntime?.PassPlay is not { } play || session.Role == null
             || OpenPass(session) == null) return [];
-        var (day, week) = PassPeriod(clock.GetLocalNow());
+        var (day, week) = PassPeriod(_clock.GetLocalNow());
         if (play.Day != day || play.Week != week)
         {
             play = JsonClone(play);
@@ -88,15 +88,15 @@ public sealed partial class NewActivityService
     /// <summary>77014: from now on this session's 5027 carries the challenges (a client without the rows never asks).</summary>
     public Task PassPanelAsync(GameSession session)
     {
-        if (!passPlay || session.Role == null || session.Tasks == null) return Task.CompletedTask;
-        if (!session.PassChallengeRows) log.LogInformation("Pass challenge rows on for role {Role}", session.Role.Id);
+        if (!_passPlay || session.Role == null || session.Tasks == null) return Task.CompletedTask;
+        if (!session.PassChallengeRows) _log.LogInformation("Pass challenge rows on for role {Role}", session.Role.Id);
         session.PassChallengeRows = true;
-        return session.DeferTaskSync ? Task.CompletedTask : tasks.SyncTasksAsync(session);
+        return session.DeferTaskSync ? Task.CompletedTask : _tasks.SyncTasksAsync(session);
     }
 
     private long[]? _chapterEnds;
     /// <summary>The last main quest of each story chapter (TaskConfig type 1, ids 1010CXXX grouped by chapter C).</summary>
-    private long[] ChapterEnds() => _chapterEnds ??= data.Table("TaskConfig").Values
+    private long[] ChapterEnds() => _chapterEnds ??= _data.Table("TaskConfig").Values
         .Where(r => GameData.Int(r, "_iTaskType") == 1 && GameData.Int(r, "_iTaskID") is >= 10_100_000 and < 10_200_000)
         .Select(r => GameData.Int(r, "_iTaskID")).GroupBy(id => id / 1000).Select(g => g.Max()).ToArray();
 
@@ -105,14 +105,14 @@ public sealed partial class NewActivityService
     {
         combat.Killed.Add((s, _) =>
         {
-            bool party = teams.MembersOf(s.Role!.Id).Count > 1;
+            bool party = _teams.MembersOf(s.Role!.Id).Count > 1;
             PassEvent(s, party ? [(PassGoal.Kills, 1), (PassGoal.PartyKills, 1)] : [(PassGoal.Kills, 1)], kills: 1);
             return Task.CompletedTask;
         });
         dungeons.Completed.Add((s, _, _) => { PassEvent(s, [(PassGoal.Dungeons, 1)], dungeons: 1); return Task.CompletedTask; });
         mvps.ParticipantSettled.Add(s => PassEvent(s, [(PassGoal.Mvps, 1)], mvps: 1));
         tasks.QuestDelivered.Add((s, task, _) => PassEvent(s, [(PassGoal.Quests, 1)], quest: task));
-        character.StateChanged.Add(s =>
+        _character.StateChanged.Add(s =>
         {
             // Daily activity points are a currency: watch the balance after every award instead of the grants.
             if (s.Progress is { } progress && s.ActivityRuntime?.PassPlay is { } play
@@ -174,11 +174,11 @@ public sealed partial class NewActivityService
     internal void PassEvent(GameSession session, (PassGoal Goal, long Count)[] progress, long kills = 0, long dungeons = 0,
         long mvps = 0, long quest = 0)
     {
-        if (!passPlay || session.Role == null || !session.ActivitiesReady) return;
+        if (!_passPlay || session.Role == null || !session.ActivitiesReady) return;
         // Detached: the event often fires inside another owned operation; the activity gate then admits the role and its
         // lifecycle itself once that operation is done.
         var role = session.Role;
-        loop.TrackRuntimeDetached("pass progress", async () =>
+        _loop.TrackRuntimeDetached("pass progress", async () =>
         {
             if (!ReferenceEquals(session.Role, role)) return;
             try { await PassEventAsync(session, progress, kills, dungeons, mvps, quest); }
@@ -191,13 +191,13 @@ public sealed partial class NewActivityService
     {
         if (!session.ActivitiesReady || session.Role == null || session.NewActivities == null || session.ActivityRuntime == null) return;
         // Like ReconcileAsync: the owner scope takes the activity gate with it, and the caller releases the gate.
-        var scope = loop.Owners != null ? await EnterLocalWithGateAsync(session, "activity/pass-progress") : null;
+        var scope = _loop.Owners != null ? await EnterLocalWithGateAsync(session, "activity/pass-progress") : null;
         if (scope == null) await session.ActivityGate.WaitAsync();
         try
         {
             if (!session.ActivitiesReady || session.Role == null || session.NewActivities == null || session.ActivityRuntime == null) return;
             await PassProgressCoreAsync(session, progress, kills, dungeons, mvps, quest);
-            if (!session.DeferTaskSync) await tasks.SyncTasksAsync(session); // the challenges in the season task panel
+            if (!session.DeferTaskSync) await _tasks.SyncTasksAsync(session); // the challenges in the season task panel
         }
         finally { session.ActivityGate.Release(); scope?.Dispose(); }
     }
@@ -208,7 +208,7 @@ public sealed partial class NewActivityService
         long role = session.Role!.Id;
         var runtime = CloneRuntime(session);
         var play = runtime.PassPlay ??= new PassPlayState();
-        var (day, week) = PassPeriod(clock.GetLocalNow());
+        var (day, week) = PassPeriod(_clock.GetLocalNow());
         bool dirty = Roll(play, role, day, week);
         var notices = new List<string>();
         long baseExp = 0;
@@ -217,7 +217,7 @@ public sealed partial class NewActivityService
         var drops = new List<AwardGrant>();
         string Paid(long exp, bool weekly)
         {
-            if (!f2p.Enabled) return $"+{exp} Pass EXP";
+            if (!_f2p.Enabled) return $"+{exp} Pass EXP";
             int gems = weekly ? F2PRules.WeeklyChallengeCrystals : F2PRules.DailyChallengeCrystals;
             crystals += gems;
             if (!weekly) return $"+{exp} Pass EXP, +{gems} Crystals";
@@ -245,22 +245,22 @@ public sealed partial class NewActivityService
         {
             play.DungeonsToday++;
             baseExp += DungeonExp;
-            if (f2p.Enabled && Random.Shared.NextDouble() < f2p.DungeonBlessedOreChance) drops.Add(BlessedOre());
+            if (_f2p.Enabled && Random.Shared.NextDouble() < _f2p.DungeonBlessedOreChance) drops.Add(BlessedOre());
         }
         if (mvps > 0 && play.MvpsToday < MvpsPaidPerDay)
         {
             play.MvpsToday++;
             baseExp += MvpExp;
-            if (f2p.Enabled)
+            if (_f2p.Enabled)
             {
                 crystals += F2PRules.MvpCrystals;
                 notices.Add($"MVP fight: +{F2PRules.MvpCrystals} Crystals");
             }
         }
-        if (mvps > 0 && f2p.Enabled)
+        if (mvps > 0 && _f2p.Enabled)
         {
-            if (Random.Shared.NextDouble() < f2p.MvpBlessedOreChance) drops.Add(BlessedOre());
-            if (Random.Shared.NextDouble() < f2p.MvpRefineOreChance)
+            if (Random.Shared.NextDouble() < _f2p.MvpBlessedOreChance) drops.Add(BlessedOre());
+            if (Random.Shared.NextDouble() < _f2p.MvpRefineOreChance)
                 drops.Add(new AwardGrant(Random.Shared.Next(2) == 0 ? HighDensityOridecon : HighDensityElunium, Random.Shared.Next(1, 3)));
         }
         if (quest != 0 && ChapterEnds().Contains(quest) && !play.ChaptersPaid.Contains(quest))
@@ -303,7 +303,7 @@ public sealed partial class NewActivityService
         var grants = new List<AwardGrant>();
         if (crystals > 0) grants.Add(new AwardGrant(F2PRules.Crystal, checked((int)crystals)));
         // Supporters (AccessList "supporter") earn Supporter Tokens 1:1 with these Crystals; earned tokens are theirs to keep.
-        if (crystals > 0 && access.IsSupporter(session.Account))
+        if (crystals > 0 && _access.IsSupporter(session.Account))
         {
             grants.Add(new AwardGrant(F2PRules.SupporterToken, checked((int)crystals)));
             notices.Add($"Supporter bonus: +{crystals} Supporter Tokens");
@@ -312,12 +312,12 @@ public sealed partial class NewActivityService
         foreach (var drop in drops)
         {
             grants.Add(drop);
-            notices.Add($"Bonus drop: {data.ItemName(drop.Entry)} x{drop.Count}");
+            notices.Add($"Bonus drop: {_data.ItemName(drop.Entry)} x{drop.Count}");
         }
         if (OpenPass(session) is long passId && baseExp + challengeExp > 0)
         {
             double multiplier = 1;
-            if (teams.MembersOf(role).Count > 1) multiplier += 0.2;
+            if (_teams.MembersOf(role).Count > 1) multiplier += 0.2;
             var info = session.NewActivities!.ActivityInfo[passId];
             double days = Math.Max(1, (Now - info.CycleStartTime) / 86400.0);
             if (play.Instance != info.ActivityInstance) { play.Instance = info.ActivityInstance; play.Earned = 0; play.Overflow = 0; }
@@ -337,7 +337,7 @@ public sealed partial class NewActivityService
             }
             grants.Add(new AwardGrant(PassExpCurrency, checked((int)exp)));
         }
-        if (quest != 0 && ActivityError(session, 9201, 23) == 0 && data.Row("TaskConfig", quest) is { } task
+        if (quest != 0 && ActivityError(session, 9201, 23) == 0 && _data.Row("TaskConfig", quest) is { } task
             && GameData.Int(task, "_iTaskType") == 1)
             grants.Add(new AwardGrant(NovicePassExpCurrency, (int)NoviceQuestExp));
 
@@ -349,9 +349,9 @@ public sealed partial class NewActivityService
             if (++play.Unsaved < 10) { session.ActivityRuntime = runtime; return; }
             play.Unsaved = 0;
             play.Sequence++;
-            var save = roles.NewTransaction();
+            var save = _roles.NewTransaction();
             save.RoleBlob(role, "activity_runtime", System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(runtime));
-            await roles.CommitAsync(save, "activity/pass-progress", _ => session.ActivityRuntime = runtime);
+            await _roles.CommitAsync(save, "activity/pass-progress", _ => session.ActivityRuntime = runtime);
             foreach (var notice in notices) await GmCommands.ReplyAsync(session, notice);
             return;
         }
@@ -359,7 +359,7 @@ public sealed partial class NewActivityService
         play.Sequence++;
         int result = await CommitAsync(session, session.NewActivities!.Clone(), extra: grants, runtime: runtime,
             source: string.Create(CultureInfo.InvariantCulture, $"pass/play/{role}/{play.Day}/{play.Sequence}"));
-        if (result != 0) { log.LogWarning("Pass progress for role {Role} not saved: {Result}", role, result); return; }
+        if (result != 0) { _log.LogWarning("Pass progress for role {Role} not saved: {Result}", role, result); return; }
         if (grants.Count > 0) await ReconcilePassAsync(session);
         foreach (var notice in notices) await GmCommands.ReplyAsync(session, notice);
     }
@@ -370,7 +370,7 @@ public sealed partial class NewActivityService
         if (PassConfig(passId) is not { } config || PassReward(passId, (int)GameData.Int(config, "_iMaxLevel")) is not { } row)
             return [];
         long group = GameData.Int(row, "_iFreeReward");
-        try { return awards.Resolve(session, group, Playbook(session)).Grants; }
+        try { return _awards.Resolve(session, group, Playbook(session)).Grants; }
         catch (AwardResolutionException) { return []; }
     }
 
@@ -383,7 +383,7 @@ public sealed partial class NewActivityService
             return;
         }
         var play = session.ActivityRuntime.PassPlay ?? new PassPlayState();
-        var (day, week) = PassPeriod(clock.GetLocalNow());
+        var (day, week) = PassPeriod(_clock.GetLocalNow());
         if (play.Day != day || play.Week != week)
         {
             play = JsonClone(play);
@@ -397,7 +397,7 @@ public sealed partial class NewActivityService
             finished.Contains(c.Id) ? $"{c.Text} (done)" : $"{c.Text} {done.GetValueOrDefault(c.Id)}/{c.Target}";
         if (args.Trim().Equals("week", StringComparison.OrdinalIgnoreCase))
         {
-            string weekly = f2p.Enabled
+            string weekly = _f2p.Enabled
                 ? $"+{PassWeeklyReward} EXP, {F2PRules.WeeklyChallengeCrystals} Crystals, {F2PRules.WeeklyChallengeJerky} Jerky each"
                 : $"+{PassWeeklyReward} each";
             await GmCommands.ReplyAsync(session, $"{head}. This week ({play.WeeklyDone.Count}/{WeeklyChallenges.Length} done, "
@@ -405,7 +405,7 @@ public sealed partial class NewActivityService
             return;
         }
         var today = DailyChallenges.Where(c => play.Daily.Contains(c.Id));
-        string daily = f2p.Enabled ? $"+{PassDailyReward} EXP, {F2PRules.DailyChallengeCrystals} Crystals each" : $"+{PassDailyReward} each";
+        string daily = _f2p.Enabled ? $"+{PassDailyReward} EXP, {F2PRules.DailyChallengeCrystals} Crystals each" : $"+{PassDailyReward} each";
         await GmCommands.ReplyAsync(session, $"{head}. Today ({daily}): "
             + string.Join(" | ", today.Select(c => Line(c, play.DailyProgress, play.DailyDone))) + ". Weekly: /pass week");
     }

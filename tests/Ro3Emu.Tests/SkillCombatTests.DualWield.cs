@@ -32,7 +32,7 @@ public sealed partial class SkillCombatTests
         }
         Assert.Equal(0, await Wear(guids[0], 1));
         Assert.Equal(0, await Wear(guids[1], 2));
-        var skills = app.Services.GetRequiredService<SkillService>();
+        var skills = _app.Services.GetRequiredService<SkillService>();
         await Loop.InvokeAsync(() =>
         {
             var s = Session("alice");

@@ -47,9 +47,9 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
         [1100] = 1103, [4100] = 1104, [2100] = 1105, [3100] = 1106, [5100] = 1107, [6100] = 1108,
     };
 
-    private readonly object gate = new();
-    private Task<Snapshot>? snapshot;
-    private DateTimeOffset builtAt;
+    private readonly object _gate = new();
+    private Task<Snapshot>? _snapshot;
+    private DateTimeOffset _builtAt;
 
     public string Name => "RankService";
 
@@ -58,49 +58,50 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
         switch (method)
         {
             case "rangeUserRank":
-            {
-                if (!TryParseRankId(Arg(args, 0, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
-                long start = Math.Max(1, Number(Arg(args, 1, "Start")));
-                long end = Number(Arg(args, 2, "End"));
-                var board = sub ? null : (await BoardsAsync()).Boards.GetValueOrDefault(boardId);
-                var rows = board == null || end < start ? []
-                    : board.Rows.Skip((int)Math.Min(start - 1, board.Rows.Count)).Take((int)Math.Min(end - start + 1, board.Rows.Count))
-                        .Select((row, i) => Row(row, (int)start + i)).ToArray();
-                return Reply(rows, board);
-            }
-            case "queryUserRank":
-            {
-                if (!TryParseRankId(Arg(args, 0, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
-                var boards = await BoardsAsync();
-                var board = sub ? null : boards.Boards.GetValueOrDefault(boardId);
-                var rows = new List<object>();
-                if (board != null && Arg(args, 1, "UserIds") is object?[] ids)
-                    foreach (var value in ids)
-                    {
-                        if (!long.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), out long id)) continue;
-                        // Guild boards: the client asks for the local player (_proessLeaderBoardSync 905-911); its own
-                        // guild row is the one the footer can show (inferred).
-                        if (!board.RankOf.ContainsKey(id) && board.Guild && boards.GuildOf.TryGetValue(id, out long guild)) id = guild;
-                        if (board.RankOf.TryGetValue(id, out int rank)) rows.Add(Row(board.Rows[rank - 1], rank));
-                    }
-                return Reply(rows.ToArray(), board);
-            }
-            case "getUserRankSurrounding":
-            {
-                if (!TryParseRankId(Arg(args, -1, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
-                long.TryParse(Convert.ToString(Arg(args, -1, "UserId"), System.Globalization.CultureInfo.InvariantCulture), out long id);
-                // (inferred) a bounded window; the client asks a few rows each side.
-                int before = (int)Math.Clamp(Number(Arg(args, -1, "Before")), 0, 100);
-                int after = (int)Math.Clamp(Number(Arg(args, -1, "After")), 0, 100);
-                var board = sub ? null : (await BoardsAsync()).Boards.GetValueOrDefault(boardId);
-                object[] rows = [];
-                if (board != null && board.RankOf.TryGetValue(id, out int rank))
                 {
-                    int first = Math.Max(1, rank - before), last = Math.Min(board.Rows.Count, rank + after);
-                    rows = Enumerable.Range(first, last - first + 1).Select(r => Row(board.Rows[r - 1], r)).ToArray();
+                    if (!TryParseRankId(Arg(args, 0, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
+                    long start = Math.Max(1, Number(Arg(args, 1, "Start")));
+                    long end = Number(Arg(args, 2, "End"));
+                    var board = sub ? null : (await BoardsAsync()).Boards.GetValueOrDefault(boardId);
+                    var rows = board == null || end < start ? []
+                        : board.Rows.Skip((int)Math.Min(start - 1, board.Rows.Count)).Take((int)Math.Min(end - start + 1, board.Rows.Count))
+                            .Select((row, i) => Row(row, (int)start + i)).ToArray();
+                    return Reply(rows, board);
                 }
-                return Reply(rows, board);
-            }
+            case "queryUserRank":
+                {
+                    if (!TryParseRankId(Arg(args, 0, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
+                    var boards = await BoardsAsync();
+                    var board = sub ? null : boards.Boards.GetValueOrDefault(boardId);
+                    var rows = new List<object>();
+                    if (board != null && Arg(args, 1, "UserIds") is object?[] ids)
+                        foreach (var value in ids)
+                        {
+                            if (!long.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), out long id)) continue;
+                            // Guild boards: the client asks for the local player (_proessLeaderBoardSync 905-911); its own
+                            // guild row is the one the footer can show (inferred).
+                            if (!board.RankOf.ContainsKey(id) && board.Guild && boards.GuildOf.TryGetValue(id, out long guild)) id = guild;
+                            if (board.RankOf.TryGetValue(id, out int rank)) rows.Add(Row(board.Rows[rank - 1], rank));
+                        }
+                    return Reply(rows.ToArray(), board);
+                }
+            case "getUserRankSurrounding":
+                {
+                    if (!TryParseRankId(Arg(args, -1, "RankId"), out int boardId, out bool sub)) return MicroServiceRouter.Fail("bad rank id");
+                    if (!long.TryParse(Convert.ToString(Arg(args, -1, "UserId"), System.Globalization.CultureInfo.InvariantCulture), out long id))
+                        return MicroServiceRouter.Fail("bad user id");
+                    // (inferred) a bounded window; the client asks a few rows each side.
+                    int before = (int)Math.Clamp(Number(Arg(args, -1, "Before")), 0, 100);
+                    int after = (int)Math.Clamp(Number(Arg(args, -1, "After")), 0, 100);
+                    var board = sub ? null : (await BoardsAsync()).Boards.GetValueOrDefault(boardId);
+                    object[] rows = [];
+                    if (board != null && board.RankOf.TryGetValue(id, out int rank))
+                    {
+                        int first = Math.Max(1, rank - before), last = Math.Min(board.Rows.Count, rank + after);
+                        rows = Enumerable.Range(first, last - first + 1).Select(r => Row(board.Rows[r - 1], r)).ToArray();
+                    }
+                    return Reply(rows, board);
+                }
             default:
                 return null;
         }
@@ -114,7 +115,7 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
     /// <summary>Drops the cached boards so the next request recomputes them (tests, GM tools).</summary>
     internal void Invalidate()
     {
-        lock (gate) snapshot = null;
+        lock (_gate) _snapshot = null;
     }
 
     private static Dictionary<string, object?> Reply(object[] rows, Board? board) => new()
@@ -169,15 +170,15 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
 
     private Task<Snapshot> BoardsAsync()
     {
-        lock (gate)
+        lock (_gate)
         {
             var now = clock.GetUtcNow();
-            if (snapshot == null || snapshot.IsFaulted || snapshot.IsCompleted && now - builtAt >= Ttl)
+            if (_snapshot == null || _snapshot.IsFaulted || _snapshot.IsCompleted && now - _builtAt >= Ttl)
             {
-                snapshot = Task.Run(BuildAsync);
-                builtAt = now;
+                _snapshot = Task.Run(BuildAsync);
+                _builtAt = now;
             }
-            return snapshot;
+            return _snapshot;
         }
     }
 
@@ -215,10 +216,7 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
             }
             if (role.Wardrobe is { Length: > 0 })
             {
-                // LC_FashionHelper.UpdateFashionScore:496-530: permanent (overdueTimeMs 0) lit appearances' _iFashionScore.
-                long fashion = DBWardRobeInfo.Parser.ParseFrom(role.Wardrobe).AllLightUpAppearances.Values
-                    .Where(a => a.OverdueTimeMs == 0)
-                    .Sum(a => data.Row("WardRobeConfig", a.AppearanceId) is { } row ? GameData.Int(row, "_iFashionScore") : 0);
+                long fashion = WardrobeService.FashionScore(data, DBWardRobeInfo.Parser.ParseFrom(role.Wardrobe));
                 if (fashion > 0) Add(Fashion, new Candidate(role.Id, fashion, 0, 0, 0, () => []));
             }
             if (role.TimedBattle is { Length: > 0 } && JsonSerializer.Deserialize<TimedBattleService.State>(role.TimedBattle) is { } battle)
@@ -246,8 +244,9 @@ public sealed class RankService(GameData data, AccountStore accounts, GuildServi
                 }.ToByteArray()));
             }
             // Hero Registry (UI_Sys_RankCopyMainPanel): ranked by the role's displayed power, normalPower +
-            // seasonPower (spec-power-score.md §0); this server's PowerUnit is the Soul Echo season power only.
-            long power = emblems.StoredPower(role.Emblems, items);
+            // seasonPower: the total PowerService last published and saved with the Soul Echo
+            // state. A role that never logged in since has only its Soul Echo plan to rank by.
+            long power = PowerService.StoredTotal(role.Emblems) ?? emblems.StoredPower(role.Emblems, items);
             if (power > 0)
             {
                 Add(HeroAll, new Candidate(role.Id, power, 0, 0, 0, () => []));
