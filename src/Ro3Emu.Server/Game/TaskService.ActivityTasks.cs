@@ -32,6 +32,12 @@ public sealed partial class TaskService
             && Defs().ContainsKey(GameData.Int(r, "_iTaskID")))
         .ToDictionary(r => GameData.Int(r, "_iTaskID"), r => (int)GameData.Int(r, "_iTaskSonType"));
 
+    /// <summary>Pass II's tasks (sonType 9201) name an AwardConfig row in _iAward, like its BattlePassRewardConfig rows
+    /// (NewActivityService.BattlePass); every other task names a MultiverseGroupConfig route.</summary>
+    private bool DirectAward(long id) => ActivityTasks().TryGetValue(id, out int son) && son == PassTwoTasks;
+
+    private const int PassTwoTasks = 9201;
+
     private bool ActivityTaskOpen(GameSession session, long id, IReadOnlyDictionary<(int Type, int Son), bool>? groups = null) =>
         ActivityTasks().TryGetValue(id, out int son)
         && (groups ?? OpenActivityTaskGroups?.Invoke(session))?.ContainsKey((SeasonTreasureType, son)) == true;

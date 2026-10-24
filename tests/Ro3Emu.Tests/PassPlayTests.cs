@@ -271,6 +271,26 @@ public sealed class PassPlayTests : IAsyncLifetime
         Assert.Equal(60, (await Pass(alice)).Level);
     }
 
+    /// <summary>
+    /// Pass II's daily quest "Reach 60 Activity" (9201101) names its reward as an AwardConfig row (920160), like Pass II's
+    /// level rewards, not as a MultiverseGroupConfig route: it pays once a player reaches 60 Activity, instead of being
+    /// retried (and refused) on every kill.
+    /// </summary>
+    [ClientDataFact]
+    public async Task PassTwosActivityQuestPaysItsDirectAward()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm(alice, "!lvl 99");
+        await Gm(alice, "!item 132 120000");
+        await Service<NewActivityService>().ReconcileAsync(Session(alice));
+        await Service<NewActivityService>().ReconcileAsync(Session(alice));
+        Task<TaskInfo?> Quest() => OnLoop(() => Session(alice).Tasks!.Infos.GetValueOrDefault(9201101L));
+        Assert.NotNull(await Quest());
+
+        await Gm(alice, "!item 5 60");
+        await Until(async () => (await Quest())?.Status == TaskState.Delivery, "Reach 60 Activity delivered");
+    }
+
     [ClientDataFact]
     public async Task ChallengesReach5027OnlyAfterTheClientAsksAndShowProgress()
     {
