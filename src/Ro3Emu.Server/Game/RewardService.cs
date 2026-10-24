@@ -27,6 +27,7 @@ public sealed class RewardService
     private readonly Random _random = new();
     private Dictionary<int, long>? _expCorrection;
     private readonly DropAttenuation _attenuation;
+    private readonly int _killExpPercent, _cardDropRolls;
 
     /// <summary>Field AFK selects the enhanced _iDrop table only for qualified ordinary field kills.
     /// Other kills use environment 0, preserving ordinary rewards (localization 10960000077; mapping inferred).</summary>
@@ -43,6 +44,8 @@ public sealed class RewardService
         Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
     {
         _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
+        _killExpPercent = Math.Max(1, options?.Value.KillExpPercent ?? 100);
+        _cardDropRolls = Math.Clamp(options?.Value.CardDropRolls ?? 1, 1, 10);
         this._character = character;
         this._teams = teams;
         this._data = data;
@@ -155,23 +158,27 @@ public sealed class RewardService
             return ([], 0, 0);
         if (_data.Row("NPCConfig", monster.Template.NpcId) is not { } npc) return ([], 0, 0);
         var drops = new List<(int Entry, int Count)>();
-        // (inferred) NPCDropConfig environment 0 is reduced and 1 is Bonus Time: the former carries
-        // small EXP at player levels 1-99, the latter larger EXP. Fatigue environment 2 has no proven trigger.
-        // _iNormalDrop remains additive under its own level/map conditions; no numeric multiplier is invented.
-        if (Resolve(GameData.Int(npc, "_iDrop")) is var dropId and > 0 && _data.Row("NPCDropConfig", dropId) is { } nd
-            && nd.ValueKind == JsonValueKind.Object && nd.TryGetProperty(bonus ? "1" : "0", out var env))
-            RollPools(env, player, drops, monster.Template.Level);
-        if (npc.TryGetProperty("_iNormalDrop", out var normals) && normals.ValueKind == JsonValueKind.Array)
+        void Roll(List<(int Entry, int Count)> into)
         {
-            foreach (var n in normals.EnumerateArray())
+            // (inferred) NPCDropConfig environment 0 is reduced and 1 is Bonus Time: the former carries
+            // small EXP at player levels 1-99, the latter larger EXP. Fatigue environment 2 has no proven trigger.
+            // _iNormalDrop remains additive under its own level/map conditions; no numeric multiplier is invented.
+            if (Resolve(GameData.Int(npc, "_iDrop")) is var dropId and > 0 && _data.Row("NPCDropConfig", dropId) is { } nd
+                && nd.ValueKind == JsonValueKind.Object && nd.TryGetProperty(bonus ? "1" : "0", out var env))
+                RollPools(env, player, into, monster.Template.Level);
+            if (npc.TryGetProperty("_iNormalDrop", out var normals) && normals.ValueKind == JsonValueKind.Array)
             {
-                if (GameData.Number(n) is not { } nid || Resolve((long)nid) is not (var id and > 0) || _data.Row("NpcNormalDropConfig", id) is not { } row) continue;
-                if (row.TryGetProperty("_iMapId", out var maps) && maps.ValueKind == JsonValueKind.Array && maps.GetArrayLength() > 0
-                    && !maps.EnumerateArray().Any(m => GameData.Number(m) == player.SceneEntry))
-                    continue;
-                RollPools(row, player, drops, monster.Template.Level);
+                foreach (var n in normals.EnumerateArray())
+                {
+                    if (GameData.Number(n) is not { } nid || Resolve((long)nid) is not (var id and > 0) || _data.Row("NpcNormalDropConfig", id) is not { } row) continue;
+                    if (row.TryGetProperty("_iMapId", out var maps) && maps.ValueKind == JsonValueKind.Array && maps.GetArrayLength() > 0
+                        && !maps.EnumerateArray().Any(m => GameData.Number(m) == player.SceneEntry))
+                        continue;
+                    RollPools(row, player, into, monster.Template.Level);
+                }
             }
         }
+        RollWithExtraCards(drops, Roll, _character.IsCard, _cardDropRolls);
 
         if (ExtraKillDrops != null) drops.AddRange(ExtraKillDrops(player, monster));
         long baseExp = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
@@ -181,9 +188,29 @@ public sealed class RewardService
             long gap = player.Progress!.Level - monster.Template.Level;
             baseExp = baseExp * Correction((int)Math.Clamp(gap, -200, 200)) / 10000;
             baseExp = Math.Max(1, baseExp * _teams.ExpBonus(player) / 10000);
+            baseExp = HouseExp(baseExp, _killExpPercent);
         }
         // BaseExpAddConfig catch-up below the server level raises Base EXP only (CharacterService.LevelRules).
         return (items, _character.WithPursueBonus(player.Progress!.Level, baseExp), baseExp);
+    }
+
+    /// <summary>Sol RO3 house rule (ServerOptions.KillExpPercent): a kill's EXP in percent. Job EXP is the same amount
+    /// (ResolveKill), so it scales both; a kill that gave EXP still gives at least 1.</summary>
+    internal static long HouseExp(long exp, int percent) => exp > 0 ? Math.Max(1, exp * percent / 100) : exp;
+
+    /// <summary>Sol RO3 house rule (ServerOptions.CardDropRolls): the drop tables roll <paramref name="rolls"/> times, the
+    /// first in full and the others for cards only, so a card is about that many times as likely and every other drop
+    /// and the EXP keep the data's odds.</summary>
+    internal static void RollWithExtraCards(List<(int Entry, int Count)> drops, Action<List<(int Entry, int Count)>> roll,
+        Func<int, bool> isCard, int rolls)
+    {
+        roll(drops);
+        for (int extra = 1; extra < rolls; extra++)
+        {
+            var again = new List<(int Entry, int Count)>();
+            roll(again);
+            drops.AddRange(again.Where(d => isCard(d.Entry)));
+        }
     }
 
     private async Task KilledAsync(GameSession player, MonsterUnit monster)
