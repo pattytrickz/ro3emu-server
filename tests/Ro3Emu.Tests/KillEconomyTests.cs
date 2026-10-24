@@ -359,7 +359,7 @@ public sealed class KillEconomyTests : IAsyncLifetime
             Assert.Equal(0, (await Next(leader, TeamService.TeamInvite, InviteIntoTeamResp.Parser)).Result);
             await Next(member, TeamService.TeamNotifyInvitee, NotifyInvitee.Parser);
             await member.SendGameAsync(TeamService.TeamInviteeResp, new InviteeResp
-                { TeamId = created.TeamId, IsAgree = true, InviteGuid = (long)leader.Self!.Uuid });
+            { TeamId = created.TeamId, IsAgree = true, InviteGuid = (long)leader.Self!.Uuid });
             Assert.Equal(0, (await Next(member, TeamService.TeamInviteeResp, InviteeRespResp.Parser)).Result);
         }
     }

@@ -327,7 +327,8 @@ public sealed class GmCommands(IOptions<ServerOptions> options, GameData data, S
         {
             int reached = await AnnounceAsync(string.Join(' ', a));
             if (reached == 0) await ReplyAsync(s, "Usage: !announce <message>");
-        }),
+        }
+        ),
         ["warp"] = ("<sceneEntry> [x z]", Warp),
         ["jump"] = ("<x> <z>", Jump),
         ["finditem"] = ("<name>", FindItem),

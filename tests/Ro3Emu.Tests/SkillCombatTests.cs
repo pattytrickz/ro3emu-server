@@ -846,8 +846,10 @@ public sealed partial class SkillCombatTests : IAsyncLifetime
         var nav = _app.Services.GetRequiredService<WorldData>().Map(Session("alice").SceneEntry)!.Nav!;
         // A row along x: walkable cell x0, rock at x0 + 1, walkable x0 + 2 and x0 + 3, all on one floor.
         float? Floor(int x, int z) => nav.WalkHeight(x + 0.5f, z + 0.5f, start.Y) is { } h && MathF.Abs(h - start.Y) <= 1 ? h : null;
-        var (x0, z0) = (from dz in Enumerable.Range(-60, 121) from dx in Enumerable.Range(-60, 121)
-                        let x = (int)start.X + dx let z = (int)start.Z + dz
+        var (x0, z0) = (from dz in Enumerable.Range(-60, 121)
+                        from dx in Enumerable.Range(-60, 121)
+                        let x = (int)start.X + dx
+                        let z = (int)start.Z + dz
                         where Floor(x, z) != null && Floor(x + 1, z) == null && nav.WalkHeight(x + 1.5f, z + 0.5f, start.Y) == null
                             && Floor(x + 2, z) != null && Floor(x + 3, z) != null
                         orderby Math.Abs(dx) + Math.Abs(dz)

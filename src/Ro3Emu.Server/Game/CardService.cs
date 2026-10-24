@@ -33,7 +33,15 @@ public sealed partial class CardService
     /// 7 / 8 / 9 are the fashion headwear / facewear / mouthwear grids (PublicParamConfig.CardPartIcon, EquipGridConfig 8-10 icons).</summary>
     private static int[] GridsFor(long part) => part switch
     {
-        1 => [1], 2 => [2], 3 => [3], 4 => [4], 5 => [5], 6 => [6, 7], 7 => [8], 8 => [9], 9 => [10],
+        1 => [1],
+        2 => [2],
+        3 => [3],
+        4 => [4],
+        5 => [5],
+        6 => [6, 7],
+        7 => [8],
+        8 => [9],
+        9 => [10],
         _ => [],
     };
 

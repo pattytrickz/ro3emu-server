@@ -431,8 +431,11 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(1, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns[DivineLight].SkillLevel);
 
         // On the bar like a learned skill: the saved plan keeps it, but it never becomes a learned (paid) level.
-        await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = SkillLoadOperation.SkillLoadOpLoad,
-            IsManual = true, SocketNum = 5, Info = new SkillData { SkillId = DivineLight, SkillLevel = 1 } }); // an empty slot
+        await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
+        {
+            OpType = SkillLoadOperation.SkillLoadOpLoad,
+            IsManual = true, SocketNum = 5, Info = new SkillData { SkillId = DivineLight, SkillLevel = 1 }
+        }); // an empty slot
         Assert.Equal(0, (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
         Assert.DoesNotContain(DivineLight, session.Progress.Skills.Keys);
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role.Id });

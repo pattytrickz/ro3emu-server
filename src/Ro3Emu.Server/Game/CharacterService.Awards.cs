@@ -322,7 +322,7 @@ public sealed partial class CharacterService
                     {
                         persist?.Invoke(builder);
                         cardSight?.Persist(builder);
-            vigorPlan?.Persist(builder);
+                        vigorPlan?.Persist(builder);
                         escrowAward = builder.HasEscrowEconomy;
                     }, expectedDaily, nextDaily, persistedTasks, expectedTasks != null)) return false;
             }

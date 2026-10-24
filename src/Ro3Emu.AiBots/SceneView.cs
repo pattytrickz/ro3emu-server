@@ -132,8 +132,11 @@ public sealed class SceneView
                     foreach (var b in view.Bases)
                     {
                         if (b.Uuid == SelfUid || b.EntityType is not (1 or 3)) continue;
-                        var unit = new Unit { Uid = b.Uuid, Type = b.EntityType, TemplateId = b.EntityTemplateID, Name = b.Name,
-                            Dead = b.State == EntityState.Dead };
+                        var unit = new Unit
+                        {
+                            Uid = b.Uuid, Type = b.EntityType, TemplateId = b.EntityTemplateID, Name = b.Name,
+                            Dead = b.State == EntityState.Dead
+                        };
                         if (b.MovementInfo?.Pos is { } p) (unit.X, unit.Y, unit.Z) = (p.X, p.Y, p.Z);
                         foreach (var prop in b.Property) Apply(unit, prop.Idx, prop.Data);
                         _units[b.Uuid] = unit;
@@ -286,8 +289,11 @@ public sealed class SceneView
     {
         lock (_lock)
             return _party.TryGetValue(guid, out var m)
-                ? new PartyMember { Guid = m.Guid, MapId = m.MapId, Line = m.Line, X = m.X, Y = m.Y, Z = m.Z, Hp = m.Hp,
-                    MaxHp = m.MaxHp, Dead = m.Dead, Offline = m.Offline, Updated = m.Updated }
+                ? new PartyMember
+                {
+                    Guid = m.Guid, MapId = m.MapId, Line = m.Line, X = m.X, Y = m.Y, Z = m.Z, Hp = m.Hp,
+                    MaxHp = m.MaxHp, Dead = m.Dead, Offline = m.Offline, Updated = m.Updated
+                }
                 : null;
     }
 

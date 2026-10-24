@@ -144,9 +144,12 @@ public sealed partial class CombatService
             : _skills.NormalAttack(s.Progress!.Career, WeaponType(s, 1), WeaponType(s, 2));
         if (GameData.Int(row!.Value, "_iIfAutoAtk") == 2 && owned == null && target != null && CanHitMonster(s, target))
         {
-            s.Attack = new AttackLoop { Target = target, SkillId = loopSkill,
+            s.Attack = new AttackLoop
+            {
+                Target = target, SkillId = loopSkill,
                 NextSwingMs = Now + SkillMs(s, row.Value) + ChantMs(s, row.Value) + 1,
-                StartX = s.Position.X, StartZ = s.Position.Z };
+                StartX = s.Position.X, StartZ = s.Position.Z
+            };
         }
         else if (!keepsAttack && s.Attack is { } replaced)
         {
