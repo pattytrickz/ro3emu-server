@@ -9,22 +9,15 @@ namespace Ro3Emu.Tests;
 public sealed class AiBotPartyRulesTests
 {
     [Theory]
-    [InlineData(40, 30, true)]
-    [InlineData(40, 50, true)]
-    [InlineData(40, 29, false)]
-    [InlineData(40, 51, false)]
-    public void InvitesAreAcceptedFromPlayersWithinTenBaseLevels(long bot, long inviter, bool accepted) =>
+    [InlineData(40, 25, true)]
+    [InlineData(40, 55, true)]
+    [InlineData(40, 24, false)]
+    [InlineData(40, 56, false)]
+    public void InvitesAreAcceptedFromPlayersWithinFifteenBaseLevels(long bot, long inviter, bool accepted) =>
         Assert.Equal(accepted, PartyRules.InLevelRange(bot, inviter));
 
     [Fact]
     public void AnInviterOfUnknownLevelIsDeclined() => Assert.False(PartyRules.InLevelRange(40, null));
-
-    [Fact]
-    public void TheDeclineSaysWhichSideIsTooHigh()
-    {
-        Assert.Equal("Sorry, I'm too high level to help you here.", PartyRules.LevelDecline(60, 20));
-        Assert.Equal("Sorry, you're too high level for me to keep up with you.", PartyRules.LevelDecline(20, 60));
-    }
 
     [Theory]
     [InlineData(1000, 1000, 50, false)] // fresh

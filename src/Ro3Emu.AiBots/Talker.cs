@@ -108,8 +108,6 @@ public sealed partial class Talker(ChatHub hub, Persona persona, string name, st
         return line;
     }
 
-    public string Thanks() => persona.Greetings[random.Next(persona.Greetings.Length)] + " thanks for the invite!";
-
     private List<string> Remember(long player, string line)
     {
         if (!_memory.TryGetValue(player, out var lines)) _memory[player] = lines = new();
