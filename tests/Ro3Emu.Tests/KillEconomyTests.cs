@@ -59,10 +59,10 @@ public sealed class KillEconomyTests : IAsyncLifetime
         });
         return bot;
     }
-    private MonsterUnit Monster(long uid = 77) => new()
+    private MonsterUnit Monster(long uid = 77, int level = 1) => new()
     {
         Uid = uid, SceneEntry = Session.SceneEntry, RuntimeMap = Session.RuntimeMap,
-        Template = new MonsterTemplate(10001, 1, 10, 0, 1, 1, 0, 0, 1, 0, 0, 100, 1, 1, 1, 1,
+        Template = new MonsterTemplate(10001, level, 10, 0, 1, 1, 0, 0, 1, 0, 0, 100, 1, 1, 1, 1,
             false, 0, 1000, 5, 10, 0, 1000, .1f, 1000, 1, 500),
         Group = new SpawnGroup(-1, false, 1, 0, [], []), Home = new SpawnPoint(-1, 0, 0, 0, 0, 10001), Hp = 0
     };
@@ -335,6 +335,40 @@ public sealed class KillEconomyTests : IAsyncLifetime
         await OnLoop(() => { Service<RewardService>().ResolveKillForTest = (_, _) => ([], 3, 3); return Task.CompletedTask; });
         await OnLoop(() => Reward(a, Monster(79)));
         Assert.Equal((p0 + 2, b0 + 2, a0 + 1), (player.Progress.Exp, b.Progress.Exp, a.Progress.Exp));
+    }
+
+    /// <summary>
+    /// Issue #137: every member got the killer's share, scaled by the killer's level (LvExpCorrectionConfig), so a
+    /// player far above the monster earned more from a lower partner's kill than from their own. Each share now applies
+    /// its own member's level: what a member gets does not depend on who lands the kill.
+    /// </summary>
+    [ClientDataFact]
+    public async Task APartyMembersShareUsesTheirOwnLevelWhoeverKills()
+    {
+        await using var bot = await Enter(); var player = Session;
+        await using var bob = await Member("partybob", "Bob");
+        await Party(bot, bob);
+        var b = Service<SessionRegistry>().All().Single(s => s.Account == "partybob" && s.Role != null);
+        var reward = Service<RewardService>();
+        await OnLoop(async () =>
+        {
+            await Service<CharacterService>().SetLevelAsync(player, 30, null);
+            await Service<CharacterService>().SetLevelAsync(b, 60, null);
+            reward.ResolveKillForTest = null;
+            reward.RollKillForTest = (_, _) => [(100, 1000)]; // 1000 Base EXP before the level gap
+        });
+        (long Player, long Bob) Exp() => (player.Progress!.Exp, b.Progress!.Exp);
+
+        var start = Exp();
+        await OnLoop(() => Reward(player, Monster(80, level: 30)));
+        var afterPlayerKill = Exp();
+        await OnLoop(() => Reward(b, Monster(81, level: 30)));
+        var afterBobKill = Exp();
+
+        long playerOwn = afterPlayerKill.Player - start.Player, bobOnPlayer = afterPlayerKill.Bob - start.Bob;
+        long playerOnBob = afterBobKill.Player - afterPlayerKill.Player, bobOwn = afterBobKill.Bob - afterPlayerKill.Bob;
+        Assert.True(bobOwn < playerOwn, $"Bob is 30 levels above the monster: {bobOwn} vs {playerOwn}");
+        Assert.Equal((playerOwn, bobOwn), (playerOnBob, bobOnPlayer));
     }
 
     private async Task<BotClient> Member(string account, string name)

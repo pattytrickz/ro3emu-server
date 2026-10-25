@@ -44,7 +44,8 @@ so a player who skips two days loses nothing.
 ## Playing together (`RealPartyExpPercent`)
 
 RO3's party bonus raises a kill's EXP by 25 % per extra party member on the map, and this realm splits field-kill EXP
-among them. `RealPartyExpPercent` adds a further bonus (0–100 %) when the killer's party has at least
+among them. Each member's share uses that member's own level against the monster's (`LvExpCorrectionConfig`) and
+their own catch-up bonus, so it doesn't depend on who lands the kill. `RealPartyExpPercent` adds a further bonus (0–100 %) when the killer's party has at least
 `RealPartyMinPlayers` (default 3) **real** players on the killer's map. AI players (`PartyShareExcludedAccounts`) don't
 count. Sol RO3 uses 25 with 3 players, so a party of three people out-earns three soloists.
 
