@@ -46,6 +46,8 @@ public sealed class RewardService
     {
         _events = events;
         _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
+        _realPartyPercent = Math.Clamp(options?.Value.RealPartyExpPercent ?? 0, 0, 100);
+        _realPartyMinPlayers = options?.Value.RealPartyMinPlayers ?? 3;
         _killExpPercent = Math.Max(1, options?.Value.KillExpPercent ?? 100);
         _cardDropRolls = Math.Clamp(options?.Value.CardDropRolls ?? 1, 1, 10);
         this._character = character;
@@ -191,7 +193,7 @@ public sealed class RewardService
             long gap = player.Progress!.Level - monster.Template.Level;
             baseExp = baseExp * Correction((int)Math.Clamp(gap, -200, 200)) / 10000;
             baseExp = Math.Max(1, baseExp * _teams.ExpBonus(player) / 10000);
-            baseExp = HouseExp(baseExp, _killExpPercent * eventExp / 100);
+            baseExp = HouseExp(baseExp, _killExpPercent * eventExp / 100 * RealPartyPercent(player) / 100);
         }
         // BaseExpAddConfig catch-up below the server level raises Base EXP only (CharacterService.LevelRules).
         return (items, _character.WithPursueBonus(player.Progress!.Level, baseExp), baseExp);
@@ -260,6 +262,15 @@ public sealed class RewardService
     private static long Share(long exp, int members) => exp > 0 ? Math.Max(1, exp / members) : 0;
 
     private readonly string[] _noShare;
+    private readonly int _realPartyPercent, _realPartyMinPlayers;
+
+    /// <summary>Sol RO3 house rule (ServerOptions.RealPartyExpPercent): 100 plus the bonus when the killer's party has at
+    /// least RealPartyMinPlayers real players (not PartyShareExcludedAccounts) on the killer's map, the killer included.</summary>
+    private int RealPartyPercent(GameSession killer) => RealPartyPercent(_realPartyPercent, _realPartyMinPlayers,
+        _teams.SameMapMembers(killer).Count(s => !ExcludedFromShare(s.Account)));
+
+    internal static int RealPartyPercent(int bonus, int minPlayers, int realPlayers) =>
+        bonus > 0 && realPlayers >= Math.Max(2, minPlayers) ? 100 + bonus : 100;
 
     /// <summary>ServerOptions.PartyShareExcludedAccounts (Sol RO3 house rule): exact names or "prefix*". Such members
     /// (the AI players) take no share of a party kill, so a player's kill is split among the real players only.</summary>
