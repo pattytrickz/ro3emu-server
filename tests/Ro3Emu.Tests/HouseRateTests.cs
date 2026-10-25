@@ -43,6 +43,23 @@ public sealed class HouseRateTests
     }
 
     [Fact]
+    public void AFractionalCardMultiplierRollsTheRestAtThatChance()
+    {
+        var random = new Random(7);
+        Assert.Equal(1, RewardService.WholeRolls(1, random));
+        Assert.Equal(3, RewardService.WholeRolls(3, random));
+        const int Kills = 20_000;
+        int total = 0;
+        for (int i = 0; i < Kills; i++)
+        {
+            int rolls = RewardService.WholeRolls(1.5, random);
+            Assert.InRange(rolls, 1, 2);
+            total += rolls;
+        }
+        Assert.InRange(total / (double)Kills, 1.47, 1.53);
+    }
+
+    [Fact]
     public void ARealPartyOfThreeEarnsTheBonus()
     {
         Assert.Equal(0, new ServerOptions().RealPartyExpPercent); // off unless the realm sets it
