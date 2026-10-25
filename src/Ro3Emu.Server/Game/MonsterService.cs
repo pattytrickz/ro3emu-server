@@ -486,6 +486,8 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
     {
         if (m.Dead || m.WorldScene != target.WorldScene || TargetVisible?.Invoke(m, target) == false || m.Template.SpeedCm == 0 && m.Template.AttackRange <= 0) return;
         if (m.Target == null) m.NextSwingMs = NowMs + 300;
+        m.Hatred.Remove(target);
+        m.Hatred.Insert(0, target);
         SetTarget(m, target);
         m.Returning = false;
     }
@@ -559,14 +561,7 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
 
     private void Fight(MonsterUnit m, MapInstance map, long now)
     {
-        var target = m.Target!;
-        bool lost = target.Role == null || target.Dead || target.SceneLoading || TargetVisible?.Invoke(m, target) == false || target.WorldScene != m.WorldScene
-                    || !m.IgnoresLeash && Distance(m.Home.X, m.Home.Z, target.Position.X, target.Position.Z) > m.Template.LeashDistance;
-        if (lost)
-        {
-            Disengage(m, map);
-            return;
-        }
+        if (FightOn(m, map) is not { } target) return;
         if (m.BusyUntilMs > now)
         {
             // A special skill is being cast: the boss holds its ground and does not swing.
@@ -607,9 +602,32 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
         }
     }
 
+    private bool Lost(MonsterUnit m, GameSession target) =>
+        target.Role == null || target.Dead || target.SceneLoading || TargetVisible?.Invoke(m, target) == false || target.WorldScene != m.WorldScene
+        || !m.IgnoresLeash && Distance(m.Home.X, m.Home.Z, target.Position.X, target.Position.Z) > m.Template.LeashDistance;
+
+    /// <summary>Whom it fights on: its target, else the latest player on its hatred list still in reach (it turns to them
+    /// and keeps its HP); with nobody left it leaves combat and walks home.</summary>
+    private GameSession? FightOn(MonsterUnit m, MapInstance map)
+    {
+        var target = m.Target!;
+        if (!Lost(m, target)) return target;
+        m.Hatred.Remove(target);
+        foreach (var next in m.Hatred)
+        {
+            if (Lost(m, next)) continue;
+            SetTarget(m, next);
+            m.NextChaseMs = 0;
+            return next;
+        }
+        Disengage(m, map);
+        return null;
+    }
+
     private void Disengage(MonsterUnit m, MapInstance map)
     {
         EndBossSkills(m, interrupt: true);
+        m.Hatred.Clear();
         SetTarget(m, null);
         m.PetTarget = null;
         m.Returning = true;
@@ -682,6 +700,7 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
         m.Dead = true;
         m.Moving = false;
         EndBossSkills(m, interrupt: true);
+        m.Hatred.Clear();
         SetTarget(m, null);
         m.PetTarget = null;
         await _world.ToUnitViewersAsync(m, CombatService.AoiAttrChange, Hp(m));
