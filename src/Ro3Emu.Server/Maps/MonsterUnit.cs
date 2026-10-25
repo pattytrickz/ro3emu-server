@@ -57,6 +57,9 @@ public sealed class MonsterUnit : WorldUnit
     // AI
     public long NextRoamMs { get; set; }
     public GameSession? Target { get; set; }
+    /// <summary>The players it fights, the latest attacker first (AIConfig _iHatredType 1): losing its target turns it to the
+    /// next one still in reach before it leaves combat (inferred order: the hatred values are server-only).</summary>
+    public List<GameSession> Hatred { get; } = [];
     /// <summary>Tower pet currently drawing this monster's attacks; owner remains the fallback target (inferred).</summary>
     public TowerPetUnit? PetTarget { get; set; }
     public long NextSwingMs { get; set; }
