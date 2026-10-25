@@ -34,6 +34,31 @@ Implemented:
 - Daily/weekly **reward allowances**, not hard entry limits: the client supports joining to help without a reward.
   Normal/Hard raw counters remain separate; the client may count Hard extras toward Normal eligibility.
 
+Realm of the Gods extras (`DungeonService.RealmOfGods`, TenGameplayConfig 100101-100103):
+
+- 82583 hall of fame: the realm's first team clear of each boss (`DBMultiDungeonHallOfFame`: leader, time, every
+  participant's `RoleDetailInfo` at the clear), kept in `server_state` `multi_dungeon_server`. The client asks for it on
+  every boss the group widget shows and says "No Team First Clear Yet" (UIWords 56287) without one. Later clears never
+  replace it.
+- Sacred Blessings: bosses with `_kBlessingID` unlock when the condition `_kBlessingBuffUnlock` ([3034, boss, days],
+  "Unlocks on day N after the Current Server's First Clear") is met by that first clear. The level is the highest
+  `TenGameplayBuffConfig` row of the group whose `_iUnlockDay` has passed since the unlock (inferred: counted from the
+  unlock, not the clear). 5062 carries it in `sacredBlessings`; its buffs go on the run's members and `_iAddReviveNum`
+  adds to the revive count. 82588 acknowledges the tip (isNeedTip until the next level).
+- Final Trial honors (`_kFinalTrialID`): a won run finishes the goals whose `LC_ConditionList` holds: 7005 revives left
+  (the team pool, inferred), 7004 seconds left before enrage (`Ro3Emu:RaidEnrageSeconds`, default 600, inferred),
+  7006 another goal done. 82584 lists the goals the run finished, 5062 their states, 82589 pays `_iPersonAward` once per
+  goal (event receipt `event/dungeon/honor-award`).
+- 30125 Start Battle: the raid scenes 3020101-3020104/3020108 open in a preparation phase with dungeon var 1001 = [1]
+  (DungeonLua `FunctionButtons`); the leader's button or `Ro3Emu:RaidPreparationSeconds` (default 120, inferred) starts
+  the boss fight.
+- 82591 Hidden Realm (50199): the entry draws a boss of the `_iRandom` 1 rows that every member has unlocked (inferred:
+  uniform), sends `RandomDungeonNotify` with the countdown `FiveGamePlay_RandomDuration`, then runs that boss with the
+  Hidden Realm as `MultiDungeonInitData.origin`. The clear counts as the Hidden Realm's (its awards, allowance and
+  record, inferred).
+- Test aids: `!dungeonsolo on` also admits a lone 30400 entry to a team boss; `!firstclear <boss> [daysAgo] | clear`
+  sets the realm's first clear of a boss.
+
 Policies below remain **(inferred)** except for explicitly identified client contracts; they do not establish
 original-server encounter parity:
 
@@ -152,9 +177,14 @@ Reconstructed scripted scenes without a fight (`Reconstructed/scripted-scenes.js
 - The next step (or the settlement) after a completing event runs in its own owner scope (`GameLoop.PostLegacy`): the
   route of the message that completed it does not reserve the settlement's role locks. Scene actors are room props
   (`InstanceService.AddPropAsync`), removed at settlement and before the room's final cleanup.
+- A step may shuffle its actors: its "shuffle" lists of points draw one random order per run that moves the actors on
+  every list together (Louie's game: the rings on the bells 29-31 and Fervor on the mark in front of Katie's, 33-35).
+  A trigger may give a buff to the step's actor of one NPC at the point of the actor that sent it (the guessed bell
+  rings true, 5402101, or shatters, 5402201).
 - Guessed (see each scene's "guessed" list): the corridor region that ends 1000201's first stage, Bobo's place there,
-  the jump and the ride as teleports, no exploding ant eggs, no seamless 1000201 to 1000301 transfer, which bell hides
-  Katie (from both stories), a wrong guess changing nothing, the instrument retrieved within 4 m of mark point 37.
+  the jump and the ride as teleports, no exploding ant eggs, no seamless 1000201 to 1000301 transfer, Katie under a
+  random bell with Fervor standing (not walking) in front of it, no shuffle animation, a wrong guess costing nothing
+  but that bell, the instrument retrieved within 4 m of mark point 37.
 - `DungeonTests.Scripted` resolves each scene against the client data, plays each one through its client events (wrong
   and premature events included) to a clear, and checks that the story step is delivered and the next one offered.
   The story walk plays the three scenes with the same events and has no known-open blocker left.

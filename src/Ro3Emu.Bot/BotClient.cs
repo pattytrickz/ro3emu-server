@@ -167,22 +167,37 @@ public sealed class BotClient : IAsyncDisposable
 
     // ---------------------------------------------------------------- game gate
 
+    /// <summary>The game gate's encrypted handshake alone: no account signs in on the connection yet.</summary>
+    public Task OpenGateAsync() => OpenGameAsync();
+
+    private async Task<PhonestChannel> OpenGameAsync() =>
+        _game = await StageAsync("game-handshake", () => ConnectAsync(GameGate, OnGameFrame, requestToken: 1, confirmKey: 2));
+
     /// <summary>Game gate handshake + ConnectServerReq, then waits for the role screen trigger (OnQueueFinishedNotify).</summary>
     public async Task EnterGateAsync()
     {
-        _game = await StageAsync("game-handshake", () => ConnectAsync(GameGate, OnGameFrame, requestToken: 1, confirmKey: 2));
+        var game = await OpenGameAsync();
         await StageAsync("game-connect", async () =>
         {
             using var connectExpected = _inbox.Expect(e => e.Kind == BotEventKind.ConnectResponse);
             using var accountExpected = _inbox.Expect(e => e.Kind == BotEventKind.Entity && e.Name == "ClientAccount");
             using var queueExpected = _inbox.Expect(e => e.Kind == BotEventKind.Rpc && e.Name == "OnQueueFinishedNotify");
-            await SendWithDrainAsync(_game, 3, new ConnectServerReq { Type = ConnectServerReq.Types.ReqType.NewConnection, Token = ByteString.CopyFrom(EngineToken) });
+            await SendWithDrainAsync(game, 3, new ConnectServerReq { Type = ConnectServerReq.Types.ReqType.NewConnection, Token = ByteString.CopyFrom(EngineToken) });
             var connected = await connectExpected.WaitAsync(Timeout, _cts.Token);
             if (connected.ConnectResult != ConnectServerResp.Types.RespType.Connected)
                 throw Refused("game-connect", connected.ConnectResult, $"gate refused: {connected.ConnectResult}");
             await accountExpected.WaitAsync(Timeout, _cts.Token);
             await queueExpected.WaitAsync(Timeout, _cts.Token);
         });
+    }
+
+    /// <summary>Another ConnectServerReq{NewConnection} on the open game connection (tests: an account switch on one
+    /// connection); returns the gate's answer.</summary>
+    public async Task<ConnectServerResp.Types.RespType> ConnectAgainAsync(byte[] engineToken)
+    {
+        using var connectExpected = _inbox.Expect(e => e.Kind == BotEventKind.ConnectResponse);
+        await SendWithDrainAsync(_game!, 3, new ConnectServerReq { Type = ConnectServerReq.Types.ReqType.NewConnection, Token = ByteString.CopyFrom(engineToken) });
+        return (await connectExpected.WaitAsync(Timeout, _cts.Token)).ConnectResult;
     }
 
     public async Task<AccountLoginCreateRoleResp> CreateRoleAsync(string name, int sex = 1, int hair = 0)
@@ -442,11 +457,14 @@ public sealed class BotClient : IAsyncDisposable
     }
 
     /// <summary>The head-name lookup the client makes for every player unit (UserDataService.getAttributeBatchByVersion).</summary>
-    public async Task<Dictionary<string, object?>> GetRoleAttributesAsync(params long[] uids)
+    public Task<Dictionary<string, object?>> GetRoleAttributesAsync(params long[] uids) => GetRoleFieldsAsync(uids, "Base", "Name");
+
+    /// <summary>getAttributeBatchByVersion for the given global cache types ("Base", "Personal"...), each at version 0.</summary>
+    public async Task<Dictionary<string, object?>> GetRoleFieldsAsync(IEnumerable<long> uids, params string[] types)
     {
         var request = new Dictionary<string, object>
         {
-            ["UidFieldVersions"] = uids.ToDictionary(u => u.ToString(), _ => (object)new Dictionary<string, object> { ["Base"] = 0, ["Name"] = 0 }),
+            ["UidFieldVersions"] = uids.ToDictionary(u => u.ToString(), _ => (object)types.ToDictionary(t => t, _ => (object)0)),
         };
         return MessagePackSerializer.Deserialize<Dictionary<string, object?>>(await CallMicroAsync("UserDataService", "getAttributeBatchByVersion", request));
     }
@@ -561,7 +579,8 @@ public sealed class BotClient : IAsyncDisposable
     private async Task AnswerEncryptTokenAsync(PhonestChannel channel, ReadOnlyMemory<byte> body, ushort confirmKey)
     {
         long token = EncryptToken.Parser.ParseFrom(body.Span).Token;
-        var sessionKey = SHA1.HashData(RandomNumberGenerator.GetBytes(16));
+        // The client hashes 16 random bytes with SHA-1; 20 random bytes are the same to the server.
+        var sessionKey = RandomNumberGenerator.GetBytes(20);
         var key = new EncryptKey
         {
             HeadPadding = ByteString.CopyFrom(RandomNumberGenerator.GetBytes(8)),

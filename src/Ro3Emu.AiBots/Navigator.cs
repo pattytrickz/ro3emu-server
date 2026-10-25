@@ -30,7 +30,7 @@ public static class Navigator
     }
 
     /// <summary>Paths planned, cells expanded and time spent (Stopwatch ticks), for the status line.</summary>
-    public static long Calls, Expanded, Ticks;
+    internal static long Calls, Expanded, Ticks;
 
     /// <summary>
     /// A straight walk the server accepts with room to spare: the centre line and two lines 0.4 m to either side are

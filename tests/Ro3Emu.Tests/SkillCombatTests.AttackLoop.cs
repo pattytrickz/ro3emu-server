@@ -15,7 +15,7 @@ public sealed partial class SkillCombatTests
         var target = immobile ? await Loop.InvokeAsync(async () =>
         {
             var s = Session("alice");
-            var monsters = app.Services.GetRequiredService<MonsterService>();
+            var monsters = _app.Services.GetRequiredService<MonsterService>();
             var template = monsters.Template(5000001)! with { RoamDistance = 0, SpeedCm = 0 };
             return (await monsters.SpawnSingleAsync(s.SceneEntry, 5000001,
                 new MapPoint(s.Position.X, s.Position.Y, s.Position.Z, 0), s.InstanceId, customTemplate: template))!;
@@ -31,7 +31,7 @@ public sealed partial class SkillCombatTests
     private Vec3 Beside(float metres)
     {
         var s = Session("alice");
-        var nav = app.Services.GetRequiredService<WorldData>().Map(s.SceneEntry)!.Nav;
+        var nav = _app.Services.GetRequiredService<WorldData>().Map(s.SceneEntry)!.Nav;
         var p = s.Position;
         return Enumerable.Range(0, 16).Select(i => i * MathF.Tau / 16)
             .Select(a => new Vec3 { X = p.X + metres * MathF.Cos(a), Y = p.Y, Z = p.Z + metres * MathF.Sin(a) })
@@ -48,8 +48,11 @@ public sealed partial class SkillCombatTests
     {
         await using var alice = await InWorld("Alice");
         var (target, self) = await AutoAttacking(alice);
-        await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = await Loop.InvokeAsync(() => Task.FromResult(Beside(0.5f))),
-            Face = 90, BStop = true, SpeedRate = 1 });
+        await alice.SendGameAsync(MsgId.Walk, new WalkReq
+        {
+            Pos = await Loop.InvokeAsync(() => Task.FromResult(Beside(0.5f))),
+            Face = 90, BStop = true, SpeedRate = 1
+        });
         await Loop.InvokeAsync(() => { Assert.NotNull(Session("alice").Attack); return Task.CompletedTask; });
         long after = await Loop.InvokeAsync(() => Task.FromResult(Session("alice").SkillCast?.Id ?? 0));
         var swing = await Next(alice, CombatService.UseInSkill, UseInSkillInfo.Parser, u => u.SrcID == self && u.SessionId > after);
@@ -62,8 +65,11 @@ public sealed partial class SkillCombatTests
     {
         await using var alice = await InWorld("Alice");
         var (_, self) = await AutoAttacking(alice);
-        await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = await Loop.InvokeAsync(() => Task.FromResult(Beside(0.5f))),
-            Dir = 90, Face = 90, SpeedRate = 1 });
+        await alice.SendGameAsync(MsgId.Walk, new WalkReq
+        {
+            Pos = await Loop.InvokeAsync(() => Task.FromResult(Beside(0.5f))),
+            Dir = 90, Face = 90, SpeedRate = 1
+        });
         var end = await Next(alice, CombatService.SkillEnd, SkillEndNotify.Parser,
             e => e.SrcID == self && e.InterruptedInfo?.Type == SkillInterruptedInfo.Types.SkillInterruptType.Move);
         Assert.Equal(SkillEndNotify.Types.SkillEndType.Interrupted, end.Type);

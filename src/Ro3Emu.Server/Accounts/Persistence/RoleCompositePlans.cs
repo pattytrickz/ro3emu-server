@@ -174,6 +174,22 @@ internal sealed class TowerFirstPassWritePlan : DbPlan
     }
 }
 
+/// <summary>GM repair: removes one floor's first-pass record, only while it is still the record the caller read.</summary>
+internal sealed class TowerFirstPassClearPlan : DbPlan
+{
+    private readonly long _floor;
+    private readonly byte[] _record;
+    internal TowerFirstPassClearPlan(long floor, byte[] record) { _floor = floor; _record = (byte[])record.Clone(); }
+    internal override int Bytes => 128 + _record.Length;
+    internal override string Label => "tower/clear-first-pass";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        using var cmd = DbSql.Command(db, tx, "DELETE FROM tower_first_pass WHERE floor=$floor AND record=$record");
+        cmd.Parameters.AddWithValue("$floor", _floor); cmd.Parameters.AddWithValue("$record", _record);
+        return cmd.ExecuteNonQuery();
+    }
+}
+
 internal sealed class TowerFirstPassReadPlan(long min, long max) : DbReadPlan
 {
     internal override int Bytes => 128;

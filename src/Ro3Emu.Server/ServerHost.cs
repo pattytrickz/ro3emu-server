@@ -19,6 +19,8 @@ public static class ServerHost
             ContentRootPath = AppContext.BaseDirectory,
         });
         var options = Resolve(builder.Configuration, configure);
+        // Fail fast, before any service is built, if an offline restore of this data dir did not finish (C/D 19).
+        DatabaseRestore.ThrowIfUnfinished(options.DataDir);
         // Stage G: the default host on Windows also writes Warning and above to the Windows Event Log, synchronously on
         // the logging thread - the game loop included (a quarter of a walk's cost at 500 players). The console logger
         // queues to a background writer; the metrics provider registered below stays.
@@ -33,6 +35,7 @@ public static class ServerHost
         // First hosted service: everything after it (loop, gates, HTTP) starts with the game data already parsed.
         if (options.PreloadGameData) builder.Services.AddHostedService<Ro3Emu.Server.Data.GameDataPreload>();
         builder.Services.AddSingleton<Diagnostics.ServerMetrics>();
+        builder.Services.AddSingleton<Diagnostics.SessionCensus>();
         builder.Services.AddSingleton<ILoggerProvider, Diagnostics.MetricsLoggerProvider>();
         // Recent log lines for bug reports (FeedbackService); kept out of the pipeline when reports keep no context.
         builder.Services.AddSingleton<Diagnostics.RecentLogBuffer>();
@@ -61,6 +64,7 @@ public static class ServerHost
         builder.Services.AddSingleton<BuffService>();
         builder.Services.AddSingleton<CombatService>();
         builder.Services.AddSingleton<RewardService>();
+        builder.Services.AddSingleton<EventService>();
         builder.Services.AddSingleton<TaskService>();
         builder.Services.AddSingleton<AwardService>();
         builder.Services.AddSingleton<DailyActivityService>();
@@ -85,21 +89,29 @@ public static class ServerHost
         builder.Services.AddSingleton<GatheringService>();
         builder.Services.AddSingleton<GuideService>();
         builder.Services.AddSingleton<EmojiService>();
+        builder.Services.AddSingleton<PersonalService>();
+        builder.Services.AddSingleton<SocialOutfitService>();
         builder.Services.AddSingleton<AchievementService>();
         builder.Services.AddSingleton<TeamService>();
         builder.Services.AddSingleton<MvpService>();
         builder.Services.AddSingleton<CardService>();
+        builder.Services.AddSingleton<CardEffects>();
+        builder.Services.AddSingleton<TalentProcs>();
+        builder.Services.AddSingleton<PassiveSkills>();
+        builder.Services.AddSingleton<RidingEffects>();
         builder.Services.AddSingleton<SeasonService>();
         builder.Services.AddSingleton<SeasonPageService>();
         builder.Services.AddSingleton<SeasonRefineService>();
         builder.Services.AddSingleton<SeasonTalentService>();
         builder.Services.AddSingleton<ShopService>();
+        builder.Services.AddSingleton<ItemBoxService>();
         builder.Services.AddSingleton<MountService>();
         builder.Services.AddSingleton<CareerSpecialService>();
         builder.Services.AddSingleton<WardrobeService>();
         builder.Services.AddSingleton<TotemEffects>();
         builder.Services.AddSingleton<TotemService>();
         builder.Services.AddSingleton<GenreService>();
+        builder.Services.AddSingleton<PowerService>();
         builder.Services.AddSingleton<Game.MailService>();
         builder.Services.AddSingleton<AuctionService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AuctionService>());
@@ -107,6 +119,7 @@ public static class ServerHost
         builder.Services.AddSingleton<TradeService>();
         builder.Services.AddSingleton<StallsService>();
         builder.Services.AddSingleton<GuildService>();
+        builder.Services.AddSingleton<GuildVoiceService>();
         builder.Services.AddSingleton<AdventureGroupStore>();
         builder.Services.AddSingleton<AdventureGroupService>();
         builder.Services.AddSingleton<GuildCaravanService>();
@@ -115,6 +128,8 @@ public static class ServerHost
         builder.Services.AddSingleton<InstanceService>();
         builder.Services.AddSingleton<DungeonCatalog>();
         builder.Services.AddSingleton<DungeonObligationStore>();
+        builder.Services.AddSingleton<PraiseService>();
+        builder.Services.AddSingleton<CasualBattleService>();
         builder.Services.AddSingleton<DungeonService>();
         builder.Services.AddSingleton<TerritoryWarsClock>();
         builder.Services.AddSingleton<TerritoryWarsService>();
@@ -124,6 +139,8 @@ public static class ServerHost
         builder.Services.AddSingleton<TowerService>();
         builder.Services.AddSingleton<ValhallaService>();
         builder.Services.AddSingleton<MonsterHuntService>();
+        builder.Services.AddSingleton<GrowthClassService>();
+        builder.Services.AddSingleton<FirstHeartService>();
         builder.Services.AddSingleton<AppraisalService>();
         builder.Services.AddSingleton<EnchantService>();
         builder.Services.AddSingleton<PetFollowerService>();
@@ -146,6 +163,10 @@ public static class ServerHost
         builder.Services.AddSingleton<SessionRegistry>();
         builder.Services.AddSingleton<GateAuthRegistry>();
         builder.Services.AddSingleton<ReconnectService>();
+        builder.Services.AddSingleton<Voice.VoiceTicketRegistry>();
+        builder.Services.AddSingleton<Voice.VoiceRooms>();
+        // The voice relay PoC only opens a second listener when a port is configured for it.
+        if (options.Voice.Port > 0) builder.Services.AddHostedService<Voice.VoiceGateServer>();
         builder.Services.AddHostedService<DatabaseBackup>();
         builder.Services.AddSingleton<ReceiptCompaction>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ReceiptCompaction>());
@@ -161,6 +182,8 @@ public static class ServerHost
         builder.Services.AddSingleton<Game.Messaging.IMessageModule, SocialMessages>();
         builder.Services.AddSingleton<Game.Messaging.IMessageModule, ActivitiesMessages>();
         builder.Services.AddSingleton<Game.Messaging.IMessageModule, AdventureGroupMessages>();
+        builder.Services.AddSingleton<Game.Messaging.IMessageModule, Voice.VoiceTicketService>();
+        builder.Services.AddSingleton<Game.Messaging.IMessageModule>(sp => sp.GetRequiredService<GuildVoiceService>());
         builder.Services.AddSingleton<GameMessageHandler>();
         builder.Services.AddSingleton(sp => GateCrypto.LoadOrCreate(options.DataDir, sp.GetRequiredService<ILogger<GateCrypto>>()));
         builder.Services.AddSingleton<IMicroService, LoginService>();
@@ -186,6 +209,8 @@ public static class ServerHost
         // Stops before the quiesce: roles waiting for a reconnect are logged out while cleanup is still admitted.
         builder.Services.AddHostedService<ReconnectShutdownService>();
 
+        builder.Services.AddSingleton<CredentialLimiter>();
+
         var app = builder.Build();
         app.Services.GetRequiredService<RealmLock>();
         app.Services.GetRequiredService<Game.Ownership.RoleHandover>()
@@ -204,6 +229,8 @@ public static class ServerHost
             return next();
         });
         app.UseRouting();
+        // Mount energy meters (EnergyConfig._iBelongMount): BuffService cannot take MountService (MountService -> SceneService -> BuffService).
+        app.Services.GetRequiredService<MountService>().Changed.Add(app.Services.GetRequiredService<BuffService>().MountsChangedAsync);
         app.Use(async (context, next) =>
         {
             if (HttpMethods.IsPost(context.Request.Method) && app.Services.GetRequiredService<GameLoop>().Phase != GameLoopPhase.Accepting)
@@ -288,8 +315,9 @@ public static class ServerHost
         });
         // Character deletion for the launcher / website (the client itself has none): POST form identity, credential,
         // role (id or name). A role that is in the world cannot be deleted.
-        app.MapPost("/ro3emu/account/delete-role", async (HttpRequest request, AccountStore accounts, RoleStore roles, SessionRegistry sessions, GameLoop loop, Game.Ownership.OwnerRegistry owners, ILogger<RoleStore> log) =>
+        app.MapPost("/ro3emu/account/delete-role", async (HttpRequest request, CredentialLimiter limiter, AccountStore accounts, RoleStore roles, SessionRegistry sessions, GameLoop loop, Game.Ownership.OwnerRegistry owners, ILogger<RoleStore> log) =>
         {
+            if (!limiter.TryAcquire(request.HttpContext.Connection.RemoteIpAddress)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
             var form = await request.ReadFormAsync();
             string typed = form["identity"].ToString().Trim(), credential = form["credential"].ToString(), which = form["role"].ToString().Trim();
             // Roles are keyed by the account's stored name, whatever letter case the form used.
@@ -315,9 +343,10 @@ public static class ServerHost
                 return Results.Json(new { code = ok ? 0 : 500, message = ok ? $"{current.Name} deleted" : "not deleted" });
             });
         });
-        // Public status for the launcher's online pill: only a count, never account or character names.
-        app.MapGet("/ro3emu/status", (SessionRegistry sessions) =>
-            Results.Json(new { online = true, players = sessions.All().Count(s => s.Role != null) }));
+        // Public status for the launcher's online pill: only a count, never account or character names. Read from the
+        // loop's census, so anyone polling it adds no work to the loop.
+        app.MapGet("/ro3emu/status", (Diagnostics.SessionCensus census) =>
+            Results.Json(new { online = true, players = census.Current.Players }));
         // A clean stop for RO3Emu.exe (loopback only): the same shutdown as Ctrl+C, the loop drains and the database closes.
         app.MapPost("/ro3emu/shutdown", (HttpContext context, IHostApplicationLifetime lifetime) =>
         {
@@ -325,11 +354,11 @@ public static class ServerHost
             lifetime.StopApplication();
             return Results.Ok("stopping");
         });
-        // Who is online, for the admin (loopback only).
-        app.MapGet("/ro3emu/online", (HttpContext context, SessionRegistry sessions) =>
+        // Who is online, for the admin (loopback only): read on the loop, where the sessions change.
+        app.MapGet("/ro3emu/online", async (HttpContext context, SessionRegistry sessions, GameLoop loop) =>
         {
             if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
-            return Results.Json(sessions.All().Select(s => new
+            var online = await loop.InvokeAsync(() => Task.FromResult(sessions.All().Select(s => new
             {
                 account = s.Account,
                 role = s.Role?.Name,
@@ -337,7 +366,8 @@ public static class ServerHost
                 x = s.Position.X,
                 z = s.Position.Z,
                 remote = s.Channel.Remote,
-            }));
+            }).ToArray()));
+            return Results.Json(online);
         });
         app.MapFallback((HttpContext context) =>
         {
@@ -352,7 +382,10 @@ public static class ServerHost
         app.Services.GetRequiredService<TimedEventService>();
         app.Services.GetRequiredService<PronteraDefenseService>();
         var timedBattles = app.Services.GetRequiredService<TimedBattleService>();
-        app.Services.GetRequiredService<CombatService>().SetEventPvPHandlers(timedBattles.CanFight, timedBattles.PlayerKilledAsync);
+        var casual = app.Services.GetRequiredService<CasualBattleService>();
+        app.Services.GetRequiredService<CombatService>().SetEventPvPHandlers(
+            (a, b) => timedBattles.CanFight(a, b) || casual.CanFight(a, b),
+            async (killer, victim) => { await timedBattles.PlayerKilledAsync(killer, victim); await casual.PlayerKilledAsync(killer, victim); });
         app.Services.GetRequiredService<FestivalService>();
         app.Services.GetRequiredService<TrainingService>();
         app.Services.GetRequiredService<GuildHomeService>();
@@ -383,7 +416,28 @@ public static class ServerHost
         // A committed dungeon clear counts toward quest target 101018 (story steps such as Payon Forest, the airship).
         var questTasks = app.Services.GetRequiredService<TaskService>();
         app.Services.GetRequiredService<DungeonService>().Completed.Add((s, scene, _) => questTasks.OnDungeonClearedAsync(s, scene));
+        app.Services.GetRequiredService<TotemService>().Combined.Add(questTasks.OnTotemCombined); // target 315004
+        // Participation and state targets (TaskService.ParticipationTargets.cs).
+        app.Services.GetRequiredService<DungeonService>().MultiBossCleared.Add(questTasks.OnTenBossClearedAsync); // 106602
+        app.Services.GetRequiredService<GuildChallengeService>().Participated.Add(questTasks.OnGveJoined); // 103014
+        league.MatchCommitted.Add(questTasks.OnGuildLeagueMatch); // 106603, 106019
+        territory.SiegeSettled.Add(questTasks.OnSiegeSettled); // 106611, 106605, 106606
+        app.Services.GetRequiredService<EmblemService>().Upgraded.Add(questTasks.OnEchoUpgraded); // 317002
+        app.Services.GetRequiredService<TowerService>().Settled.Add(questTasks.OnTowerSettled); // 101007, 101010
+        app.Services.GetRequiredService<PersonalService>().Upvoted.Add(questTasks.OnProfileLiked); // 106902
+        app.Services.GetRequiredService<GuildCampfireService>().Joined.Add(questTasks.OnCampfireJoined); // 106018
+        app.Services.GetRequiredService<GuildService>().MembershipChanged.Add(questTasks.OnStateChanged); // 104007
+        app.Services.GetRequiredService<GuildService>().MembershipChanged.Add(app.Services.GetRequiredService<GuildVoiceService>().OnMembershipChanged);
+        app.Services.GetRequiredService<GuildService>().RightsChanged.Add(app.Services.GetRequiredService<GuildVoiceService>().OnRightsChanged);
+        var social = app.Services.GetRequiredService<Micro.SocialOwnerCache>();
+        questTasks.LoadFriendCount = async s => s.Role is { } role
+            ? (await social.LoadSocialAsync([role.Id])).GetValueOrDefault(role.Id)?.Friends.LongLength : null; // 103019
+        app.Services.GetRequiredService<Micro.FriendService>().RelationChanged.Add(questTasks.OnRelationChanged);
         app.Services.GetRequiredService<ReconnectService>(); // hooks the handover and registers !netdrop
+        app.Services.GetRequiredService<CardEffects>(); // socketed-card passives and procs (sockets, scene loads, hits)
+        app.Services.GetRequiredService<TalentProcs>(); // profession talent procs (cast resolutions)
+        app.Services.GetRequiredService<PassiveSkills>(); // learned passives' procs, shields and reactions
+        app.Services.GetRequiredService<RidingEffects>(); // a ridden mount's buffs and the riding passives
         // Create the key before the first client connects, so ClientPatch can read the public half.
         app.Services.GetRequiredService<GateCrypto>();
         app.Logger.LogInformation("Data dir {DataDir}", options.DataDir);
@@ -487,11 +541,14 @@ internal sealed class GameLoopTickers(IServiceProvider services) : IHostedServic
         Add<CombatService>();
         Add<SeasonService>();
         Add<MountService>();
+        Add<RidingEffects>();
+        Add<PassiveSkills>();
         Add<TeamService>();
         Add<DailyActivityService>();
         Add<TimedEventService>();
         Add<PronteraDefenseService>();
         Add<TimedBattleService>();
+        Add<CasualBattleService>();
         Add<FestivalService>();
         Add<TrainingService>();
         Add<GuildHomeService>();
@@ -508,12 +565,20 @@ internal sealed class GameLoopTickers(IServiceProvider services) : IHostedServic
         Add<GuildLeagueService>();
         Add<WorldCoreService>();
         Add<EmojiService>();
+        Add<EventService>();
         Add<AchievementService>();
+        Add<FirstHeartService>();
         Add<DungeonMatchService>();
         Add<GatheringService>();
         Add<TotemEffects>();
         Add<Game.Persistence.PositionPersistence>();
         Add<Game.Persistence.SettingsPersistence>();
+        Add<Diagnostics.SessionCensus>();
+        Add<ShopService>(); // 05:00 purchase-limit rollover
+        Add<ItemBoxService>(); // award boxes; 05:00 item use-time rollover
+        Add<PowerService>(); // throttled 31502/31503 republish of changed power
+        Add<Voice.VoiceRooms>(); // VAD silence timeout every tick, team-membership sweep every second
+        Add<GuildVoiceService>(); // guild voice channels: drops the offline and those no longer in the guild, every second
         return Task.CompletedTask;
     }
 

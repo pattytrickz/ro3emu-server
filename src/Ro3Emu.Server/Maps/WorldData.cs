@@ -112,14 +112,14 @@ public sealed class MapWorld
             MapPoint? best = null;
             float bestDistance = float.MaxValue;
             for (int dx = -r; dx <= r; dx++)
-            for (int dz = -r; dz <= r; dz++)
-            {
-                if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != r) continue;
-                float x = cx + dx + 0.5f, z = cz + dz + 0.5f;
-                if (nav.WalkHeight(x, z, p.Y) is not { } y) continue;
-                float distance = (x - p.X) * (x - p.X) + (z - p.Z) * (z - p.Z) + (y - p.Y) * (y - p.Y);
-                if (distance < bestDistance) { bestDistance = distance; best = p with { X = x, Y = y, Z = z }; }
-            }
+                for (int dz = -r; dz <= r; dz++)
+                {
+                    if (Math.Max(Math.Abs(dx), Math.Abs(dz)) != r) continue;
+                    float x = cx + dx + 0.5f, z = cz + dz + 0.5f;
+                    if (nav.WalkHeight(x, z, p.Y) is not { } y) continue;
+                    float distance = (x - p.X) * (x - p.X) + (z - p.Z) * (z - p.Z) + (y - p.Y) * (y - p.Y);
+                    if (distance < bestDistance) { bestDistance = distance; best = p with { X = x, Y = y, Z = z }; }
+                }
             if (best is { } found) return found;
         }
         return p;
@@ -281,8 +281,11 @@ public sealed partial class WorldData(IOptions<ServerOptions> options, GameData 
         var spawnGroups = LoadSpawnGroups(se);
         log.LogInformation("Map {Scene} {Name}: {Npcs} NPC/portal/Kafra, {Groups} spawn groups, born {Born}, nav {W}x{H}",
             sceneEntry, data.MapName(sceneEntry), npcs.Count, spawnGroups.Count, born, map.Nav?.Width, map.Nav?.Height);
-        return new MapWorld { SceneEntry = sceneEntry, Born = born, Revive = revive, Npcs = npcs, Points = points, Nav = map.Nav, SpawnGroups = spawnGroups,
-            GatheringPoints = LoadGatheringPoints(se, sceneEntry), DungeonGroups = LoadDungeonGroups(se), Regions = LoadRegions(se) };
+        return new MapWorld
+        {
+            SceneEntry = sceneEntry, Born = born, Revive = revive, Npcs = npcs, Points = points, Nav = map.Nav, SpawnGroups = spawnGroups,
+            GatheringPoints = LoadGatheringPoints(se, sceneEntry), DungeonGroups = LoadDungeonGroups(se), Regions = LoadRegions(se)
+        };
     }
 
     /// <summary>An NPC more than this far below the walkable floor is drawn inside the ground.</summary>

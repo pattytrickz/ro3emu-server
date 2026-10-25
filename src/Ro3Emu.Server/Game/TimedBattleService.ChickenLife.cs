@@ -153,17 +153,17 @@ public sealed partial class TimedBattleService
     {
         var me = run.Players[player];
         // A death still being published (or another revive) holds the claim: the tick retries a second later.
-        if (!combat.TryClaimRevive(player)) { me.RelifeUntilMs = NowMs() + 1000; return; }
+        if (!_combat.TryClaimRevive(player)) { me.RelifeUntilMs = NowMs() + 1000; return; }
         me.RelifeUntilMs = 0;
         try
         {
-            if (!combat.CommitReviveClaim(player)) return;
+            if (!_combat.CommitReviveClaim(player)) return;
             me.State = RoundRoleStatus.InWar;
             me.Revived++;
             match.Fallen.Remove(player);
-            await combat.PublishReviveAsync(player, WalkablePoint(x, z));
+            await _combat.PublishReviveAsync(player, WalkablePoint(x, z));
         }
-        finally { combat.ReleaseReviveClaim(player); }
+        finally { _combat.ReleaseReviveClaim(player); }
         await player.SendGameAsync(RelifeNotify, new ChickenRelifeNotify { RelifeEndTime = 0 });
         await SyncTeamAsync(match, match.Faction[player]);
         await BroadcastHudAsync(match);
@@ -261,10 +261,11 @@ public sealed partial class TimedBattleService
     public Task RelifeOtherAsync(GameSession session, ChickenRelifeOtherReq _) =>
         session.SendGameAsync(RelifeOther, new ChickenRelifeOtherResp { Result = ErrorCodes.FeatureUnavailable });
 
-    /// <summary>31013 inside the match: the generic revive is not this mode's (revival is 82661 after 82663).</summary>
+    /// <summary>31013 inside the match: the generic revive is not this mode's (revival is 82661 after 82663). A Rift
+    /// fight is NoRevive (TimedBattleService.OnePiece): no self-revive there either.</summary>
     public async Task<bool> TryRefuseReliveAsync(GameSession session)
     {
-        if (Chicken(session) == null) return false;
+        if (Chicken(session) == null && !InRiftFight(session)) return false;
         await session.SendGameAsync(CombatService.Relive, new EntityReliveAck
         { Result = ErrorCodes.SkillReviveNotAllowed, EntityID = (ulong)(session.Role?.Id ?? 0) });
         return true;
@@ -306,7 +307,7 @@ public sealed partial class TimedBattleService
 
     // ---- end ----
 
-    private void PostEndCheck(Match match) => loop.PostRuntime(async () =>
+    private void PostEndCheck(Match match) => _loop.PostRuntime(async () =>
     {
         if (!match.Settled && match.Chicken is { Stage: StageStartGame } && RemainingFactions(match).Count <= 1)
             await SettleMatchAsync(match);
@@ -340,7 +341,7 @@ public sealed partial class TimedBattleService
         if (player.Role != null && player.Progress != null)
         {
             player.CurrentHp = null; player.CurrentSp = null;
-            character.Refresh(player);
+            _character.Refresh(player);
         }
     }
 

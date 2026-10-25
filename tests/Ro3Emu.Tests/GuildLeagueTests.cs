@@ -6,6 +6,7 @@ using Romsg;
 using Ro3Emu.Bot;
 using Ro3Emu.Server;
 using Ro3Emu.Server.Accounts;
+using Ro3Emu.Server.Data;
 using Ro3Emu.Server.Game;
 using Ro3Emu.Server.Maps;
 
@@ -15,24 +16,24 @@ namespace Ro3Emu.Tests;
 /// Guild League (GuildLeagueService): the server-owned calendar (opening weeks from DailyActivityCustomConfig, then the two-week cycle), registration, 30410-30412, a match on
 /// the Main/Sub battlefields with 30415/30433/30110/30414 and the settlement.
 /// </summary>
-public sealed class GuildLeagueTests : IAsyncLifetime
+public sealed partial class GuildLeagueTests : IAsyncLifetime
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(15);
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-league-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-league-" + Guid.NewGuid().ToString("N"));
     // Members join in real time (GuildService.EnterTime) and stop being temporary after an hour: the realm opens on a
     // Monday more than a week ahead of today.
-    private readonly DateTime opening = FutureMonday();
-    private readonly Clock clock = new();
-    private WebApplication app = null!;
-    private string http = "";
+    private readonly DateTime _opening = FutureMonday();
+    private readonly Clock _clock = new();
+    private WebApplication _app = null!;
+    private string _http = "";
 
     private sealed class Clock : TimeProvider
     {
-        private long seconds;
-        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref seconds));
+        private long _seconds;
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeSeconds(Interlocked.Read(ref _seconds));
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Local;
-        public void Set(long value) => Interlocked.Exchange(ref seconds, value);
-        public long Now => Interlocked.Read(ref seconds);
+        public void Set(long value) => Interlocked.Exchange(ref _seconds, value);
+        public long Now => Interlocked.Read(ref _seconds);
     }
 
     private static DateTime FutureMonday()
@@ -45,40 +46,40 @@ public sealed class GuildLeagueTests : IAsyncLifetime
     /// <summary>Unix seconds of a local time in opening week <paramref name="week"/> (1-based), weekday 1 = Monday.</summary>
     private long At(int week, int weekday, int hour, int minute, int second = 0)
     {
-        var local = opening.AddDays((week - 1) * 7 + weekday - 1).AddHours(hour).AddMinutes(minute).AddSeconds(second);
+        var local = _opening.AddDays((week - 1) * 7 + weekday - 1).AddHours(hour).AddMinutes(minute).AddSeconds(second);
         return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToUnixTimeSeconds();
     }
 
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
     private Task<T> Read<T>(Func<T> read) => Service<GameLoop>().InvokeAsync(() => Task.FromResult(read()));
     private Task OnLoop(Func<Task> action) => Service<GameLoop>().InvokeAsync(action);
     private GuildLeagueService League => Service<GuildLeagueService>();
 
     public async Task InitializeAsync()
     {
-        clock.Set(At(1, 1, 10, 0));
+        _clock.Set(At(1, 1, 10, 0));
         var (web, micro, gate) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(ClientData.RepoRoot, "data");
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(ClientData.RepoRoot, "data");
             o.HttpPort = web; o.MicroGatePort = micro; o.GameGatePort = gate;
-            o.SeasonStart = opening.ToString("yyyy-MM-dd"); o.GuildLeagueMinMembers = 2;
-        }, clock);
-        SureHitRolls.Install(app);
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{web}";
+            o.SeasonStart = _opening.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture); o.GuildLeagueMinMembers = 2;
+        }, _clock);
+        SureHitRolls.Install(_app);
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{web}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync(); await app.DisposeAsync();
+        await _app.StopAsync(); await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw"); await bot.EnterGateAsync();
         await bot.EnterWorldAsync((await bot.CreateRoleAsync(name)).RoleBaseInfo.Id);
         return bot;
@@ -94,7 +95,7 @@ public sealed class GuildLeagueTests : IAsyncLifetime
     private async Task Gm(BotClient bot, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
 
     private GameSession Session(BotClient bot) => Service<SessionRegistry>().All().Single(s => s.Account == bot.Account && s.Role != null);
@@ -108,20 +109,23 @@ public sealed class GuildLeagueTests : IAsyncLifetime
     /// <summary>Move the clock and wait until the league's per-second work for that second has run.</summary>
     private async Task Go(long at)
     {
-        clock.Set(at);
+        _clock.Set(at);
         await Until(() => Read(() => League.Idle(at)), "the league sweep at " + at);
     }
 
     private async Task Step(int seconds)
     {
-        for (int i = 0; i < seconds; i++) await Go(clock.Now + 1);
+        for (int i = 0; i < seconds; i++) await Go(_clock.Now + 1);
     }
 
     private async Task<long> Guild(string name, BotClient leader, BotClient member)
     {
         foreach (var b in new[] { leader, member }) await Gm(b, "!lvl 60");
-        await leader.SendGameAsync(GuildService.Create, new GuildCreateReq { Name = name,
-            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 } });
+        await leader.SendGameAsync(GuildService.Create, new GuildCreateReq
+        {
+            Name = name,
+            Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 }
+        });
         Assert.Equal(0, (await Next(leader, GuildService.Create, GuildCreateResp.Parser)).Result);
         long guild = (await Next(leader, GuildService.Full, GuildFullInfoNtf.Parser, n => n.Guid > 0)).Guid;
         await leader.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)6, AutoAcceptApply = true });
@@ -176,10 +180,17 @@ public sealed class GuildLeagueTests : IAsyncLifetime
         Assert.Equal((At(3, 3, 5, 0), At(3, 3, 20, 0), At(3, 6, 20, 0), At(4, 6, 20, 0), At(4, 6, 20, 30)),
             (tournaments[1].Init, tournaments[1].Preliminary.Start, tournaments[1].Semifinal.Start, tournaments[1].Final.Start,
              tournaments[1].Final.End));
-        // Then _kDay 1/3/6/13 every two weeks: Monday 05:03, Wednesday, Saturday, Saturday of the next week.
-        Assert.Equal((3, At(5, 1, 5, 3), At(5, 3, 20, 30), At(5, 6, 20, 30), At(6, 6, 20, 30)),
+        // Then every two weeks from week 5 on the rows' own first _kDay and start (13 is Saturday of the next week).
+        long Steady(int week, int id)
+        {
+            var row = Service<GameData>().Row("DailyActivityConfig", id)!.Value;
+            int day = (int)GameData.Number(row.GetProperty("_kDay")[0])!.Value;
+            int start = (int)GameData.Number(row.GetProperty("_kTime")[0])!.Value;
+            return At(week, day, start / 100, start % 100);
+        }
+        Assert.Equal((3, Steady(5, 129), Steady(5, 109), Steady(5, 110), Steady(5, 111)),
             (tournaments[2].Index, tournaments[2].Init, tournaments[2].Preliminary.Start, tournaments[2].Semifinal.Start, tournaments[2].Final.Start));
-        Assert.Equal(At(7, 1, 5, 3), tournaments[3].Init);
+        Assert.Equal(Steady(7, 129), tournaments[3].Init);
 
         var info = calendar.Info(At(1, 1, 12, 0));
         Assert.Equal((GuildLeagueStatus.NotOpen, false, At(1, 3, 20, 30)), (info.EStatus, info.Open, info.NextPreliminaryTime));
@@ -235,6 +246,9 @@ public sealed class GuildLeagueTests : IAsyncLifetime
 
         // The final: both guilds meet. Blue is the guild of the first semifinal (the client's FightThree pairing).
         await Go(At(1, 6, 20, 30, 5));
+        // Quest targets of a fought match (TaskService.OnGuildLeagueMatch): 106603 [stage, n] and 106019 [stage, points, n].
+        foreach (var (account, task) in new[] { ("alice", 706050L), ("alice", 500042L), ("alice", 1602030L), ("bob", 706050L), ("bob", 1602030L) })
+            await QuestProbe.AcceptAsync(_app, _http, account, task);
         var open = await MgrData(alice);
         Assert.Equal((GuildLeagueStatus.FightThree, true), (open.ActivityInfo.EStatus, open.ActivityInfo.Open));
         var cup = await Read(() => League.State.Cup!);
@@ -311,6 +325,13 @@ public sealed class GuildLeagueTests : IAsyncLifetime
         Assert.Equal(blue == astra ? 0 : 1, result.History.ResultInfo.Result);
         Assert.Equal(new[] { League.MainScene, League.SubScene }.Order(), result.History.DungeonRolesInfo.Keys.Order());
         await Next(bob, GuildLeagueService.ResultNotify, GuildLeagueDungeonResultNtf.Parser);
+        // The byes of rounds 1 and 2 were no match; the final is one for both fighters. 1602030 asks for more than
+        // 20 personal points in the finals: Alice scored, Bob (Sub-Battlefield, no kill or capture) did not.
+        await QuestProbe.DoneAsync(_app, "alice", 706050);
+        await QuestProbe.WaitAsync(_app, "alice", 500042, i => i.Status == TaskState.Delivery, "delivered");
+        await QuestProbe.DoneAsync(_app, "alice", 1602030); // delivery waits on its action 115
+        await QuestProbe.DoneAsync(_app, "bob", 706050);
+        Assert.Equal(0, (await QuestProbe.ReadAsync(_app, "bob", 1602030))!.CompleteNum[0]);
         await Until(() => Read(() => League.State.Cup!.Settled), "the tournament settlement");
 
         await alice.SendGameAsync(GuildLeagueService.Info, new GetGuildLeagueInfoReq());

@@ -13,15 +13,13 @@ public sealed partial class CharacterService
 {
     // ---- level, exp, stat points ----
 
-    public int MaxLevel => data.Table("BaseLvConfig").Values.Where(r => GameData.Int(r, "_iBaseExp") == 0).Select(r => (int)GameData.Int(r, "_iID")).DefaultIfEmpty(100).Min();
-
     private int MaxJobLevel(int career) => (int)(JobLvRow(career, 1) is { } row ? GameData.Int(row, "_iMaxJobLv") : 10);
 
     private int JobRank(int career) => (int)(data.Row("JobConfig", career) is { } job ? Math.Max(1, GameData.Int(job, "_iJobRank")) : 1);
 
     private JsonElement? JobLvRow(int career, int jobLevel) => data.Row("JobLvConfig", JobRank(career) * 100L + jobLevel);
 
-    private long BaseExpNeed(int level) => data.Row("BaseLvConfig", level) is { } row ? GameData.Int(row, "_iBaseExp") : 0;
+    internal long BaseExpNeed(int level) => data.Row("BaseLvConfig", level) is { } row ? GameData.Int(row, "_iBaseExp") : 0;
 
     private long JobExpNeed(int career, int jobLevel) => JobLvRow(career, jobLevel) is { } row ? GameData.Int(row, "_iJobeExp") : 0;
 
@@ -79,8 +77,10 @@ public sealed partial class CharacterService
         if (stillOwner?.Invoke() == false) return string.Empty;
         var p = session.Progress!;
         int oldLevel = p.Level, oldJob = p.JobLevel;
+        // BaseExpAddConfig catch-up bonus below the server level (CharacterService.LevelRules).
+        baseExp = WithPursueBonus(p.Level, Math.Max(0, baseExp));
         var staged = CloneProgress(p);
-        ApplyExp(staged, Math.Max(0, baseExp), Math.Max(0, jobExp));
+        ApplyExp(staged, baseExp, Math.Max(0, jobExp));
         var builder = roles.NewTransaction();
         builder.ItemDelta(session.Role!.Id, session.Items, session.Items);
         builder.Progress(session.Role!.Id, staged);

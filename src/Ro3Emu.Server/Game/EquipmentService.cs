@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
@@ -24,23 +25,25 @@ public sealed partial class EquipmentService
     public List<Func<GameSession, int, int, int, Task>> Crafted { get; } = new();
     public List<Func<GameSession, Task>> Refined { get; } = new();
 
-    private readonly GameData data;
-    private readonly CharacterService character;
-    private readonly FunctionService functions;
-    private readonly ItemStore items;
-    private readonly RoleStore roles;
-    private readonly ILogger<EquipmentService> log;
+    private readonly GameData _data;
+    private readonly CharacterService _character;
+    private readonly FunctionService _functions;
+    private readonly ItemStore _items;
+    private readonly RoleStore _roles;
+    private readonly ILogger<EquipmentService> _log;
     // A test can fix each ten-thousandth roll without changing the production probability.
     internal Func<int, int> RefineRoll { get; set; } = bound => Random.Shared.Next(bound);
+    // Likewise for the craft quality draw (a roll in [0, total weight)).
+    internal Func<long, long> CraftRoll { get; set; } = bound => Random.Shared.NextInt64(bound);
 
     public EquipmentService(GameData data, CharacterService character, FunctionService functions, ItemStore items, RoleStore roles, ILogger<EquipmentService> log)
     {
-        this.data = data;
-        this.character = character;
-        this.functions = functions;
-        this.items = items;
-        this.roles = roles;
-        this.log = log;
+        this._data = data;
+        this._character = character;
+        this._functions = functions;
+        this._items = items;
+        this._roles = roles;
+        this._log = log;
         character.AutoDecomposeReturns = AutoReturns;
     }
 
@@ -57,7 +60,7 @@ public sealed partial class EquipmentService
         Fail? error = null;
         for (int next = level + 1; next <= level + steps && error == null; next++)
         {
-            if (character.StrengthenRow(grid, next) is not { } row) error = new(ErrorCodes.StrengthenParameter, $"no level {next}");
+            if (_character.StrengthenRow(grid, next) is not { } row) error = new(ErrorCodes.StrengthenParameter, $"no level {next}");
             else if (GameData.Int(row, "_iLev") > session.Progress!.Level) error = new(ErrorCodes.StrengthenParameter, $"level {next} needs base {GameData.Int(row, "_iLev")}");
             else cost.AddRange(Pairs(row, "_kDeplete"));
         }
@@ -65,23 +68,23 @@ public sealed partial class EquipmentService
         {
             var next = CopyLevels(levels);
             next.Strength[grid] = level + steps;
-            if (await character.ExchangeLockedAsync(session, cost, [], popup: false, sync: false,
+            if (await _character.ExchangeLockedAsync(session, cost, [], popup: false, sync: false,
                 persist: tx =>
                 {
                     tx.RoleBlob(session.Role!.Id, "equip_levels", JsonSerializer.SerializeToUtf8Bytes(next));
-                    tx.WithEconomy(character.FamilyEconomy(session, "cd13a/equipment-strengthen", cost, [],
+                    tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/equipment-strengthen", cost, [],
                         new { Grid = grid, Before = level, After = level + steps, Steps = steps }));
                 }, committed: () => session.EquipLevels = next) == null)
                 error = new(ErrorCodes.StrengthenMaterials, "payment short");
         }
-        log.LogInformation("{Name} strengthens grid {Grid} +{Steps} from {Level}: {Result}", session.Role!.Name, grid, steps, level, error?.Why ?? "ok");
+        _log.LogInformation("{Name} strengthens grid {Grid} +{Steps} from {Level}: {Result}", session.Role!.Name, grid, steps, level, error?.Why ?? "ok");
         if (error == null) level += steps;
         // The reply before 5007: the client keeps the level the reply carries and judges success against the old one.
         await session.SendGameAsync(Strengthen, new StrengthenEquipmentRsp
         {
             // The level travels on failure too: the handler's nil fallback reads a wrong table (spec §3).
             Result = error?.Code ?? 0, EquipPos = req.EquipPos, StrengthenLv = level,
-            StrengthenEffectLv = character.Resonance(session, "StrengthenEffectTable"),
+            StrengthenEffectLv = _character.Resonance(session, "StrengthenEffectTable"),
         });
         await AfterUpgradeAsync(session, error == null);
     }
@@ -102,7 +105,7 @@ public sealed partial class EquipmentService
             int grid = (int)req.EquipPos;
             var levels = session.EquipLevels;
             int level = levels.Refine.GetValueOrDefault(grid), luck = levels.Luck.GetValueOrDefault(grid);
-            var row = character.RefineRow(grid, level + 1);
+            var row = _character.RefineRow(grid, level + 1);
             Fail? error = row == null ? new(ErrorCodes.RefineParameter, "max level") : GameData.Int(row.Value, "_iLev") > session.Progress!.Level ? new(ErrorCodes.RefineParameter, "base level") : null;
             bool protect = false;
             long bonus = 0;
@@ -133,7 +136,7 @@ public sealed partial class EquipmentService
                     nextLevels.Refine[grid] = level + 1;
                     nextLevels.Luck.Remove(grid);
                 }
-                else if (!(level == 0 || character.RefineRow(grid, level) is { } current && GameData.Int(current, "_iSafeLev") != 0))
+                else if (!(level == 0 || _character.RefineRow(grid, level) is { } current && GameData.Int(current, "_iSafeLev") != 0))
                 {
                     // The client's own rules (Localization 精炼规则): failure may drop one level and grants luck; at a safe
                     // level (the current level's row has _iSafeLev) it does neither; Blessed / Legend Ore prevent the drop.
@@ -145,23 +148,26 @@ public sealed partial class EquipmentService
                         if (demoteRoll < GameData.Int(row.Value, "_iDemote")) nextLevels.Refine[grid] = level - 1;
                     }
                 }
-                if (await character.ExchangeLockedAsync(session, cost, [], popup: false, sync: false,
+                if (await _character.ExchangeLockedAsync(session, cost, [], popup: false, sync: false,
                     persist: tx =>
                     {
                         tx.RoleBlob(session.Role!.Id, "equip_levels", JsonSerializer.SerializeToUtf8Bytes(nextLevels));
-                        tx.WithEconomy(character.FamilyEconomy(session, "cd13a/equipment-refine", cost, [],
-                            new { Grid = grid, Before = level, BeforeLuck = luck, After = nextLevels.Refine.GetValueOrDefault(grid),
+                        tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/equipment-refine", cost, [],
+                            new
+                            {
+                                Grid = grid, Before = level, BeforeLuck = luck, After = nextLevels.Refine.GetValueOrDefault(grid),
                                 AfterLuck = nextLevels.Luck.GetValueOrDefault(grid), Success = success, SuccessRoll = successRoll,
-                                DemoteRoll = demoteRoll, Protect = protect, Bonus = bonus }));
+                                DemoteRoll = demoteRoll, Protect = protect, Bonus = bonus
+                            }));
                     }, committed: () => session.EquipLevels = nextLevels) == null)
                     error = new(ErrorCodes.RefineMaterials, "payment short");
             }
             levels = session.EquipLevels;
-            log.LogInformation("{Name} refines grid {Grid} +{Level}: {Result}", session.Role!.Name, grid, level, error?.Why ?? (success ? "success" : $"failed, now +{levels.Refine.GetValueOrDefault(grid)}"));
+            _log.LogInformation("{Name} refines grid {Grid} +{Level}: {Result}", session.Role!.Name, grid, level, error?.Why ?? (success ? "success" : $"failed, now +{levels.Refine.GetValueOrDefault(grid)}"));
             await session.SendGameAsync(Refine, new RefineEquipmentRsp
             {
                 Result = error?.Code ?? 0, EquipPos = req.EquipPos, RefineLv = levels.Refine.GetValueOrDefault(grid),
-                RefineEffectLv = character.Resonance(session, "RefiningEffectTable"), RefineLuckyAdd = levels.Luck.GetValueOrDefault(grid),
+                RefineEffectLv = _character.Resonance(session, "RefiningEffectTable"), RefineLuckyAdd = levels.Luck.GetValueOrDefault(grid),
             });
             await AfterUpgradeAsync(session, error == null);
             paid = error == null;
@@ -180,8 +186,8 @@ public sealed partial class EquipmentService
     private async Task AfterUpgradeAsync(GameSession session, bool paid)
     {
         if (!paid) return;
-        await character.ItemsChangedAsync(session, stats: false);
-        await character.EquipLevelsChangedAsync(session, persist: false);
+        await _character.ItemsChangedAsync(session, stats: false);
+        await _character.EquipLevelsChangedAsync(session, persist: false);
     }
 
     private static EquipLevels CopyLevels(EquipLevels source) => new()
@@ -191,10 +197,19 @@ public sealed partial class EquipmentService
 
     // ---- craft ----
 
+    private const int QualityOrange = 5, QualityRed = 6;
+
     /// <summary>
     /// 31409: EquipCraftConfig[rank, subtype] pays _kCost and makes one of _kQualityEquipID, drawn by
-    /// EquipCraftQualityConfig._iWeight of the rank (the orange/red guarantee counters are not applied: their update
-    /// rule is not recovered). World-level availability (_iCondition) is not gated: no world level yet.
+    /// EquipCraftQualityConfig._iWeight of the rank. World-level availability (_iCondition) is not gated: no world level
+    /// yet. Quality pity: every row carries _iOrangeGuarantee (11) and _iRedGuarantee (300), and DBEquipInfo keeps the
+    /// counters (craftInfo: DBEquipCraftInfo rank, equipType, orangeGuarantee, redGuarantee, craftCount; CraftRankCount)
+    /// in 5007; no client Lua reads them. (inferred) craftInfo is keyed by the EquipCraftConfig row id and
+    /// CraftRankCount by rank; a counter counts the crafts since its guarantee last applied, and the craft that
+    /// reaches the threshold is drawn only from the recipe's outputs of at least that quality (orange 5, red 6),
+    /// by their weights, or evenly when they all weigh 0 at the rank. Any result of at least orange resets the orange
+    /// counter and any red result resets the red one, whether drawn naturally or forced (the usual pity semantics; a red
+    /// result is also orange-or-better). A recipe without such an output does not count toward it.
     /// </summary>
     public async Task CraftAsync(GameSession session, EquipCraftReq req)
     {
@@ -203,40 +218,77 @@ public sealed partial class EquipmentService
         InvItem? made;
         using (await CharacterService.Lock(session))
         {
-            var recipe = data.Table("EquipCraftConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iRank") == req.Rank && GameData.Int(r, "_iEquipType") == req.Subtype);
+            var recipe = _data.Table("EquipCraftConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iRank") == req.Rank && GameData.Int(r, "_iEquipType") == req.Subtype);
             Fail? error = recipe.ValueKind != JsonValueKind.Object ? new(ErrorCodes.CraftParameter, "no recipe")
-                : !functions.IsOpen(session, FunctionCraft) ? new(ErrorCodes.FeatureUnavailable, "craft closed") : null;
+                : !_functions.IsOpen(session, FunctionCraft) ? new(ErrorCodes.FeatureUnavailable, "craft closed") : null;
             made = null;
             if (error == null)
             {
-                var outputs = Pairs(recipe, "_kQualityEquipID")
-                    .Select(o => (Entry: (int)o.Count, Weight: WeightOf(req.Rank, o.Entry))) // [quality, item]
-                    .Where(o => o.Weight > 0).ToList();
-                int entry = Draw(outputs);
+                var outputs = Pairs(recipe, "_kQualityEquipID") // [quality, item]
+                    .Select(o => (Quality: o.Entry, Entry: (int)o.Count, Weight: WeightOf(req.Rank, o.Entry))).ToList();
+                int recipeId = (int)GameData.Int(recipe, "_iID");
+                var counter = session.EquipmentPlans.CraftInfo.TryGetValue(recipeId, out var held) ? held.Clone()
+                    : new DBEquipCraftInfo { Rank = req.Rank, EquipType = req.Subtype };
+                long orangeAt = GameData.Int(recipe, "_iOrangeGuarantee"), redAt = GameData.Int(recipe, "_iRedGuarantee");
+                bool canOrange = orangeAt > 0 && outputs.Any(o => o.Quality >= QualityOrange);
+                bool canRed = redAt > 0 && outputs.Any(o => o.Quality >= QualityRed);
+                bool redDue = canRed && counter.RedGuarantee + 1 >= redAt;
+                bool orangeDue = canOrange && counter.OrangeGuarantee + 1 >= orangeAt;
+                int floor = redDue ? QualityRed : orangeDue ? QualityOrange : 0;
+                var pool = outputs.Where(o => o.Quality >= floor).ToList();
+                var weighted = pool.Where(o => o.Weight > 0).Select(o => (o.Entry, o.Weight)).ToList();
+                if (weighted.Count == 0 && floor > 0) weighted = pool.Select(o => (o.Entry, Weight: 1L)).ToList();
+                int entry = Draw(weighted);
+                long quality = outputs.FirstOrDefault(o => o.Entry == entry).Quality;
+                counter.CraftCount++;
+                if (canRed) counter.RedGuarantee = quality >= QualityRed ? 0 : counter.RedGuarantee + 1;
+                if (canOrange) counter.OrangeGuarantee = quality >= QualityOrange ? 0 : counter.OrangeGuarantee + 1;
+                var next = session.EquipmentPlans.Clone();
+                ApplyCraftCounter(next, recipeId, counter);
                 if (entry == 0) error = new(ErrorCodes.CraftParameter, "no output");
-                else if (await character.ExchangeLockedAsync(session, Pairs(recipe, "_kCost"), [(entry, 1)], popup: false,
-                    persist: tx => tx.WithEconomy(character.FamilyEconomy(session, "cd13a/equipment-craft",
-                        Pairs(recipe, "_kCost"), [(entry, 1)], new { req.Rank, req.Subtype, Entry = entry })))
+                else if (await _character.ExchangeLockedAsync(session, Pairs(recipe, "_kCost"), [(entry, 1)], popup: false,
+                    persist: tx =>
+                    {
+                        tx.RoleBlob(session.Role!.Id, "equip_plans", next.ToByteArray());
+                        tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/equipment-craft",
+                            Pairs(recipe, "_kCost"), [(entry, 1)], new { req.Rank, req.Subtype, Entry = entry }));
+                    },
+                    // A same-commit prune of stale plan GUIDs (never caused by craft materials) keeps its plans;
+                    // the counters apply on top of whatever plans the commit published.
+                    committed: () =>
+                    {
+                        var current = session.EquipmentPlans.Clone();
+                        ApplyCraftCounter(current, recipeId, counter);
+                        session.EquipmentPlans = current;
+                    })
                     is not { Count: > 0 } items) error = new(ErrorCodes.CraftMaterialsShort, "payment short");
                 else made = items[0];
             }
-            log.LogInformation("{Name} crafts rank {Rank} subtype {Subtype}: {Result}", session.Role!.Name, req.Rank, req.Subtype, error?.Why ?? $"item {made!.Entry}");
+            _log.LogInformation("{Name} crafts rank {Rank} subtype {Subtype}: {Result}", session.Role!.Name, req.Rank, req.Subtype, error?.Why ?? $"item {made!.Entry}");
             var resp = new EquipCraftResp { Result = error?.Code ?? 0 };
-            if (made != null) resp.Item = character.ItemInfoOf(made);
+            if (made != null) resp.Item = _character.ItemInfoOf(made);
             await session.SendGameAsync(Craft, resp);
+            if (made != null) await _character.SyncEquipmentAsync(session);
         }
         if (made != null) foreach (var handler in Crafted) await handler(session, made.Entry, req.Rank, req.Subtype);
     }
 
+    private static void ApplyCraftCounter(DBEquipInfo info, int recipeId, DBEquipCraftInfo counter)
+    {
+        long previous = info.CraftInfo.TryGetValue(recipeId, out var old) ? old.CraftCount : 0;
+        info.CraftInfo[recipeId] = counter.Clone();
+        info.CraftRankCount[counter.Rank] = info.CraftRankCount.GetValueOrDefault(counter.Rank) + counter.CraftCount - previous;
+    }
+
     private long WeightOf(int rank, long quality) =>
-        data.Table("EquipCraftQualityConfig").Values.Where(r => GameData.Int(r, "_iRank") == rank && GameData.Int(r, "_iQuality") == quality)
+        _data.Table("EquipCraftQualityConfig").Values.Where(r => GameData.Int(r, "_iRank") == rank && GameData.Int(r, "_iQuality") == quality)
             .Select(r => GameData.Int(r, "_iWeight")).FirstOrDefault();
 
-    private static int Draw(List<(int Entry, long Weight)> outputs)
+    private int Draw(List<(int Entry, long Weight)> outputs)
     {
         long total = outputs.Sum(o => o.Weight);
         if (total <= 0) return 0;
-        long roll = Random.Shared.NextInt64(total);
+        long roll = CraftRoll(total);
         foreach (var (entry, weight) in outputs)
         {
             if (roll < weight) return entry;
@@ -251,17 +303,17 @@ public sealed partial class EquipmentService
     public async Task CombineAsync(GameSession session, ItemCombineReq req)
     {
         using var gate = await CharacterService.Lock(session);
-        var row = data.Row("ItemConfig", req.ItemId);
+        var row = _data.Row("ItemConfig", req.ItemId);
         var cost = row is { } r ? Pairs(r, "_kCombine").Select(c => (c.Entry, c.Count * (long)req.ItemCount)).ToList() : [];
         Fail? error = row == null ? new(ErrorCodes.ItemNoConfig, "no item") : cost.Count == 0 ? new(ErrorCodes.Parameter, "not combinable")
             : req.ItemCount < 1 ? new(ErrorCodes.Parameter, "bad count")
             : req.CostItem.Count > 0 && !req.CostItem.OrderBy(c => c.Key).Select(c => ((int)c.Key, (long)c.Value)).SequenceEqual(cost.OrderBy(c => c.Entry)) ? new(ErrorCodes.Parameter, "cost differs")
             : null;
-        if (error == null && await character.ExchangeLockedAsync(session, cost, [(req.ItemId, req.ItemCount)], popup: false,
-            persist: tx => tx.WithEconomy(character.FamilyEconomy(session, "cd13a/equipment-combine", cost,
+        if (error == null && await _character.ExchangeLockedAsync(session, cost, [(req.ItemId, req.ItemCount)], popup: false,
+            persist: tx => tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/equipment-combine", cost,
                 [(req.ItemId, req.ItemCount)], new { req.ItemId, req.ItemCount }))) == null)
             error = new(ErrorCodes.ItemsShort, "materials short");
-        log.LogInformation("{Name} combines {Count}x {Item}: {Result}", session.Role!.Name, req.ItemCount, req.ItemId, error?.Why ?? "ok");
+        _log.LogInformation("{Name} combines {Count}x {Item}: {Result}", session.Role!.Name, req.ItemCount, req.ItemId, error?.Why ?? "ok");
         await session.SendGameAsync(ItemCombine, new ItemCombineResp { Result = error?.Code ?? 0 });
     }
 
@@ -279,7 +331,7 @@ public sealed partial class EquipmentService
         // The client supplies isLapseDecompose, but item season/playBook are not
         // represented in InvItem yet. A lapse return must not silently pay the ordinary _kDecompose yield.
         Fail? error = req.IsLapseDecompose ? new(ErrorCodes.FeatureUnavailable, "season-lapse return is not qualified")
-            : !functions.IsOpen(session, FunctionDecompose) ? new(ErrorCodes.FeatureUnavailable, "dismantle closed")
+            : !_functions.IsOpen(session, FunctionDecompose) ? new(ErrorCodes.FeatureUnavailable, "dismantle closed")
             : req.DecomposeItem.Count == 0 ? new(ErrorCodes.NothingToDismantle, "nothing") : null;
         foreach (var (guid, count) in req.DecomposeItem)
         {
@@ -287,7 +339,7 @@ public sealed partial class EquipmentService
             if (session.Items.FirstOrDefault(i => i.Guid == guid) is not { } item) { error = new(ErrorCodes.ItemMissing, $"no item {guid}"); break; }
             if (item.IsLocked) { error = new(ErrorCodes.ItemLocked, $"{guid} is protected"); break; }
             if (item.Grid != 0) { error = new(ErrorCodes.CannotDismantleEquipped, $"{guid} is worn or socketed"); break; }
-            if (data.Row("ItemConfig", item.Entry) is { } seasonRow && GameData.Int(seasonRow, "_iSeasonResetType") != 0)
+            if (_data.Row("ItemConfig", item.Entry) is { } seasonRow && GameData.Int(seasonRow, "_iSeasonResetType") != 0)
             { error = new(ErrorCodes.FeatureUnavailable, $"{item.Entry} requires authoritative season state"); break; }
             var returns = Returns(item);
             if (returns.Count == 0) { error = new(ErrorCodes.Parameter, $"{item.Entry} has no returns"); break; }
@@ -304,21 +356,21 @@ public sealed partial class EquipmentService
         var inputs = error == null
             ? instances.Select(g => (session.Items.Single(i => i.Guid == g.Key).Entry, (long)g.Value)).ToList()
             : [];
-        if (error == null && await character.ExchangeLockedAsync(session, [], goods, instances, popup: false,
-            persist: tx => tx.WithEconomy(character.FamilyEconomy(session, "cd13a/equipment-decompose", inputs, goods,
+        if (error == null && await _character.ExchangeLockedAsync(session, [], goods, instances, popup: false,
+            persist: tx => tx.WithEconomy(_character.FamilyEconomy(session, "cd13a/equipment-decompose", inputs, goods,
                 new { Inputs = instances.OrderBy(p => p.Key).ToArray(), Goods = goods.OrderBy(g => g.Key).ToArray() }))) == null)
             error = new(ErrorCodes.ItemsShort, "bad count");
-        log.LogInformation("{Name} dismantles {Items}: {Result}", session.Role!.Name, string.Join(",", req.DecomposeItem.Keys), error?.Why ?? "ok");
+        _log.LogInformation("{Name} dismantles {Items}: {Result}", session.Role!.Name, string.Join(",", req.DecomposeItem.Keys), error?.Why ?? "ok");
         await session.SendGameAsync(ItemDecompose, new ItemDecomposeResp { Result = error?.Code ?? 0 });
     }
 
     private List<(int Entry, long Count)> Returns(InvItem instance)
     {
-        if (data.Row("ItemConfig", instance.Entry) is not { } item) return [];
-        if (GameData.Int(item, "_iType") == ItemTypeEquip && GameData.Int(item, "_iEquipId") is var equipId and > 0 && data.Row("EquipConfig", equipId) is { } equip)
+        if (_data.Row("ItemConfig", instance.Entry) is not { } item) return [];
+        if (GameData.Int(item, "_iType") == ItemTypeEquip && GameData.Int(item, "_iEquipId") is var equipId and > 0 && _data.Row("EquipConfig", equipId) is { } equip)
         {
             long rank = GameData.Int(equip, "_iRank"), quality = GameData.Int(item, "_iQuality");
-            var row = data.Table("EquipReturnConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iRank") == rank && GameData.Int(r, "_iQuality") == quality
+            var row = _data.Table("EquipReturnConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iRank") == rank && GameData.Int(r, "_iQuality") == quality
                 && GameData.Int(r, "_iEntriesNum") == EntryCount(instance) && GameData.Int(r, "_iSpecialNum") == SpecialCount(instance));
             if (row.ValueKind == JsonValueKind.Object && Pairs(row, "_kReturn") is { Count: > 0 } back) return back;
         }

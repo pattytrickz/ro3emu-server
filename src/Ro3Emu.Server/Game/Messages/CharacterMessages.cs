@@ -5,16 +5,20 @@ using Romsg;
 namespace Ro3Emu.Server.Game;
 
 /// <summary>The role itself: stats, skills, equipment, cards, pets, mounts, wardrobe, life jobs, emotes and achievements.</summary>
-public sealed class CharacterMessages(CharacterService character, SkillService skills, CombatService combat, SceneService scene, TaskService tasks, GuideService guides, EmojiService emoji, AchievementService achievements, CardService cards, EquipmentService equipment, AppraisalService appraisal, EnchantService enchants, SeasonPageService seasonPage, SeasonRefineService seasonRefine, SeasonTalentService talents, PetService pets, DungeonService dungeons, LifeJobService life, GatheringService gathering, TimedBattleService timedBattles, GuildCampfireService campfire, MountService mounts, CareerSpecialService careerSpecial, WardrobeService wardrobe, TotemService totems) : Messaging.IMessageModule
+public sealed class CharacterMessages(CharacterService character, SkillService skills, CombatService combat, SceneService scene, TaskService tasks, GuideService guides, EmojiService emoji, AchievementService achievements, CardService cards, EquipmentService equipment, AppraisalService appraisal, EnchantService enchants, SeasonPageService seasonPage, SeasonRefineService seasonRefine, SeasonTalentService talents, PetService pets, DungeonService dungeons, LifeJobService life, GatheringService gathering, TimedBattleService timedBattles, GuildCampfireService campfire, MountService mounts, CareerSpecialService careerSpecial, WardrobeService wardrobe, TotemService totems, GrowthClassService growthClass) : Messaging.IMessageModule
 {
     public void Map(Messaging.MessageRoutes routes)
     {
         routes.AdmitEconomic(id => id is GatheringService.MiniGame);
+        // The Codex monster unlock pays its Collection Points, a Growth Classroom rank its reward.
+        routes.AdmitEconomic(id => id is CardService.LibraryMonsterUnlock or GrowthClassService.GetRankReward);
         // Messages that change only the sender's role.
         routes.AdmitRole(id => id is CharacterService.PlayerTransformJob or CharacterService.ChangeStatPlan
             or CharacterService.RenameStatPlan
             or >= 31301 and <= 31501); // character, equipment, card and stat plans
-        routes.AdmitRole(id => id is CardService.LibraryCardUnlock);
+        routes.AdmitRole(id => id is CardService.LibraryCardUnlock or CardService.LibrarySwitchTheme);
+        // An item whose use action changes a guild or Adventure Group record reserves it in its own item-use scope.
+        routes.AdmitEconomic((session, id, body) => id == CharacterService.ItemUse && character.ItemUseWidens(session, body));
         // As Realm a cast waited behind every other player's work (31102 p99 1.4 s); NPC talk behind the market up to 3.4 s.
         routes.AdmitRole(id => id is CombatService.UseSkill or CombatService.SkillInterrupt
             or >= 31151 and <= 31160); // skill plans
@@ -430,6 +434,18 @@ public sealed class CharacterMessages(CharacterService character, SkillService s
         {
             await cards.UnlockAsync(session, LibraryCardUnlockReq.Parser.ParseFrom(body.Span));
         });
+        routes.Map(CardService.LibrarySwitchTheme, "cards", async (session, msgId, body) =>
+        {
+            await cards.SwitchThemeAsync(session, LibrarySwitchThemeReq.Parser.ParseFrom(body.Span));
+        });
+        routes.Map(CardService.LibraryMonsterUnlock, "cards", async (session, msgId, body) =>
+        {
+            await cards.UnlockMonsterAsync(session, LibraryMonsterUnlockReq.Parser.ParseFrom(body.Span));
+        });
+        routes.Map(GrowthClassService.GetRankReward, "growthClass", async (session, msgId, body) =>
+        {
+            await growthClass.ClaimAsync(session, GrowthClassGetRankRewardReq.Parser.ParseFrom(body.Span));
+        });
         routes.Map(CharacterService.AllocateAttrPoints, "character", async (session, msgId, body) =>
         {
             await character.AllocateAsync(session, AllocateAttrPointReq.Parser.ParseFrom(body.Span));
@@ -466,7 +482,9 @@ public sealed class CharacterMessages(CharacterService character, SkillService s
         {
             // Starting another action cancels collection even if it never lands a combat hit (inferred).
             await gathering.InterruptAsync(session);
-            await combat.CastAsync(session, CastSkillReq.Parser.ParseFrom(body.Span));
+            var cast = CastSkillReq.Parser.ParseFrom(body.Span);
+            // Dragon Coffin Island's crystals and soul are taken by their interaction skills (TimedBattleService.DragonIsland).
+            if (!await timedBattles.TryDragonPickupAsync(session, cast)) await combat.CastAsync(session, cast);
         });
         routes.Map(SkillService.PlanUpdate, "skills", async (session, msgId, body) =>
         {

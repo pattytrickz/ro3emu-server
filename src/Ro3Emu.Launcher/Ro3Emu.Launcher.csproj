@@ -9,7 +9,6 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>Ro3EmuLauncher</AssemblyName>
@@ -41,8 +40,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
-    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="Mono.Cecil" />
     <ProjectReference Include="..\Ro3Emu.Patcher\Ro3Emu.Patcher.csproj" />
     <ProjectReference Include="..\Ro3Emu.DataExport\Ro3Emu.DataExport.csproj" />
   </ItemGroup>
@@ -60,6 +59,8 @@
     <Compile Include="..\Ro3Emu.ClientTools\ClientPatcher.cs" Link="Shared\ClientPatcher.cs" />
     <Compile Include="..\Ro3Emu.ClientTools\TextSink.cs" Link="Shared\TextSink.cs" />
     <Compile Include="..\Ro3Emu.ClientTools\ImageSwapPatch.cs" Link="Shared\ImageSwapPatch.cs" />
+    <Compile Include="..\Ro3Emu.ClientTools\VoiceStubPatch.cs" Link="Shared\VoiceStubPatch.cs" />
+    <Compile Include="..\Ro3Emu.ClientTools\AccessFixPatch.cs" Link="Shared\AccessFixPatch.cs" />
     <EmbeddedResource Include="..\Ro3Emu.Loc\translations\*.tsv" LogicalName="translations/%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(ClientDlls)Ro3Emu.ClientHooks.dll" LogicalName="Ro3Emu.ClientHooks.dll" Condition="Exists('$(ClientDlls)Ro3Emu.ClientHooks.dll')" />
     <EmbeddedResource Include="$(ClientDlls)Ro3Emu.Loc.dll" LogicalName="Ro3Emu.Loc.dll" Condition="Exists('$(ClientDlls)Ro3Emu.Loc.dll')" />

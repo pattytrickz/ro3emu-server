@@ -94,7 +94,7 @@ public sealed class QuestEngineTests : IAsyncLifetime
     /// when every target is tracked; 106602 CheckTenBOSSWin completes when the role fights the listed boss.
     /// </summary>
     [ClientDataFact]
-    public async Task RootlessSideGuidesOpenAtTheirLevelAndABossWinCompletesTheDungeonGuide()
+    public async Task RootlessSideGuidesOpenAtTheirLevel()
     {
         const long AutoBattleGuide = 10200140, Professions = 10200100, JoinGuild = 10200080, Friends = 10200090,
             FivePlayerDungeon = 10200010;
@@ -120,29 +120,8 @@ public sealed class QuestEngineTests : IAsyncLifetime
         Assert.Equal(0, (await State(JoinGuild)).CompleteNum[0]); // not in a guild
         Assert.Equal(0, (await State(Friends)).CompleteNum[0]);
 
-        var combat = Service<CombatService>();
-        var callback = combat.Killed.Single(h => h.Target is TaskService);
-        async Task Kill(int npc) => await Change(async s =>
-        {
-            var monster = new MonsterUnit
-            {
-                Uid = 910000 + npc % 1000, SceneEntry = s.SceneEntry, Dead = true,
-                Template = Service<MonsterService>().Template(npc)!,
-                Home = new SpawnPoint(0, 0, 0, 0, 0, npc), Group = new SpawnGroup(0, false, 1, 0, [], []),
-            };
-            foreach (var handler in combat.Dealt) handler(s, monster, 1);
-            // Real kills stage task progress with their durable reward before publishing Killed.
-            // Calling only the task callback bypasses that path and hid missing objective kinds.
-            await Service<RewardService>().PrepareKilledAsync(s, monster);
-            await callback(s, monster);
-        });
-        await Kill(5000055); // an ordinary monster is no boss win
-        Assert.Equal(0, (await State(FivePlayerDungeon)).CompleteNum[0]);
-        await Kill(43100003); // the Orc Hero: its own line only ("Complete the Golden Thief Bug / Orc Hero / Drake Dungeon")
-        Assert.Equal([0, 1, 0], (await State(FivePlayerDungeon)).CompleteNum);
-        await Kill(4300001);
-        await Kill(43200006);
-        Assert.Equal(TaskState.Delivery, (await State(FivePlayerDungeon)).Status);
+        // The boss-win target (106602) counts a committed clear of a listed TenGameplay boss's dungeon (upstream
+        // TaskService.ParticipationTargets), covered by DungeonTests.ATenGameplayBossClearCountsForTheGrowthTitle...
         var offered = await Read(s => s.Tasks!.Infos.Keys.Where(id => id is >= 10200000 and < 10300000 or 306070 or 306080).OrderBy(id => id).ToList());
         Console.WriteLine("Side guides offered at Base 36: " + string.Join(", ", offered));
     }

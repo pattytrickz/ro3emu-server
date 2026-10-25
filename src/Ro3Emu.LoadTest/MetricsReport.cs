@@ -42,12 +42,9 @@ public sealed record MetricHistogram(long Count, double Sum, double Min, double 
         node["buckets"]?.AsArray().Select(x => x!.GetValue<long>()).ToArray() ?? []);
 }
 
-public sealed class MetricsPair
+public sealed class MetricsPair(JsonNode before, JsonNode after)
 {
-    public MetricsPair(JsonNode before, JsonNode after) { Before = before; After = after; }
-    public JsonNode Before { get; }
-    public JsonNode After { get; }
-    public bool SameEpoch => Before["epoch"]?.ToString() == After["epoch"]?.ToString();
+    public JsonNode Before { get; } = before; public JsonNode After { get; } = after; public bool SameEpoch => Before["epoch"]?.ToString() == After["epoch"]?.ToString();
     public double Seconds => (After["elapsedSeconds"]?.GetValue<double>() ?? 0) -
                              (Before["elapsedSeconds"]?.GetValue<double>() ?? 0);
     public double Delta(string path) => Number(After, path) - Number(Before, path);
@@ -326,8 +323,11 @@ public static class TargetEvaluation
         if (wire is { Length: > 0 })
         {
             bool violation = wire.Any(x => x!.P50 > 10 || x.P99 > 50);
-            rows[4] = rows[4] with { Status = violation ? "FAIL" : "NOT MEASURED",
-                Detail = $"{wire.Length} same-ID game reply IDs measured; worst p99≤{wire.Max(x => x!.P99):F1} ms; SDK/micro/deferred IDs unavailable" };
+            rows[4] = rows[4] with
+            {
+                Status = violation ? "FAIL" : "NOT MEASURED",
+                Detail = $"{wire.Length} same-ID game reply IDs measured; worst p99≤{wire.Max(x => x!.P99):F1} ms; SDK/micro/deferred IDs unavailable"
+            };
         }
         if (report.Scenario == "S2" && report.MovementPeerP99Ms > 0) Set(5,
             report.MovementPeerP99Ms <= 80 && report.MovementUnmatched == 0 && report.MovementNeverSeen == 0 && report.MovementAmbiguous == 0,
@@ -344,18 +344,24 @@ public static class TargetEvaluation
         if (report.Inbound.Count > 0)
         {
             int peak = report.Inbound.Values.Max(x => x.MaxVisiblePlayers);
-            rows[8] = rows[8] with { Status = peak > 149 ? "FAIL" : visibilityCoverage ? "PASS" : "NOT MEASURED",
-                Detail = $"continuous reducer peak={peak} other players; {report.Inbound.Count}/{report.RequestedBots} client reducers" };
+            rows[8] = rows[8] with
+            {
+                Status = peak > 149 ? "FAIL" : visibilityCoverage ? "PASS" : "NOT MEASURED",
+                Detail = $"continuous reducer peak={peak} other players; {report.Inbound.Count}/{report.RequestedBots} client reducers"
+            };
         }
         var publicLines = report.LineSamples.Where(x => x.Kind == "PublicLine").ToArray();
         if (publicLines.Length > 0)
         {
             bool breach = publicLines.Any(x => x.HardLimit != null && x.Players + x.Loading > x.HardLimit);
             bool known = publicLines.All(x => x.HardLimit != null);
-            rows[18] = rows[18] with { Status = breach ? "FAIL" : known && visibilityCoverage ? "PASS" : "NOT MEASURED",
+            rows[18] = rows[18] with
+            {
+                Status = breach ? "FAIL" : known && visibilityCoverage ? "PASS" : "NOT MEASURED",
                 Detail = $"{publicLines.Length} admission-manager HTTP map/line samples; peak players+reservations={publicLines.Max(x => x.Players + x.Loading)}; " +
                     string.Join("; ", publicLines.GroupBy(x => x.Map).Select(g => $"map {g.Key}: soft {g.First().SoftLimit}, hard {g.First().HardLimit}")) +
-                    "; sampled bounds only (see Runtime lines)" };
+                    "; sampled bounds only (see Runtime lines)"
+            };
         }
         if (report.Scenario == "S2" && report.RequestedSeconds > 0 && report.RequestedBots > 0)
             Set(9, m.Delta("wire.bytesOut") / m.Seconds / report.RequestedBots <= 20 * 1024,

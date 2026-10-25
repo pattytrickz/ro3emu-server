@@ -134,6 +134,10 @@ internal static class Flows
         Ui.EndProgress();
         Ui.Ok($"exported in {Ui.Duration(watch.Elapsed)}: {result.ConfigTables} tables, {result.SceneEditor} maps, {result.Skills} skills, " +
               $"{result.NavFiles} walk maps, {result.Messages} messages, {result.LocEntries} English texts");
+        if (result.FailedTables.Count > 0)
+            Ui.Warn($"{result.FailedTables.Count} game table(s) could not be exported ({string.Join(", ", result.FailedTables.Take(5))}" +
+                (result.FailedTables.Count > 5 ? ", ..." : "") + "). The server may miss some content; RO3Emu will try again next start. " +
+                "If this keeps happening, your game is newer than this RO3Emu: get the latest one from the releases page.");
         return result;
     }
 
@@ -227,7 +231,7 @@ internal static class Flows
                 Ui.Step("Friends can join");
                 Ui.Info($"They run:  RO3Emu.exe join {publicHost}{(ports.Http == 5380 ? "" : ":" + ports.Http)}");
                 Ui.Info($"Windows may ask whether Ro3Emu.Server may use the network: allow it.");
-                Ui.Info($"For players outside your network, forward TCP ports {ports.Http}, {ports.MicroGate} and {ports.GameGate} on your router");
+                Ui.Info($"For players outside your network, forward TCP ports {ServerProcess.PortList(ports)} on your router");
                 Ui.Info("to this PC and start with --public <your public IP>.");
             }
             if (server != null) Program.OnClose = () => server.Stop(TimeSpan.FromSeconds(4));

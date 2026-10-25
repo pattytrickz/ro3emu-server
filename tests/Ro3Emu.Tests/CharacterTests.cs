@@ -190,31 +190,60 @@ public sealed class CharacterTests : IAsyncLifetime
         foreach (var (stat, value) in new[] { (1, 5), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1) }) req.Points[stat] = value;
         await alice.SendGameAsync(CharacterService.AllocateAttrPoints, req);
         Assert.Equal(0, (await Next(alice, CharacterService.AllocateAttrPoints, AllocateAttrPointRsp.Parser)).Result);
-        var growth = await Next(alice, TaskService.GrowthClassSync, DBGrowthClassInfoIncrement.Parser, m => m.RankProgress >= 1);
+        var growth = await Next(alice, GrowthClassService.Sync, DBGrowthClassInfoIncrement.Parser, m => m.RankProgress >= 1);
         Assert.True(growth.RankProgress >= 1);
         Assert.True(TaskService.IsDelivered(session, 1700010));
 
-        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
-        Assert.Equal(0, (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser)).Result);
-        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        await alice.SendGameAsync(GrowthClassService.GetRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        Assert.Equal(0, (await Next(alice, GrowthClassService.GetRankReward, GrowthClassGetRankRewardRsp.Parser)).Result);
+        await alice.SendGameAsync(GrowthClassService.GetRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
         Assert.Equal(ErrorCodes.RewardClaimed,
-            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.Result != 0)).Result);
-        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 2 });
-        Assert.Equal(ErrorCodes.TaskRequirements,
-            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 2)).Result);
-        Assert.Contains(1L, session.TaskRuntime.GrowthRanksClaimed);
+            (await Next(alice, GrowthClassService.GetRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.Result != 0)).Result);
+        await alice.SendGameAsync(GrowthClassService.GetRankReward, new GrowthClassGetRankRewardReq { RankId = 2 });
+        Assert.Equal(ErrorCodes.NoRankReward,
+            (await Next(alice, GrowthClassService.GetRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 2)).Result);
+        Assert.Equal(1, session.GrowthClass!.RankReward[1]);
 
-        // #bug-reports "Growth Rewards reset": delivering any quest rebuilt the task runtime without the claimed ranks,
-        // so the same rank paid again (88 times for one player).
+        // #bug-reports "Growth Rewards reset": delivering any quest must not forget the claimed ranks (88 claims for one
+        // player before the fix).
         await Gm("grower", "!quest done 10101010");
         Assert.True(TaskService.IsDelivered(session, 10101010));
-        Assert.Contains(1L, session.TaskRuntime.GrowthRanksClaimed);
-        await alice.SendGameAsync(TaskService.GrowthClassRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        await alice.SendGameAsync(GrowthClassService.GetRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
         Assert.Equal(ErrorCodes.RewardClaimed,
-            (await Next(alice, TaskService.GrowthClassRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 1 && m.Result != 0)).Result);
-        var saved = System.Text.Json.JsonSerializer.Deserialize<TaskRuntimeState>(
-            _app.Services.GetRequiredService<RoleStore>().LoadTaskRuntime(session.Role!.Id)!)!;
-        Assert.Contains(1L, saved.GrowthRanksClaimed);
+            (await Next(alice, GrowthClassService.GetRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 1 && m.Result != 0)).Result);
+        var saved = DBGrowthClassInfo.Parser.ParseFrom(_app.Services.GetRequiredService<RoleStore>().LoadGrowthClass(session.Role!.Id)!);
+        Assert.Equal(1, saved.RankReward[1]);
+    }
+
+    /// <summary>
+    /// The upstream sync moves the claimed ranks from the task runtime (Sol RO3's TaskRuntimeState.GrowthRanksClaimed)
+    /// to role.growth_class at the first login: a rank paid before the sync is not paid again.
+    /// </summary>
+    [ClientDataFact]
+    public async Task GrowthClassroomRanksClaimedBeforeTheSyncStayClaimed()
+    {
+        long role;
+        var sessions = _app.Services.GetRequiredService<SessionRegistry>();
+        await using (var alice = await InWorld("Grower"))
+        {
+            await Gm("grower", "!lvl 20");
+            role = sessions.All().Single(s => s.Role?.Name == "Grower").Role!.Id;
+        }
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (sessions.All().Any(s => s.Role?.Id == role) && DateTime.UtcNow < deadline) await Task.Delay(50);
+        // A save from before the sync: rank 1 claimed in the task runtime, nothing in growth_class.
+        var roles = _app.Services.GetRequiredService<RoleStore>();
+        var tx = roles.NewTransaction();
+        tx.RoleBlob(role, "task_runtime", System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new TaskRuntimeState { GrowthRanksClaimed = { 1 } }));
+        tx.RoleBlob(role, "growth_class", []);
+        await roles.CommitAsync(tx, "test/legacy-growth-claims");
+        await using var again = await InWorld("Grower", create: false);
+        await Next(again, GrowthClassService.Sync, DBGrowthClassInfoIncrement.Parser, m => m.RankReward.ContainsKey(1));
+        await again.SendGameAsync(GrowthClassService.GetRankReward, new GrowthClassGetRankRewardReq { RankId = 1 });
+        Assert.Equal(ErrorCodes.RewardClaimed,
+            (await Next(again, GrowthClassService.GetRankReward, GrowthClassGetRankRewardRsp.Parser, m => m.RankId == 1)).Result);
+        var saved = DBGrowthClassInfo.Parser.ParseFrom(_app.Services.GetRequiredService<RoleStore>().LoadGrowthClass(role)!);
+        Assert.Equal(1, saved.RankReward[1]);
     }
 
     [ClientDataFact]
@@ -402,8 +431,11 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(1, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns[DivineLight].SkillLevel);
 
         // On the bar like a learned skill: the saved plan keeps it, but it never becomes a learned (paid) level.
-        await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = SkillLoadOperation.SkillLoadOpLoad,
-            IsManual = true, SocketNum = 5, Info = new SkillData { SkillId = DivineLight, SkillLevel = 1 } }); // an empty slot
+        await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
+        {
+            OpType = SkillLoadOperation.SkillLoadOpLoad,
+            IsManual = true, SocketNum = 5, Info = new SkillData { SkillId = DivineLight, SkillLevel = 1 }
+        }); // an empty slot
         Assert.Equal(0, (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result);
         Assert.DoesNotContain(DivineLight, session.Progress.Skills.Keys);
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role.Id });

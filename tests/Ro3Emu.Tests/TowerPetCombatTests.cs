@@ -14,48 +14,55 @@ namespace Ro3Emu.Tests;
 /// <summary>Actual tower start/AOI/cast/hit/buff wire regression for the supplied floor-2 Bobo case.</summary>
 public sealed class TowerPetCombatTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-pet-combat-" + Guid.NewGuid().ToString("N"));
-    private WebApplication app = null!;
-    private string http = "";
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-pet-combat-" + Guid.NewGuid().ToString("N"));
+    private WebApplication _app = null!;
+    private string _http = "";
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
+
+    /// <summary>Uids for pets this test spawns itself, far above the ones TowerService numbers.</summary>
+    private long _petUid = TowerPetUnit.UidBase + (1L << 40);
+    private long NextPetUid() => ++_petUid;
     private Task Run(Func<Task> action) => Service<GameLoop>().InvokeAsync(action);
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
 
     public async Task InitializeAsync()
     {
         var (httpPort, microPort, gamePort) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = httpPort; o.MicroGatePort = microPort; o.GameGatePort = gamePort;
         });
         Service<SeasonService>().SetPlayBook(101);
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{httpPort}";
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{httpPort}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync(); await app.DisposeAsync();
+        await _app.StopAsync(); await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InTower()
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync("petcombat", "pw"); await bot.EnterGateAsync();
         long id = (await bot.CreateRoleAsync("Petcombat")).RoleBaseInfo.Id;
         var roster = new DBPetInfo { Inited = true, IncubationLv = 1, OnOpenUIRoomLv = 1 };
         foreach (int petId in new[] { 13001, 10001, 11001, 21002 })
             roster.ListPet[petId] = new PetData { PetId = petId, Level = 12, Star = 1 };
         Service<RoleStore>().SavePets(id, roster.ToByteArray());
-        Service<RoleStore>().SaveTower(id, new DBClimTower { LayerConfID = 1, IsNewbeeInit = true,
-            ChallengeTime = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds() }.ToByteArray());
+        Service<RoleStore>().SaveTower(id, new DBClimTower
+        {
+            LayerConfID = 1, IsNewbeeInit = true,
+            ChallengeTime = DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds()
+        }.ToByteArray());
         await bot.EnterWorldAsync(id);
         using var client = new HttpClient();
         foreach (string command in new[] { "!lvl 99", "!quest done 10105020", "!quest done 10104330" })
-            (await client.PostAsync($"{http}/ro3emu/gm?account=petcombat", new StringContent(command))).EnsureSuccessStatusCode();
+            (await client.PostAsync($"{_http}/ro3emu/gm?account=petcombat", new StringContent(command))).EnsureSuccessStatusCode();
         await bot.SendGameAsync(TowerService.SetPets, new SetClimTowerPetsReq { Pets = { 13001, 0, 0, 0 } });
         Assert.Equal(0, (await Next(bot, TowerService.SetPets, SetClimTowerPetsRes.Parser)).Result);
         await bot.SendGameAsync(TowerService.Start, new ClimTowerStartReq { Layer = 2 });
@@ -117,16 +124,20 @@ public sealed class TowerPetCombatTests : IAsyncLifetime
             for (int i = 0; i < 7; i++)
             {
                 var pet = TowerPetUnit.Create(Service<GameData>(), s.Pets!, s, Service<World>(), Service<MonsterService>(),
-                    Service<CombatService>(), 13001, a.InstanceId, s.Position.X + (i == 6 ? 9 : i), s.Position.Y, s.Position.Z)!;
+                    Service<CombatService>(), NextPetUid(), 13001, a.InstanceId, s.Position.X + (i == 6 ? 9 : i),
+                    s.Position.Y, s.Position.Z)!;
                 added.Add(pet); a.Pets.Add(pet); await Service<World>().AddUnitAsync(pet);
                 // Only the caster may auto-cast; reserve other actors' cooldown before the controlled cast.
                 if (i > 0) Assert.True(pet.TryBeginCast(pet.SupportSkills.Single(), MonsterService.NowMs));
             }
             var source = a.Monsters[0];
-            attacker = new MonsterUnit { Uid = 1L << 49, SceneEntry = s.SceneEntry, InstanceId = a.InstanceId,
+            attacker = new MonsterUnit
+            {
+                Uid = 1L << 49, SceneEntry = s.SceneEntry, InstanceId = a.InstanceId,
                 X = added[0].X, Y = added[0].Y, Z = added[0].Z, Hp = 1000000,
                 Template = source.Template with { NormalSkill = 0, Atk = 200, HitPointSeconds = 0 },
-                Group = source.Group, Home = source.Home };
+                Group = source.Group, Home = source.Home
+            };
             await Service<World>().AddUnitAsync(attacker);
             await Service<CombatService>().TowerPetSupportAsync(s, added[0], 2354301);
             await Service<CombatService>().TowerPetSupportAsync(s, added[0], 2354301); // rejected by own cooldown/action
@@ -184,7 +195,7 @@ public sealed class TowerPetCombatTests : IAsyncLifetime
             foreach (int id in new[] { 10001, 13001 })
             {
                 var unit = TowerPetUnit.Create(Service<GameData>(), s.Pets!, s, Service<World>(), Service<MonsterService>(),
-                    Service<CombatService>(), id, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
+                    Service<CombatService>(), NextPetUid(), id, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
                 a.Pets.Add(unit); await Service<World>().AddUnitAsync(unit);
                 if (id == 10001) choco = unit; else bobo = unit;
             }
@@ -220,7 +231,7 @@ public sealed class TowerPetCombatTests : IAsyncLifetime
             foreach (var old in a.Pets.ToArray()) await Service<World>().RemoveUnitAsync(old);
             a.Pets.Clear(); foreach (var monster in a.Monsters) monster.Dead = true;
             healer = TowerPetUnit.Create(Service<GameData>(), s.Pets!, s, Service<World>(), Service<MonsterService>(),
-                Service<CombatService>(), 11001, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
+                Service<CombatService>(), NextPetUid(), 11001, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
             healer.Hp = 1; a.Pets.Add(healer); await Service<World>().AddUnitAsync(healer);
             await Service<CombatService>().TowerPetSupportAsync(s, healer, 2356401);
         });
@@ -233,7 +244,7 @@ public sealed class TowerPetCombatTests : IAsyncLifetime
         await Run(async () =>
         {
             cancelled = TowerPetUnit.Create(Service<GameData>(), s.Pets!, s, Service<World>(), Service<MonsterService>(),
-                Service<CombatService>(), 13001, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
+                Service<CombatService>(), NextPetUid(), 13001, a.InstanceId, s.Position.X, s.Position.Y, s.Position.Z)!;
             a.Pets.Add(cancelled); await Service<World>().AddUnitAsync(cancelled);
             await Service<CombatService>().TowerPetSupportAsync(s, cancelled, 2354301);
             a.Settled = true;

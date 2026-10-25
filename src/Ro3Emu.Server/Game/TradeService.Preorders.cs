@@ -16,8 +16,10 @@ public sealed partial class TradeService
     /// </summary>
     private async Task Reserve(GameSession s, CPreTradeTopRequest req)
     {
+        long saleMs = 0;
         int code = await market.RunAsync(s, tx =>
         {
+            saleMs = 0;
             if (!functions.IsOpen(s, 2)) return ErrorCodes.FunctionLocked;
             if (req.TotalQuantity < 1 || req.Price < 1 || (long)req.Price * req.TotalQuantity != req.TotalPrice)
                 return ErrorCodes.TradeRequest;
@@ -45,9 +47,20 @@ public sealed partial class TradeService
                 Sequence = sequence,
             };
             tx.Put(Orders, order.Id, order);
+            saleMs = listing.PublicUntilMs;
             return 0;
         });
         await s.SendGameAsync(Preorder, new CPreTradeTopResponse { Result = code });
+        // 32622 skuQueueNtf: LC_DAL_Trade._notifyInQueue (lua:2151-2384) pops UIWords 21090 "You have joined the Lineup
+        // to purchase this item. In ${1} seconds, a random player from the Lineup will be selected..." counting down to
+        // saleTime (seconds, ignored once past) and closes itself then. The lineup is this pre-purchase (21172 "one buyer
+        // will be randomly selected from all purchase Lineups"); pushing it on the accepted 32626 is (inferred).
+        if (code == 0 && saleMs > NowMs)
+            await s.SendGameAsync(InQueue, new skuQueueNtf
+            {
+                ItemId = req.ItemId, Price = req.Price, Quantity = req.TotalQuantity,
+                SaleTime = (saleMs + 999) / 1000, SkuId = req.SkuId,
+            });
     }
 
     private CPreTradeTopOrderDTO OrderInfo(PreorderRow o, Listing? listing)
@@ -118,8 +131,11 @@ public sealed partial class TradeService
             }
             return 0;
         });
-        var response = new CRefundPreTradeTopResponse { Code = code, Errno = code,
-            Errmsg = code == 0 ? "" : "Refund refused" };
+        var response = new CRefundPreTradeTopResponse
+        {
+            Code = code, Errno = code,
+            Errmsg = code == 0 ? "" : "Refund refused"
+        };
         if (code == 0)
         {
             response.Data = new CRefundPreTradeTopDTO { IsReward = req.IsReward };
@@ -134,13 +150,13 @@ public sealed partial class TradeService
     // Stage G: every trade message and the 1 s stall maintenance call this. As a full market transaction each time it
     // put two transactions on every trade request (p50 0.5-0.9 s at 500 players). It now runs only when a listing can
     // have matured or expired: a market commit since the last pass, or the earliest due time reached.
-    private long maintainedVersion = -1, nextDueMs;
+    private long _maintainedVersion = -1, _nextDueMs;
     internal long MaintenancePasses { get; private set; }
 
     internal async Task TickMaintenanceAsync()
     {
         long version = market.Version;
-        if (version == maintainedVersion && NowMs < nextDueMs) return;
+        if (version == _maintainedVersion && NowMs < _nextDueMs) return;
         MaintenancePasses++;
         long due = long.MaxValue;
         bool wrote = false;
@@ -224,8 +240,8 @@ public sealed partial class TradeService
         }, _ => NotifyTradeAsync(expiredCount, successfulPreorders, failedPreorders));
         if (code != 0) return;
         // A commit by anyone else meanwhile leaves the version ahead of this, so the next call passes again.
-        maintainedVersion = version + (wrote ? 1 : 0);
-        nextDueMs = due;
+        _maintainedVersion = version + (wrote ? 1 : 0);
+        _nextDueMs = due;
     }
 
     private async Task NotifyTradeAsync(IReadOnlyDictionary<long, int> expired,

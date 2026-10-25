@@ -22,17 +22,26 @@ public sealed partial class SkillCombatTests
         });
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1120701 });
         Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        for (int i = 0; i < 5; i++)
+        // Upstream's periodic buff heal (BuffService.Periodic): one 350 tick a second while the five-second buff lives,
+        // each shown as its own heal number.
+        int heals = 0;
+        var until = DateTime.UtcNow.AddSeconds(7);
+        while (DateTime.UtcNow < until)
         {
-            var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SkillId == 1120701);
+            SkillHitInfo hit;
+            try { hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.Dsts.Any(d => d.DamageType == DamageType.Heal)); }
+            catch (TimeoutException) { break; }
             var heal = Assert.Single(hit.Dsts);
-            Assert.Equal(DamageType.Heal, heal.DamageType);
             Assert.Equal((long)alice.Self!.Uuid, heal.DstID);
             Assert.Equal(350, heal.Damage);
+            heals++;
+            if (heals == 5) break;
         }
-        Assert.Equal(1751, await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2000])));
+        Assert.InRange(heals, 4, 5);
+        long hp = await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2000]));
+        Assert.Equal(1 + 350L * heals, hp);
         await Task.Delay(1600);
-        Assert.Equal(1751, await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2000])));
+        Assert.Equal(hp, await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2000])));
     }
 
     [ClientDataFact]
@@ -51,12 +60,12 @@ public sealed partial class SkillCombatTests
         });
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1120701 });
         Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
-        var heal = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SkillId == 1120701);
+        var heal = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.Dsts.Any(d => d.DamageType == DamageType.Heal));
         Assert.Equal(10, Assert.Single(heal.Dsts).Damage);
         await Loop.InvokeAsync(async () =>
         {
             var s = Session("alice");
-            await app.Services.GetRequiredService<BuffService>().RemoveAsync(s, Assert.Single(s.Buffs, b => b.ConfigId == 1120701));
+            await _app.Services.GetRequiredService<BuffService>().RemoveAsync(s, Assert.Single(s.Buffs, b => b.ConfigId == 1120701));
             await Character.SetHpSpAsync(s, 1, null);
         });
         await Task.Delay(2200);
@@ -69,7 +78,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 1100");
         await Gm("alice", "!lvl 40");
-        var combat = app.Services.GetRequiredService<CombatService>();
+        var combat = _app.Services.GetRequiredService<CombatService>();
         long plain = await Loop.InvokeAsync(() => Task.FromResult(combat.RegenAmount(Session("alice"), Character.Stats(Session("alice"))).Hp));
         await Teach("alice", 11006);
         long boosted = await Loop.InvokeAsync(() =>

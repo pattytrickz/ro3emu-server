@@ -210,6 +210,183 @@ public sealed class DatabaseBackupTests : IDisposable
         Assert.Contains("Restore refused", output.ToString());
     }
 
+    private static List<string> RoleNames(string path)
+    {
+        using var db = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
+        db.Open();
+        using var command = db.CreateCommand();
+        command.CommandText = "SELECT name FROM role ORDER BY name";
+        using var reader = command.ExecuteReader();
+        var names = new List<string>();
+        while (reader.Read()) names.Add(reader.GetString(0));
+        return names;
+    }
+
+    /// <summary>A realm holding "After" and a backup of it taken while it held only "Before".</summary>
+    private string RealmWithAnOlderBackup()
+    {
+        string copy;
+        using (var accounts = Store())
+        {
+            var roles = new RoleStore(accounts);
+            roles.Create("fault", 1, "Before", 1, 1000, 1);
+            copy = Backup(accounts).Backup();
+            roles.Create("fault", 1, "After", 1, 1000, 1);
+        }
+        SqliteConnection.ClearAllPools();
+        return copy;
+    }
+
+    private string Live => Path.Combine(_dir, "ro3emu.db");
+
+    [Fact]
+    public void RestoreThatFailsWhilePreparingTheCopyNeverTouchesTheLiveDatabase()
+    {
+        string copy = RealmWithAnOlderBackup();
+        // The copy fails outright, then a copy that lands damaged fails its check: both before the live file is touched.
+        Assert.Throws<IOException>(() => DatabaseRestore.Restore(_dir, copy, step =>
+        {
+            if (step == "copied") throw new IOException("disk full");
+        }));
+        Assert.ThrowsAny<Exception>(() => DatabaseRestore.Restore(_dir, copy, step => // quick_check or SQLite itself rejects it
+        {
+            if (step != "copied") return;
+            using var file = new FileStream(Live + DatabaseRestore.IncomingSuffix, FileMode.Open);
+            file.Position = 4096;
+            file.Write(Enumerable.Repeat((byte)0x5A, 8192).ToArray());
+        }));
+        Assert.False(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        Assert.False(File.Exists(Live + DatabaseRestore.IncomingSuffix));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "restore-saved")));
+        Assert.Equal(["After", "Before"], RoleNames(Live));
+        using var accounts = Store();
+        Assert.Equal(2, new RoleStore(accounts).ForAccount("fault").Count());
+    }
+
+    [Theory]
+    [InlineData("moved")]
+    [InlineData("swap")]
+    public void RestoreThatFailsMidSwapPutsTheOldDatabaseBack(string failAt)
+    {
+        string copy = RealmWithAnOlderBackup();
+        Assert.Throws<IOException>(() => DatabaseRestore.Restore(_dir, copy, step =>
+        {
+            if (step == failAt) throw new IOException("rename failed");
+        }));
+        Assert.False(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        Assert.False(File.Exists(Live + DatabaseRestore.IncomingSuffix));
+        Assert.Equal(["After", "Before"], RoleNames(Live));
+        using (var accounts = Store()) Assert.Equal(2, new RoleStore(accounts).ForAccount("fault").Count());
+        SqliteConnection.ClearAllPools();
+        Assert.NotNull(DatabaseRestore.Restore(_dir, copy)); // nothing was left half-done: a clean retry works
+        Assert.Equal(["Before"], RoleNames(Live));
+    }
+
+    [Fact]
+    public void ARestoreThatCannotRollBackLeavesAMarkerThatRefusesStartUntilItIsFinished()
+    {
+        string copy = RealmWithAnOlderBackup();
+        // The swap fails and so does the rollback: the live file is gone and only the marker says so.
+        var failed = Assert.Throws<IOException>(() => DatabaseRestore.Restore(_dir, copy, step =>
+        {
+            if (step is "swap" or "rollback") throw new IOException("volume went away");
+        }));
+        Assert.Contains("To recover", failed.Message);
+        Assert.True(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        Assert.False(File.Exists(Live));
+
+        // Neither a store nor a whole server may open the realm: either would create an empty database here.
+        var refused = Assert.Throws<InvalidOperationException>(() => Store());
+        Assert.Contains("unfinished database restore", refused.Message);
+        Assert.Contains("restore-saved", refused.Message);
+        Assert.Contains("unfinished database restore", Assert.Throws<InvalidOperationException>(() => ServerHost.Create([], o =>
+        {
+            var (http, micro, game) = TestPorts.FreePorts();
+            o.DataDir = _dir; o.HttpPort = http; o.MicroGatePort = micro; o.GameGatePort = game;
+        })).Message);
+        Assert.False(File.Exists(Live));
+
+        // The previous database is intact in restore-saved, and running the restore again finishes the job.
+        string saved = Assert.Single(Directory.GetDirectories(Path.Combine(_dir, "restore-saved")));
+        Assert.Equal(["After", "Before"], RoleNames(Path.Combine(saved, "ro3emu.db")));
+        Assert.Null(DatabaseRestore.Restore(_dir, copy)); // no live file to set aside this time
+        Assert.False(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        using var accounts = Store();
+        Assert.Equal(["Before"], new RoleStore(accounts).ForAccount("fault").Select(r => r.Name).ToList());
+        Assert.True(File.Exists(Path.Combine(saved, "ro3emu.db")));
+    }
+
+    /// <summary>
+    /// The state an earlier restore leaves when it is cut between moving ro3emu.db and its WAL: the database in a saved
+    /// folder named by the marker, and its WAL, holding a committed change the database file does not have yet, still
+    /// in the data dir. Returns the saved folder.
+    /// </summary>
+    private string InterruptedBetweenTheDatabaseAndItsWal()
+    {
+        string saved = Path.Combine(_dir, "restore-saved", "20261018-000000-000");
+        Directory.CreateDirectory(saved);
+        string wal = Path.Combine(_dir, "orphan-wal");
+        using (var db = new SqliteConnection($"Data Source={Live};Pooling=False"))
+        {
+            db.Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "PRAGMA wal_autocheckpoint=0; UPDATE role SET name='InWal' WHERE name='After';";
+            command.ExecuteNonQuery();
+            // Copied while the change is only in the WAL (closing the connection would checkpoint it).
+            CopyShared(Live, Path.Combine(saved, "ro3emu.db"));
+            CopyShared(Live + "-wal", wal);
+        }
+        SqliteConnection.ClearAllPools();
+        foreach (var suffix in new[] { "", "-wal", "-shm" }) File.Delete(Live + suffix);
+        File.Move(wal, Live + "-wal");
+        File.WriteAllText(DatabaseRestore.MarkerPath(_dir), $"started: earlier{Environment.NewLine}backup: x{Environment.NewLine}" +
+            $"previous database saved in: {saved}{Environment.NewLine}");
+        return saved;
+
+        static void CopyShared(string from, string to)
+        {
+            using var source = new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var target = File.Create(to);
+            source.CopyTo(target);
+        }
+    }
+
+    [Fact]
+    public void ResumingARestoreCutBeforeTheWalMovedNeverReplaysTheOldWalIntoTheBackup()
+    {
+        string copy = RealmWithAnOlderBackup();
+        string earlier = InterruptedBetweenTheDatabaseAndItsWal();
+        Assert.Contains("unfinished database restore", Assert.Throws<InvalidOperationException>(() => Store()).Message);
+
+        // The database itself was already set aside; its leftover WAL joins it there.
+        Assert.Equal(earlier, DatabaseRestore.Restore(_dir, copy));
+        Assert.False(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        Assert.Equal(["Before"], RoleNames(Live)); // exactly the backup, nothing from the old WAL
+        using (var accounts = Store()) Assert.Equal(["Before"], new RoleStore(accounts).ForAccount("fault").Select(r => r.Name).ToList());
+        SqliteConnection.ClearAllPools();
+        // The old WAL went back to its own database: that set is complete, with the change only the WAL held.
+        Assert.True(File.Exists(Path.Combine(earlier, "ro3emu.db-wal")));
+        Assert.Equal(["Before", "InWal"], RoleNames(Path.Combine(earlier, "ro3emu.db")));
+    }
+
+    [Fact]
+    public void AFailedRetryOfAnUnfinishedRestoreKeepsRefusingStart()
+    {
+        string copy = RealmWithAnOlderBackup();
+        string earlier = InterruptedBetweenTheDatabaseAndItsWal();
+        Assert.Throws<IOException>(() => DatabaseRestore.Restore(_dir, copy, step =>
+        {
+            if (step == "swap") throw new IOException("rename failed");
+        }));
+        // Still no database in the data dir: the marker stays and nothing may open (and create) an empty realm.
+        Assert.False(File.Exists(Live));
+        Assert.True(File.Exists(DatabaseRestore.MarkerPath(_dir)));
+        Assert.Contains("unfinished database restore", Assert.Throws<InvalidOperationException>(() => Store()).Message);
+        SqliteConnection.ClearAllPools();
+        Assert.Equal(earlier, DatabaseRestore.Restore(_dir, copy)); // a clean retry finishes it
+        Assert.Equal(["Before"], RoleNames(Live));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

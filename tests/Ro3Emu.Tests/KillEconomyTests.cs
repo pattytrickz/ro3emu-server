@@ -16,34 +16,35 @@ namespace Ro3Emu.Tests;
 /// <summary>E04 fixed rewards, real role ownership/writer and wire presentation. No load runs.</summary>
 public sealed class KillEconomyTests : IAsyncLifetime
 {
-    private readonly string directory = Path.Combine(RepoRoot(), ".loadtest-temp", "e04-kill-" + Guid.NewGuid().ToString("N"));
-    private WebApplication app = null!;
-    private string http = "";
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private readonly string _directory = Path.Combine(RepoRoot(), ".loadtest-temp", "e04-kill-" + Guid.NewGuid().ToString("N"));
+    private WebApplication _app = null!;
+    private string _http = "";
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
     private static readonly Lazy<EconomyCatalog> Catalog = new(() => EconomyCatalog.Load(Path.Combine(RepoRoot(), "data")));
     private GameSession Session => Service<SessionRegistry>().All().Single(s => s.Account == "killtest" && s.Role != null);
     private Task OnLoop(Func<Task> action) => Service<GameLoop>().InvokeAsync(action);
     public async Task InitializeAsync()
     {
         var (web, micro, game) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = directory; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.DataDir = _directory; o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = web; o.MicroGatePort = micro; o.GameGatePort = game;
+            o.PartyShareExcludedAccounts = ["aibot*"]; // Sol RO3 house rule; the party tests' other accounts are real players
         });
-        SureHitRolls.Install(app);
-        await app.StartAsync(); http = $"http://127.0.0.1:{web}";
+        SureHitRolls.Install(_app);
+        await _app.StartAsync(); _http = $"http://127.0.0.1:{web}";
     }
     public async Task DisposeAsync()
     {
         Service<AccountStore>().BeforeOwnedCommitForTest = null;
         Service<AccountStore>().BeforeOwnedApplyForTest = null;
-        await app.StopAsync(); await app.DisposeAsync(); SqliteConnection.ClearAllPools();
-        try { Directory.Delete(directory, true); } catch (IOException) { }
+        await _app.StopAsync(); await _app.DisposeAsync(); SqliteConnection.ClearAllPools();
+        try { Directory.Delete(_directory, true); } catch (IOException) { }
     }
     private async Task<BotClient> Enter(bool create = true)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(directory, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_directory, "gate_rsa_public.pem")));
         await bot.LoginAsync("killtest", "pw"); await bot.EnterGateAsync();
         long role = create ? (await bot.CreateRoleAsync("KillTest")).RoleBaseInfo.Id : bot.Roles.Single().Id;
         await bot.EnterWorldAsync(role);
@@ -67,16 +68,19 @@ public sealed class KillEconomyTests : IAsyncLifetime
     };
     private Task Reward(GameSession player, MonsterUnit monster) => Service<CombatService>().Killed
         .Single(h => h.Target == Service<RewardService>())(player, monster);
-    private EconomySnapshot Cut() => S3EconomyReader.Read(directory, Catalog.Value);
-    private long ReceiptCount() { using var db = Service<AccountStore>().Open(); using var c = db.CreateCommand();
-        c.CommandText = "SELECT count(*) FROM operation_receipt WHERE command_kind='monster-kill'"; return (long)c.ExecuteScalar()!; }
+    private EconomySnapshot Cut() => S3EconomyReader.Read(_directory, Catalog.Value);
+    private long ReceiptCount()
+    {
+        using var db = Service<AccountStore>().Open(); using var c = db.CreateCommand();
+        c.CommandText = "SELECT count(*) FROM operation_receipt WHERE command_kind='monster-kill'"; return (long)c.ExecuteScalar()!;
+    }
 
     [ClientDataFact]
     public async Task LethalHitAndCorpseWaitForDurableRewardBarrier()
     {
         await using var bot = await Enter();
         using (var client = new HttpClient())
-            (await client.PostAsync(http + "/ro3emu/gm?account=killtest", new StringContent("!job 1100"))).EnsureSuccessStatusCode();
+            (await client.PostAsync(_http + "/ro3emu/gm?account=killtest", new StringContent("!job 1100"))).EnsureSuccessStatusCode();
         var player = Session;
         var monster = await Service<GameLoop>().InvokeAsync(async () =>
         {
@@ -120,7 +124,7 @@ public sealed class KillEconomyTests : IAsyncLifetime
     {
         await using var bot = await Enter();
         using (var client = new HttpClient())
-            (await client.PostAsync(http + "/ro3emu/gm?account=killtest", new StringContent("!job 1100"))).EnsureSuccessStatusCode();
+            (await client.PostAsync(_http + "/ro3emu/gm?account=killtest", new StringContent("!job 1100"))).EnsureSuccessStatusCode();
         var player = Session;
         var monster = await Service<GameLoop>().InvokeAsync(async () =>
         {
@@ -167,7 +171,7 @@ public sealed class KillEconomyTests : IAsyncLifetime
         Assert.Equal(23, player.Items.Single(i => i.Entry == 1000000).Stack);
         Assert.Single(player.Items, i => i.Entry == 2010121); // starter weapon, generated loot decomposed
         Assert.Equal(1, ReceiptCount());
-        var closing = Cut(); var ledger = S3EconomyReader.ReadLedger(directory, Catalog.Value, opening, closing)!;
+        var closing = Cut(); var ledger = S3EconomyReader.ReadLedger(_directory, Catalog.Value, opening, closing)!;
         var check = EconomyExactnessChecker.Check(opening, closing, ledger);
         Assert.DoesNotContain(check.Issues, x => x.Kind == EconomyIssueKind.Corruption);
         Assert.All(check.Assets, x => { Assert.Equal("0", x.Residual); Assert.Equal("0", x.LegResidual); });
@@ -311,9 +315,31 @@ public sealed class KillEconomyTests : IAsyncLifetime
         Assert.Equal(before[0].Exp + 3, Service<RoleStore>().LoadProgress(c.Role!.Id).Exp);
     }
 
+    [ClientDataFact]
+    public async Task AnAiPartyMemberTakesNoShareOfAPlayersKillButSharesItsOwn()
+    {
+        await using var bot = await Enter(); var player = Session;
+        await using var bob = await Member("partybob", "Bob");
+        await using var ai = await Member("aibot01", "Botty");
+        await Party(bot, bob, ai);
+        GameSession Of(string account) => Service<SessionRegistry>().All().Single(s => s.Account == account && s.Role != null);
+        var (b, a) = (Of("partybob"), Of("aibot01"));
+        await OnLoop(() => { Service<RewardService>().ResolveKillForTest = (_, _) => ([], 2, 2); return Task.CompletedTask; });
+        long p0 = player.Progress!.Exp, b0 = b.Progress!.Exp, a0 = a.Progress!.Exp;
+
+        // The player's kill: split between the two real players (2 / 2), the AI member gets nothing.
+        await OnLoop(() => Reward(player, Monster(78)));
+        Assert.Equal((p0 + 1, b0 + 1, a0), (player.Progress.Exp, b.Progress.Exp, a.Progress.Exp));
+
+        // The AI member's kill still shares with the real players (3 / 3). Small amounts: a level-1 role levels at 5.
+        await OnLoop(() => { Service<RewardService>().ResolveKillForTest = (_, _) => ([], 3, 3); return Task.CompletedTask; });
+        await OnLoop(() => Reward(a, Monster(79)));
+        Assert.Equal((p0 + 2, b0 + 2, a0 + 1), (player.Progress.Exp, b.Progress.Exp, a.Progress.Exp));
+    }
+
     private async Task<BotClient> Member(string account, string name)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(directory, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_directory, "gate_rsa_public.pem")));
         await bot.LoginAsync(account, "pw"); await bot.EnterGateAsync();
         await bot.EnterWorldAsync((await bot.CreateRoleAsync(name)).RoleBaseInfo.Id);
         await bot.Inbox.WaitAsync(e => e.IsGame(ShopService.ShopSync), TimeSpan.FromSeconds(10));
@@ -333,7 +359,7 @@ public sealed class KillEconomyTests : IAsyncLifetime
             Assert.Equal(0, (await Next(leader, TeamService.TeamInvite, InviteIntoTeamResp.Parser)).Result);
             await Next(member, TeamService.TeamNotifyInvitee, NotifyInvitee.Parser);
             await member.SendGameAsync(TeamService.TeamInviteeResp, new InviteeResp
-                { TeamId = created.TeamId, IsAgree = true, InviteGuid = (long)leader.Self!.Uuid });
+            { TeamId = created.TeamId, IsAgree = true, InviteGuid = (long)leader.Self!.Uuid });
             Assert.Equal(0, (await Next(member, TeamService.TeamInviteeResp, InviteeRespResp.Parser)).Result);
         }
     }

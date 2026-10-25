@@ -18,37 +18,37 @@ namespace Ro3Emu.Tests;
 /// <summary>OnHook requests and 5035/5027/5004 through the real game gate; clock/HP fixtures shorten long fights/days.</summary>
 public sealed class WildAfkTests : IAsyncLifetime
 {
-    private readonly string dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-afk-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-afk-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
-    private WebApplication app = null!;
-    private string http = "";
-    private T Service<T>() where T : notnull => app.Services.GetRequiredService<T>();
+    private WebApplication _app = null!;
+    private string _http = "";
+    private T Service<T>() where T : notnull => _app.Services.GetRequiredService<T>();
 
     public async Task InitializeAsync()
     {
         var (hp, mp, gp) = TestPorts.FreePorts();
-        app = ServerHost.Create([], o =>
+        _app = ServerHost.Create([], o =>
         {
-            o.DataDir = dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.DataDir = _dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
             o.HttpPort = hp; o.MicroGatePort = mp; o.GameGatePort = gp;
         });
         Service<SeasonService>().SetPlayBook(101);
-        SureHitRolls.Install(app); // lethal hits are prepared; a FLEE miss would only be noise
-        await app.StartAsync();
-        http = $"http://127.0.0.1:{hp}";
+        SureHitRolls.Install(_app); // lethal hits are prepared; a FLEE miss would only be noise
+        await _app.StartAsync();
+        _http = $"http://127.0.0.1:{hp}";
     }
 
     public async Task DisposeAsync()
     {
-        await app.StopAsync();
-        await app.DisposeAsync();
+        await _app.StopAsync();
+        await _app.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        try { Directory.Delete(_dataDir, true); } catch (IOException) { }
     }
 
     private async Task<BotClient> InWorld(string name = "Alice", bool create = true)
     {
-        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        var bot = new BotClient(_http, File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem")));
         await bot.LoginAsync(name.ToLowerInvariant(), "pw");
         await bot.EnterGateAsync();
         long id = create ? (await bot.CreateRoleAsync(name)).RoleBaseInfo.Id : bot.Roles.Single().Id;
@@ -65,7 +65,7 @@ public sealed class WildAfkTests : IAsyncLifetime
     private async Task Gm(BotClient bot, string command)
     {
         using var client = new HttpClient();
-        (await client.PostAsync($"{http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
+        (await client.PostAsync($"{_http}/ro3emu/gm?account={bot.Account}", new StringContent(command))).EnsureSuccessStatusCode();
     }
 
     private GameSession Session(BotClient bot) => Service<SessionRegistry>().All().Single(s => s.Account == bot.Account && s.Role != null);
@@ -226,9 +226,6 @@ public sealed class WildAfkTests : IAsyncLifetime
         Assert.False(await State(bot, s => s.WildAfk!.Info.IsSuspended));
         await Task.Delay(1200);
         Assert.InRange(await Query(bot), 3597, 3599);
-        var progress = await Next(bot, TaskService.TaskInfoSync, DBTaskInfoIncrement.Parser,
-            x => x.Infos.TryGetValue(500130, out var q) && q.Inc?.CompleteNum?.All?.Value.Any(n => n > 0) == true);
-        Assert.NotNull(progress);
 
         await OnOwnedLoop(bot, "AFK snapshot fixture", _ =>
         {
@@ -439,6 +436,46 @@ public sealed class WildAfkTests : IAsyncLifetime
         await Query(bot);
         await OnLoop(() => Service<TaskService>().RefreshAsync(Session(bot)));
         Assert.Equal(40, await State(bot, s => s.Progress!.Currency.GetValueOrDefault(5)));
+    }
+
+    [ClientDataFact]
+    public async Task BonusSecondsRewriteTheDailyQuestOnlyWhenAWholeMinutePasses()
+    {
+        await using var bot = await InWorld();
+        await Eligible(bot);
+        await Warp(bot, 10111);
+        await Auto(bot, true);
+        await Kill(bot);
+        long role = (long)bot.Self!.Uuid;
+        long Stored() => DBTaskInfo.Parser.ParseFrom(Service<RoleStore>().LoadTasks(role)!).Infos[500130].CompleteNum[0];
+        void Running(long consumedToday, long elapsedMs)
+        {
+            var s = Session(bot).WildAfk!;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            s.ConsumedTodaySeconds = consumedToday;
+            s.Info.HighMultiplierTimeSeconds = 3000; s.Info.IsSuspended = false;
+            s.LastKillAtMs = now; s.AccountedAtMs = now - elapsedMs; s.RemainderMs = 0;
+        }
+        await OnOwnedLoop(bot, "AFK minute fixture", _ =>
+        {
+            Running(120, 0);
+            return Service<TaskService>().RefreshAsync(Session(bot));
+        });
+        long written = Stored();
+        Assert.InRange(written, 120, 121);
+
+        // Every Bonus Time second used to re-settle the quests: one durable quest write and 5027 per second.
+        await OnOwnedLoop(bot, "AFK seconds fixture", _ => { Running(written, 5000); return Task.CompletedTask; });
+        await Query(bot);
+        Assert.True(await State(bot, s => s.WildAfk!.ConsumedTodaySeconds) >= written + 5);
+        Assert.Equal(written, await State(bot, s => s.Tasks!.Infos[500130].CompleteNum[0]));
+        Assert.Equal(written, Stored());
+
+        await OnOwnedLoop(bot, "AFK next minute fixture", _ => { Running(179, 2000); return Task.CompletedTask; });
+        await Query(bot);
+        await Next(bot, TaskService.TaskInfoSync, DBTaskInfoIncrement.Parser,
+            x => x.Infos.TryGetValue(500130, out var q) && q.Inc?.CompleteNum?.All?.Value.Any(n => n >= 180) == true);
+        Assert.True(Stored() >= 180);
     }
 
     [ClientDataFact]

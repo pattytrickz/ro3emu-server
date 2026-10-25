@@ -1,0 +1,56 @@
+using Ro3Emu.Server;
+using Ro3Emu.Server.Game;
+
+namespace Ro3Emu.Tests;
+
+/// <summary>Sol RO3 house rates (ServerOptions.KillExpPercent, CardDropRolls): the data's numbers unless set.</summary>
+public sealed class HouseRateTests
+{
+    [Fact]
+    public void KillExpScalesByPercentAndKeepsAtLeastOne()
+    {
+        Assert.Equal(100, new ServerOptions().KillExpPercent);
+        Assert.Equal(300, RewardService.HouseExp(200, 150));
+        Assert.Equal(200, RewardService.HouseExp(200, 100));
+        Assert.Equal(1, RewardService.HouseExp(1, 50));
+        Assert.Equal(0, RewardService.HouseExp(0, 150)); // a kill without EXP stays without
+    }
+
+    [Fact]
+    public void ExtraCardRollsKeepOnlyTheirCards()
+    {
+        Assert.Equal(1, new ServerOptions().CardDropRolls);
+        const int Card = 1440100, Zeny = 2, Potion = 1000001;
+        int rolls = 0;
+        void Roll(List<(int Entry, int Count)> into)
+        {
+            rolls++;
+            into.Add((Zeny, 10));
+            into.Add((Potion, 1));
+            if (rolls != 2) into.Add((Card, 1)); // the second roll finds no card
+        }
+
+        var drops = new List<(int Entry, int Count)>();
+        RewardService.RollWithExtraCards(drops, Roll, e => e == Card, 3);
+        Assert.Equal(3, rolls);
+        Assert.Equal([(Zeny, 10), (Potion, 1), (Card, 1), (Card, 1)], drops);
+
+        var once = new List<(int Entry, int Count)>();
+        rolls = 0;
+        RewardService.RollWithExtraCards(once, Roll, e => e == Card, 1);
+        Assert.Equal(1, rolls);
+        Assert.Equal([(Zeny, 10), (Potion, 1), (Card, 1)], once);
+    }
+
+    [Fact]
+    public void ARealPartyOfThreeEarnsTheBonus()
+    {
+        Assert.Equal(0, new ServerOptions().RealPartyExpPercent); // off unless the realm sets it
+        Assert.Equal(125, RewardService.RealPartyPercent(25, 3, 3));
+        Assert.Equal(125, RewardService.RealPartyPercent(25, 3, 5));
+        Assert.Equal(100, RewardService.RealPartyPercent(25, 3, 2)); // two real players and an AI player: no bonus
+        Assert.Equal(100, RewardService.RealPartyPercent(0, 3, 5));
+        Assert.Equal(100, RewardService.RealPartyPercent(25, 1, 1)); // a solo player is never a party
+        Assert.Equal(187, RewardService.HouseExp(100, 150 * 100 / 100 * 125 / 100)); // x1.5 house rate, then +25%
+    }
+}

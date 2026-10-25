@@ -99,7 +99,7 @@ public abstract class GateListener(IPAddress address, int port, ILogger log, Dia
                         continue;
                     }
                     // No cancellation token on Task.Run: a canceled dispatch must still dispose its socket.
-                    var task = Task.Run(() => ServeAsync(socket, ct, completion));
+                    var task = Task.Run(() => ServeAsync(socket, ct, completion), CancellationToken.None);
                     _serves.Add(id, (socket, task));
                     if (remote != null) _perAddress[remote] = _perAddress.GetValueOrDefault(remote) + 1;
                     _ = task.ContinueWith(_ =>
@@ -146,36 +146,36 @@ public abstract class GateListener(IPAddress address, int port, ILogger log, Dia
         _serveCompletion.Value = completion;
         try
         {
-        await using var channel = new PhonestChannel(socket, Log) { Metrics = Metrics?.Connect() };
-        Log.LogInformation("{Name}: {Remote} connected", Name, channel.Remote);
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var watch = WatchHandshakeAsync(channel, deadline);
-        try
-        {
-            await channel.RunAsync(OnFrameAsync, deadline.Token);
-        }
-        // ObjectDisposedException: the server closed the socket itself while it was receiving (a kick, such as the
-        // launcher gate's disconnect), an ordinary end of the connection.
-        catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ObjectDisposedException)
-        {
-        }
-        catch (Exception e)
-        {
-            Log.LogError(e, "{Name}: {Remote} failed", Name, channel.Remote);
-        }
-        finally
-        {
-            try { await OnDisconnectedAsync(channel); }
+            await using var channel = new PhonestChannel(socket, Log) { Metrics = Metrics?.Connect() };
+            Log.LogInformation("{Name}: {Remote} connected", Name, channel.Remote);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var watch = WatchHandshakeAsync(channel, deadline);
+            try
+            {
+                await channel.RunAsync(OnFrameAsync, deadline.Token);
+            }
+            // ObjectDisposedException: the server closed the socket itself while it was receiving (a kick, such as the
+            // launcher gate's disconnect), an ordinary end of the connection.
+            catch (Exception e) when (e is SocketException or OperationCanceledException or IOException or ObjectDisposedException)
+            {
+            }
             catch (Exception e)
             {
-                DrainSucceeded = false;
-                OnCleanupFailed(channel, e);
-                Log.LogError(e, "{Name}: {Remote} disconnect cleanup failed", Name, channel.Remote);
+                Log.LogError(e, "{Name}: {Remote} failed", Name, channel.Remote);
             }
-            Log.LogInformation("{Name}: {Remote} disconnected", Name, channel.Remote);
-            deadline.Cancel();
-            await watch;
-        }
+            finally
+            {
+                try { await OnDisconnectedAsync(channel); }
+                catch (Exception e)
+                {
+                    DrainSucceeded = false;
+                    OnCleanupFailed(channel, e);
+                    Log.LogError(e, "{Name}: {Remote} disconnect cleanup failed", Name, channel.Remote);
+                }
+                Log.LogInformation("{Name}: {Remote} disconnected", Name, channel.Remote);
+                deadline.Cancel();
+                await watch;
+            }
         }
         finally { _serveCompletion.Value = null; completion?.Dispose(); }
     }

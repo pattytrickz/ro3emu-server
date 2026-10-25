@@ -10,7 +10,7 @@ public sealed partial class TerritoryWarsService
     private EventEconomyMutation? PendingSource(IReadOnlyDictionary<long, List<Grant>> awards,
         string kind, string sourceKey)
     {
-        var catalog = EventEconomy.Catalog(data);
+        var catalog = EventEconomy.Catalog(_data);
         var grants = awards.SelectMany(pair => pair.Value.Where(g => g.Count > 0 && g.Entry is not (100 or 101))
             .Select(grant => (Role: pair.Key, Grant: grant,
                 Asset: catalog.TryAsset(grant.Entry, out var asset) ? asset
@@ -23,13 +23,16 @@ public sealed partial class TerritoryWarsService
             g.Aggregate(0L, (n, x) => checked(n + x.Grant.Count)))).ToArray();
         return new EventEconomyMutation(catalog, Guid.NewGuid().ToString("N"), "realm", 0,
             "event/territory-" + kind, sourceKey, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            [], goods, deltas, JsonSerializer.SerializeToUtf8Bytes(new { Kind = kind, Source = sourceKey,
-                Grants = grants.Select(x => new { x.Role, x.Grant.Entry, x.Grant.Count, x.Grant.Bind }) }));
+            [], goods, deltas, JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Kind = kind, Source = sourceKey,
+                Grants = grants.Select(x => new { x.Role, x.Grant.Entry, x.Grant.Count, x.Grant.Bind })
+            }));
     }
     private EventEconomyMutation? SiegeMailSource(IReadOnlyDictionary<long, List<MailService.Attachment>> awards,
         string sourceKey)
     {
-        var catalog = EventEconomy.Catalog(data);
+        var catalog = EventEconomy.Catalog(_data);
         var grants = awards.SelectMany(pair => pair.Value.Where(g => g.Count > 0)
             .Select(grant => (Role: pair.Key, Grant: grant,
                 Asset: catalog.TryAsset(grant.Entry, out var asset) ? asset
@@ -42,8 +45,11 @@ public sealed partial class TerritoryWarsService
             g.Aggregate(0L, (n, x) => checked(n + x.Grant.Count)))).ToArray();
         return new EventEconomyMutation(catalog, Guid.NewGuid().ToString("N"), "realm", 0,
             "event/territory-siege-settle", sourceKey, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            [], goods, deltas, JsonSerializer.SerializeToUtf8Bytes(new { Source = sourceKey,
-                Awards = grants.Select(x => new { x.Role, x.Grant.Entry, x.Grant.Count, x.Grant.Bind }) }));
+            [], goods, deltas, JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Source = sourceKey,
+                Awards = grants.Select(x => new { x.Role, x.Grant.Entry, x.Grant.Count, x.Grant.Bind })
+            }));
     }
     private static Dictionary<(EconomyOwner Owner, EconomyAsset Asset, string Location), long> WarsHoldings(
         WorldState source, string prefix = "active/")
@@ -113,13 +119,16 @@ public sealed partial class TerritoryWarsService
             .Where(x => x.Delta != 0).ToArray();
         var totals = changes.GroupBy(x => x.key.Asset).Select(g => (Asset: g.Key,
             Delta: g.Aggregate(0L, (n, x) => checked(n + x.Delta)))).ToArray();
-        return new EventEconomyMutation(EventEconomy.Catalog(data), Guid.NewGuid().ToString("N"),
+        return new EventEconomyMutation(EventEconomy.Catalog(_data), Guid.NewGuid().ToString("N"),
             actor?.Account ?? "realm", actor?.Role?.Id ?? 0, "event/territory-" + kind, sourceKey,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             totals.Where(x => x.Delta < 0).Select(x => new EconomyQuantity(x.Asset, -x.Delta)).ToArray(),
             totals.Where(x => x.Delta > 0).Select(x => new EconomyQuantity(x.Asset, x.Delta)).ToArray(),
-            ownerDeltas, JsonSerializer.SerializeToUtf8Bytes(new { Kind = kind, Source = sourceKey,
-                Changes = changes.Select(x => new { x.key.Owner, x.key.Asset, x.key.Location, x.Delta }) }));
+            ownerDeltas, JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Kind = kind, Source = sourceKey,
+                Changes = changes.Select(x => new { x.key.Owner, x.key.Asset, x.key.Location, x.Delta })
+            }));
     }
 
 }

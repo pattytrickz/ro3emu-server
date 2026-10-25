@@ -17,7 +17,7 @@ public sealed partial class TaskService
             : !Defs().ContainsKey(req.Id) ? ErrorCodes.TaskNoConfig
             : !session.Tasks.Infos.TryGetValue(req.Id, out var info) ? ErrorCodes.TaskMissing
             : info.Status is not (Running or Finished) ? ErrorCodes.TaskStatus
-            : data.Row("TaskConfig", req.Id) is not { } row || GameData.Int(row, "_iIfReset") != 1
+            : _data.Row("TaskConfig", req.Id) is not { } row || GameData.Int(row, "_iIfReset") != 1
                 ? ErrorCodes.TaskNoGiveUp : 0;
         if (result != 0)
         {
@@ -47,7 +47,7 @@ public sealed partial class TaskService
             await FlushAsync(session);
         }
         await session.SendGameAsync(TaskNpcChat, new TaskNpcChatResp
-            { Result = allowed ? 0 : ErrorCodes.TaskRequirements, ChatId = req.ChatId });
+        { Result = allowed ? 0 : ErrorCodes.TaskRequirements, ChatId = req.ChatId });
     }
 
     /// <summary>
@@ -113,7 +113,7 @@ public sealed partial class TaskService
             await TaskErrorAsync(session, TaskLuckyTurn, req.Type, ErrorCodes.Parameter);
             return;
         }
-        var param = data.Table("PublicParamConfig");
+        var param = _data.Table("PublicParamConfig");
         int ticket = param.TryGetValue("RunRingTaskTurntableItem", out var configuredTicket)
             && GameData.Number(configuredTicket) is { } ticketNumber and > 0 and <= int.MaxValue
             ? (int)ticketNumber : 0;
@@ -130,7 +130,7 @@ public sealed partial class TaskService
         try
         {
             for (int draw = 0; draw < turns; draw++)
-                foreach (var grant in awards.Resolve(session, reward).Grants)
+                foreach (var grant in _awards.Resolve(session, reward).Grants)
                 {
                     int slot = slots.FindIndex(s => s.Entry == grant.Entry && s.Count == grant.Count);
                     if (slot < 0) slot = slots.FindIndex(s => s.Entry == grant.Entry);
@@ -143,7 +143,7 @@ public sealed partial class TaskService
             await TaskErrorAsync(session, TaskLuckyTurn, req.Type, ErrorCodes.FeatureUnavailable);
             return;
         }
-        if (!await character.ApplyAwardAsync(session, new AwardPlan(reward, 0, grants), costs: [(ticket, turns)],
+        if (!await _character.ApplyAwardAsync(session, new AwardPlan(reward, 0, grants), costs: [(ticket, turns)],
                 manifestType: ManifestTypeRunRing, rewardIndexes: indexes))
         {
             await TaskErrorAsync(session, TaskLuckyTurn, req.Type, ErrorCodes.ItemsShort);
@@ -159,8 +159,8 @@ public sealed partial class TaskService
     /// default value, the one <see cref="AwardService.Resolve"/> rolls here).</summary>
     private List<(int Entry, int Count)> WheelSlots(long group)
     {
-        if (data.Row("MultiverseGroupConfig", group) is not { } mv
-            || data.Row("AwardConfig", GameData.Int(mv, "_iValue_default")) is not { ValueKind: JsonValueKind.Array } rows
+        if (_data.Row("MultiverseGroupConfig", group) is not { } mv
+            || _data.Row("AwardConfig", GameData.Int(mv, "_iValue_default")) is not { ValueKind: JsonValueKind.Array } rows
             || rows.GetArrayLength() == 0
             || !rows[0].TryGetProperty("_kPreview", out var preview) || preview.ValueKind != JsonValueKind.Array) return [];
         return preview.EnumerateArray().Where(t => t.ValueKind == JsonValueKind.Array && t.GetArrayLength() >= 2)
@@ -184,8 +184,8 @@ public sealed partial class TaskService
             || action[0] is not ("142" or "143")
             || !long.TryParse(action[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out long sceneId)
             || !long.TryParse(action[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long pointId)
-            || pointId <= 0 || worldData.Map(sceneId)?.Points.ContainsKey(pointId) != true
-            || !await scene.TaskTrackTeleportAsync(session, sceneId, pointId))
+            || pointId <= 0 || _worldData.Map(sceneId)?.Points.ContainsKey(pointId) != true
+            || !await _scene.TaskTrackTeleportAsync(session, sceneId, pointId))
             await TaskErrorAsync(session, TaskTrackTeleport, req.TaskId, ErrorCodes.TaskRequirements);
     }
 

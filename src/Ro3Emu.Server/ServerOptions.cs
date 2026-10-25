@@ -16,6 +16,9 @@ public sealed class ServerOptions
         : System.Net.IPAddress.TryParse(PublicHost, out var host) && System.Net.IPAddress.IsLoopback(host) ? System.Net.IPAddress.Loopback
         : System.Net.IPAddress.Any;
 
+    /// <summary>The voice relay serves whenever a port is set (the stream is sealed, so off loopback too).</summary>
+    public bool VoiceServed() => Voice.Port > 0;
+
     public int HttpPort { get; set; } = 5380;
 
     public int MicroGatePort { get; set; } = 20000;
@@ -41,6 +44,12 @@ public sealed class ServerOptions
     /// (tools/WorldData); default DataDir.
     /// </summary>
     public string? GameDataDir { get; set; }
+
+    /// <summary>
+    /// Copy the database to DataDir/backups at startup and every 6 hours (DatabaseBackup). Off only for a test realm
+    /// running on a database copy where the disk cannot hold another one.
+    /// </summary>
+    public bool DatabaseBackups { get; set; } = true;
 
     /// <summary>Walk check against the client's nav grid: "off", "log" (report only) or "enforce" (snap back).</summary>
     public string WalkCheck { get; set; } = "log";
@@ -79,6 +88,27 @@ public sealed class ServerOptions
     /// Dungeon, MVP and boss kills are unchanged; battle time keeps its own accounting.
     /// </summary>
     public bool BonusExpAlways { get; set; }
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour), with <see cref="BonusExpAlways"/>: from this Base level up,
+    /// auto-battle kills pay the Bonus Time table only while battle time lasts (the original rule), so AFK hunting has
+    /// a daily budget; hands-on kills keep the table at every level. 0: BonusExpAlways covers every level.
+    /// </summary>
+    public int BonusExpAlwaysBelowLevel { get; set; }
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): daily battle time and its banked maximum
+    /// (PublicParamConfig OnHookDailyFightTime 60 minutes, OnHookFightTimeLimit 180) times this. 1 keeps the data's.
+    /// </summary>
+    public int BonusTimeMultiplier { get; set; } = 1;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a published level-cap schedule. The cap in force is the Cap of the
+    /// latest phase whose From has passed (none yet: no house cap). Base EXP stops at the cap with a full bar kept, so
+    /// a raise levels the role at once; a role already above the cap keeps its level. Replaces the original's
+    /// open-day caps (BaseLvLimitConfig), which this realm doesn't apply (CharacterService.LevelRules).
+    /// </summary>
+    public LevelCapPhase[] LevelCaps { get; set; } = [];
 
     /// <summary>
     /// Hours a settled monster-kill receipt keeps its full payload before <see cref="Accounts.ReceiptCompaction"/>
@@ -159,6 +189,20 @@ public sealed class ServerOptions
     /// <summary>In-game bug reports (FeedbackService, docs/guide/feedback.md).</summary>
     public FeedbackOptions Feedback { get; set; } = new();
 
+    /// <summary>
+    /// Credential checks (SDK login, character deletion) one remote address may make per minute; past it the server
+    /// answers 429 without hashing. Each check costs a 100 000-round PBKDF2 hash, and logins register accounts.
+    /// Loopback is exempt (local play, the load tests, RO3Emu.exe); behind a reverse proxy every player shares the
+    /// proxy's address, so raise this there.
+    /// </summary>
+    public int LoginAttemptsPerMinute { get; set; } = 20;
+
+    /// <summary>Tests: the credential limit applies to loopback too.</summary>
+    public bool LoginLimitIncludesLoopback { get; set; }
+
+    /// <summary>Team voice relay proof of concept (Voice/, docs TBD). Off until a port is set.</summary>
+    public VoiceOptions Voice { get; set; } = new();
+
     /// <summary>(inferred) Locally configured text blocklist; the original service's sensitive-word dictionary is unavailable.</summary>
     public string[] GuildBlockedWords { get; set; } = [];
 
@@ -176,6 +220,73 @@ public sealed class ServerOptions
     public int? GuildLeagueMinMembers { get; set; }
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): party members whose account matches (exact, or "prefix*") take no
+    /// share of a field kill's EXP, so the AI players ("aibot*") no longer halve a real player's kills. Their own kills
+    /// still share with the real players on the map. Empty: every member shares (the original rule).
+    /// </summary>
+    public string[] PartyShareExcludedAccounts { get; set; } = [];
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a kill's EXP rises by this percent (0-100) when the killer's party
+    /// has at least <see cref="RealPartyMinPlayers"/> real players on the killer's map (AI players in
+    /// PartyShareExcludedAccounts don't count), on top of the party bonus, so playing together beats soloing. 0: none.
+    /// </summary>
+    public int RealPartyExpPercent { get; set; }
+    public int RealPartyMinPlayers { get; set; } = 3;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a monster kill's Base and Job EXP in percent, after the level gap
+    /// correction and the party bonus (RewardService.ResolveKill), so a small realm levels faster. 100 keeps the data's.
+    /// </summary>
+    public int KillExpPercent { get; set; } = 100;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a kill's drop tables roll this many times for cards (1-10), keeping
+    /// only the cards of the extra rolls, so a card is about that many times as likely and nothing else changes. 1 keeps
+    /// the data's odds.
+    /// </summary>
+    public int CardDropRolls { get; set; } = 1;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): timed rate windows (Bonus Sunday, a holiday event), on top of
+    /// KillExpPercent and CardDropRolls. GMs add more while the server runs ("!rates", POST /ro3emu/event); those are kept
+    /// in the database. Empty: no event rates (Game/EventService.cs, docs/guide/events.md).
+    /// </summary>
+    public EventRateWindow[] EventRates { get; set; } = [];
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a mail every role gets once, at its first login inside the window
+    /// (an advent gift, a holiday present). GMs add more while the server runs ("!logingift"). Empty: none.
+    /// </summary>
+    public LoginGift[] LoginGifts { get; set; } = [];
+
+    /// <summary>
+    /// Accounts (exact, or "prefix*") whose roles the public player count (/ro3emu/status, read by the website and the
+    /// launcher) leaves out, so the AI players ("aibot*") do not show as people online. The admin's /ro3emu/online and
+    /// /ro3emu/metrics still count every session. Empty: every role counts.
+    /// </summary>
+    public string[] StatusExcludedAccounts { get; set; } = [];
+
+    /// <summary>Whether <paramref name="account"/> is on an account list of exact names or "prefix*" entries.</summary>
+    public static bool AccountListed(IEnumerable<string> entries, string? account) =>
+        account != null && entries.Any(e => e.EndsWith('*')
+            ? e.Length > 1 && account.StartsWith(e[..^1], StringComparison.OrdinalIgnoreCase)
+            : string.Equals(e, account, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): field MVPs (MvpService) spawn with this percentage of their
+    /// configured HP, so a small realm's party can finish one. 100 keeps the config. Dungeon and story bosses are unchanged.
+    /// </summary>
+    public int FieldMvpHpPercent { get; set; } = 100;
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): once the oldest party in a Phantom Realm queue (DungeonMatchService)
+    /// has waited this many seconds, the match starts with the parties queued for that boss, down to a single player.
+    /// The boss is not scaled down. 0 keeps the original rule: the match waits for a full party.
+    /// </summary>
+    public int DungeonMatchFillSeconds { get; set; }
+
+    /// <summary>
     /// Seconds an in-game role stays in the world after its game socket drops, waiting for the client's silent
     /// reconnect (Phonest ConnectServerReq ReConnection). 60 is the reference
     /// AVATAR_LOSE_CONNECTION_TIMEOUT_SECONDS; it must exceed the client's 20 s + 10 s budgets. 0 turns grace off.
@@ -189,6 +300,80 @@ public sealed class ServerOptions
     /// </summary>
     public int ChickenTestPlayers { get; set; }
     public int ChickenTestTeamSize { get; set; }
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): lobby sizes for a small population. Survivor Battle (entry 2)
+    /// starts with <see cref="SurvivorPlayers"/> entrants in teams of <see cref="SurvivorTeamSize"/> instead of
+    /// EatChickenMatchConfig's 100 in teams of 5; Battle of Dragon Coffin Island (entry 6) with
+    /// <see cref="DragonIslandPlayers"/> in squads of <see cref="DragonIslandTeamSize"/> instead of
+    /// DragonIslandMatchConfig's 30 in squads of 5 (squads alternate between the two camps, so the lobby must hold an
+    /// even number of squads). 0 keeps the config; the Survivor test aid above and GM "!chicken shape" win over it.
+    /// </summary>
+    public int SurvivorPlayers { get; set; }
+    public int SurvivorTeamSize { get; set; }
+    public int DragonIslandPlayers { get; set; }
+    public int DragonIslandTeamSize { get; set; }
+
+    /// <summary>
+    /// (inferred) Seconds of a Realm of the Gods raid's preparation phase: the boss waits until the team leader presses the
+    /// scene's "Start Battle" button (DungeonLua_30201xx DungeonBase.FunctionButtons, sent as 30125) or this time runs out.
+    /// The client has the button, not the phase length.
+    /// </summary>
+    public int RaidPreparationSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// (inferred) Seconds from a raid boss fight's start to its enrage, against which the Final Trial "more than N minutes
+    /// remaining until enrage" honors (TenGameplayFinalTrialConfig, condition 7004) are judged. The enrage timer lives in
+    /// the boss's server script, which the client does not carry.
+    /// </summary>
+    public int RaidEnrageSeconds { get; set; } = 600;
+
+    /// <summary>Boss special skills (BossSkillSets, MonsterService.BossSkills): the scheduler's inferred numbers.</summary>
+    public BossSkillOptions BossSkills { get; set; } = new();
+}
+
+/// <summary>
+/// The boss skill scheduler. The skill rows, their cooldowns, cast and action times, ranges, damage and buffs come from
+/// SkillConfig; the original server's AI scripts that decided when to cast are not in the client, so every number here
+/// is (inferred) and can be tuned without a code change.
+/// </summary>
+public sealed class BossSkillOptions
+{
+    /// <summary>Off: bosses only swing their normal attack, as before the scheduler.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Delay after a boss engages before its first special skill.</summary>
+    public int FirstCastDelayMs { get; set; } = 3000;
+
+    /// <summary>Pause after a special's action ends before the next one (the boss swings meanwhile); a row's longer
+    /// _iPubCD wins.</summary>
+    public int GlobalCooldownMs { get; set; } = 2000;
+
+    /// <summary>Cooldown of a skill whose family carries only placeholder cooldowns (every row 0-2 s: Realm of the
+    /// Gods, story Baphomet and Pharaoh), where the encounter script set the pace.</summary>
+    public int PlaceholderCooldownMs { get; set; } = 15000;
+
+    /// <summary>HP percent at which a boss with phase variants enters each next phase (phase 1, phase 2...).</summary>
+    public int[] PhaseHpPercents { get; set; } = [50, 25];
+
+    /// <summary>Area radius (m) when neither the row nor its show template gives one.</summary>
+    public float DefaultRadius { get; set; } = 5f;
+
+    /// <summary>Longest distance (m) to its target at which a boss starts a targeted skill; rows with "anywhere"
+    /// ranges (_iDistanceMax 9999) are capped to it.</summary>
+    public float MaxReach { get; set; } = 15f;
+
+    /// <summary>Most hits one cast lands (a show's attack points; Ring of Light has three).</summary>
+    public int MaxHitsPerCast { get; set; } = 6;
+
+    /// <summary>Boss skill damage as a percent of the row's formula result.</summary>
+    public int DamagePercent { get; set; } = 100;
+
+    /// <summary>Minions of a summon skill whose description gives no count.</summary>
+    public int SummonCount { get; set; } = 3;
+
+    /// <summary>Life of a summoned minion without a self-destruct born buff.</summary>
+    public int SummonLifeMs { get; set; } = 30000;
 }
 
 /// <summary>In-game bug reports: the menu's Feedback button and "/bug" in chat (FeedbackService).</summary>
@@ -208,6 +393,54 @@ public sealed class FeedbackOptions
     public int CooldownSeconds { get; set; } = 5;
 }
 
+/// <summary>
+/// Team voice relay (Talk/Listen/Mute in the party panel). The listener only opens when <see cref="Port"/> is set;
+/// an off relay still answers the 77015 ticket request with port 0 so the client's menu can disable itself cleanly.
+/// </summary>
+public sealed class VoiceOptions
+{
+    /// <summary>TCP port the voice gate listens on; 0 keeps the relay off.</summary>
+    public int Port { get; set; }
+
+    /// <summary>Members a single voice room (one party/team) may hold.</summary>
+    public int MaxRoomSize { get; set; } = 40;
+
+    /// <summary>Audio frames a connection may send per second before the token bucket drops the extra ones.</summary>
+    public int FramesPerSecond { get; set; } = 50;
+
+    /// <summary>Extra frames the token bucket allows in a short burst on top of <see cref="FramesPerSecond"/>.</summary>
+    public int Burst { get; set; } = 10;
+
+    /// <summary>Control frames (Join, Leave, Mic, Speaker, Ping, anything else after Auth) a connection may send per
+    /// second; the extra ones are dropped, and a sustained flood (3x this rate over 5 s) disconnects it. A real
+    /// client sends a few per minute: a ping every 10 s plus the player's own clicks.</summary>
+    public int ControlPerSecond { get; set; } = 10;
+
+    /// <summary>Extra control frames allowed in a short burst on top of <see cref="ControlPerSecond"/>.</summary>
+    public int ControlBurst { get; set; } = 20;
+
+    /// <summary>Longest opus payload accepted in one Audio frame, in bytes.</summary>
+    public int MaxPayload { get; set; } = 512;
+
+    /// <summary>How long a 77015 ticket stays valid before a connection must present it.</summary>
+    public int TicketSeconds { get; set; } = 60;
+
+    /// <summary>Voice connections the listener accepts at once; past this new connections are refused.</summary>
+    public int MaxConnections { get; set; } = 1024;
+
+    /// <summary>Voice connections one IP address may hold at once (a LAN party behind one router needs a few).</summary>
+    public int MaxConnectionsPerIp { get; set; } = 8;
+
+    /// <summary>Connections from one IP that end without a valid Auth before that IP is refused for a minute.</summary>
+    public int MaxFailedAuthPerIp { get; set; } = 10;
+
+    /// <summary>Seconds a fresh connection has to send its Auth frame before it is closed. A test host lowers this.</summary>
+    public int FirstFrameTimeoutSeconds { get; set; } = 5;
+
+    /// <summary>Seconds without any frame before an authed connection is closed as idle. A test host lowers this.</summary>
+    public int IdleTimeoutSeconds { get; set; } = 30;
+}
+
 /// <summary>Both off by default so the tests keep the original's pass; a realm turns them on (docs/systems/activities-battlepass-monthcard.md).</summary>
 public sealed class PassOptions
 {
@@ -216,6 +449,44 @@ public sealed class PassOptions
 
     /// <summary>Pass EXP from play: challenges, daily activity, monsters, dungeons, MVPs and story (NewActivityService.PassPlay).</summary>
     public bool Play { get; set; }
+}
+
+/// <summary>
+/// One <see cref="ServerOptions.EventRates"/> window (UTC). Overlapping windows don't stack: each rate takes the highest.
+/// </summary>
+public sealed class EventRateWindow
+{
+    /// <summary>Shown on the marquee when the window opens and to players who log in while it runs.</summary>
+    public string Name { get; set; } = "Bonus event";
+    public DateTimeOffset Start { get; set; }
+    public DateTimeOffset End { get; set; }
+    /// <summary>Kill EXP in percent of the house rate (200 = twice KillExpPercent).</summary>
+    public int ExpPercent { get; set; } = 100;
+    /// <summary>A kill's loot tables roll this many times (1-5); the extra rolls keep their items, never their EXP.</summary>
+    public int DropRolls { get; set; } = 1;
+    /// <summary>Card chance times this (1-5), on top of CardDropRolls.</summary>
+    public int CardRolls { get; set; } = 1;
+}
+
+/// <summary>One <see cref="ServerOptions.LoginGifts"/> mail (UTC window).</summary>
+public sealed class LoginGift
+{
+    /// <summary>Unique and never reused: a role that claimed this id never gets it again.</summary>
+    public string Id { get; set; } = "";
+    public DateTimeOffset Start { get; set; }
+    public DateTimeOffset End { get; set; }
+    public int Item { get; set; }
+    public int Count { get; set; } = 1;
+    public string Title { get; set; } = "A gift from the Sol RO3 team";
+    /// <summary>Roles below this Base level wait for it until they reach it inside the window.</summary>
+    public int MinLevel { get; set; }
+}
+
+/// <summary>One <see cref="ServerOptions.LevelCaps"/> phase: from this UTC time on, Base level stops at Cap.</summary>
+public sealed class LevelCapPhase
+{
+    public DateTimeOffset From { get; set; }
+    public int Cap { get; set; }
 }
 
 /// <summary>House rule: who may play. Existing accounts keep logging in unless blocked.</summary>
@@ -255,13 +526,14 @@ public sealed class OpenContentOptions
 
     /// <summary>
     /// Functions the original never opened (base level 999/9999) whose client UI and data work: 7201 Realm War map,
-    /// 70122 Totem Shop, 41 Feedback, 1000000 Adv. Guild (AdventureGroupService), 96 Valhalla Trials (ValhallaService)
+    /// 70122 Totem Shop, 41 Feedback, 1000000 Adv. Guild (AdventureGroupService), 96 Valhalla Trials (ValhallaService),
+    /// 69 Season page (SeasonPageService; level 50 until the 20 Oct 2026 client closed it with condition 2000062, [1002,9999])
     /// (Feedback's panel comes from Ro3Emu.ClientHooks.FeedbackButton, its backend is FeedbackService). Shells without a working panel (Title 14, Academy 34...) stay closed so the menu shows no dead
     /// buttons; a function joins this list together with its backend. Novice Challenge (90, activity 112) is left out
     /// (owner, 2026-10-11): its 15 random event texts are "Event Text..."/"Option A" filler and the first node's
     /// dialogues 9901-9904 do not exist, so the original never finished it.
     /// </summary>
-    public long[] Functions { get; set; } = [7201, 70122, 41, 1000000, 96];
+    public long[] Functions { get; set; } = [7201, 70122, 41, 1000000, 96, 69];
 
     /// <summary>
     /// NewActivityConfig rows whose own open condition is a level the cap never reaches (e.g. 112 Novice Challenge).

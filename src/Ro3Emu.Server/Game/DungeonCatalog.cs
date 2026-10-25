@@ -28,13 +28,32 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
         public long SceneEntry => GameData.Int(Config, "_iID");
         public int MultiId => Multi is { } row ? (int)GameData.Int(row, "_iID") : 0;
         public int DurationMs => (int)Math.Clamp(GameData.Int(Config, "_iLimitTime"), 1000, int.MaxValue);
-        public DungeonInitData Init(long teamId = 0, long instanceId = 0) => LayerId != 0
-            // The client never reads it (LC_DunGeon_Valhalla); filled as the proto defines it (inferred).
-            ? new() { HeroicSpiritDungeonInitData = new HeroicSpiritDungeonInitData { ChallengeId = LayerId } }
-            : MultiId == 0 ? new()
-            : new() { MultiDungeonInitData = new MultiDungeonInitData
-            { MultiDungeonId = MultiId, MarkId = Mark, TeamID = teamId, DungeonId = instanceId } };
+        /// <summary>A Hidden Realm run: the random entry (TenGameplayConfig _iIsRandomDungeon) this boss was drawn for.</summary>
+        public RandomOrigin? Origin { get; init; }
+        /// <summary>The entry whose rewards, allowance and record the run counts against: the Hidden Realm's own row when
+        /// drawn from it (inferred: its boss row 4300099 carries the awards and _iMatchID), else the fought boss's.</summary>
+        public JsonElement? RewardMulti => Origin?.Multi ?? Multi;
+        public JsonElement? RewardBoss => Origin?.Boss ?? Boss;
+        public int RewardMark => Origin?.Mark ?? Mark;
+        public int RewardMultiId => RewardMulti is { } row ? (int)GameData.Int(row, "_iID") : 0;
+        public DungeonInitData Init(long teamId = 0, long instanceId = 0)
+        {
+            var init = LayerId != 0
+                // The client never reads it (LC_DunGeon_Valhalla); filled as the proto defines it (inferred).
+                ? new DungeonInitData { HeroicSpiritDungeonInitData = new HeroicSpiritDungeonInitData { ChallengeId = LayerId } }
+                : MultiId == 0 ? new DungeonInitData()
+                : new DungeonInitData
+                {
+                    MultiDungeonInitData = new MultiDungeonInitData
+                    { MultiDungeonId = MultiId, MarkId = Mark, TeamID = teamId, DungeonId = instanceId }
+                };
+            if (Origin is { } origin && init.MultiDungeonInitData != null)
+                init.MultiDungeonInitData.Origin = new MultiDungeonInfo { MultiDungeonId = GameData.Int(origin.Multi, "_iID"), MarkId = origin.Mark };
+            return init;
+        }
     }
+
+    public sealed record RandomOrigin(JsonElement Multi, JsonElement Boss, int Mark);
 
     public IEnumerable<JsonElement> MultiRows => data.Table("TenGameplayConfig").Values
         .Where(r => TowerService.FitsPlayBook(r, seasons.PlayBook));
@@ -302,7 +321,8 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
     /// A scripted scene's steps (ReconstructedDungeons.Scripted): one wave without monsters per step. Every reference
     /// must resolve in the client data and the scene's map, or the scene is refused like any unresolved encounter:
     /// the quests the tracker shows, the actors' NPCConfig rows, points and buffs, the stories, regions and points,
-    /// and the interactions and dungeon messages the step's actors can actually send.
+    /// the shuffled points, the buffs an event gives and the actor that takes them, and the interactions and dungeon
+    /// messages the step's actors can actually send.
     /// </summary>
     private IReadOnlyList<Wave> ScriptedWaves(ReconstructedDungeons.ScriptedScene scene, MapWorld map)
     {
@@ -317,8 +337,12 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
                     || actor.Buffs.Any(b => data.Row("BuffConfig", b) is not { } buff || GameData.Int(buff, "_iBuffID") <= 0)) return [];
             if (step.Story != 0 && data.Row("PlotInterpretation", step.Story) == null) return [];
             if (step.TeleportAfter != 0 && !map.Points.ContainsKey(step.TeleportAfter)) return [];
+            if (step.Shuffle is { Count: > 0 } lists && (lists[0].Count < 2 || lists.Any(l => l.Count != lists[0].Count
+                    || l.Distinct().Count() != l.Count || !l.All(map.Points.ContainsKey)))) return [];
             foreach (var t in step.Complete.Concat(step.Ignore))
             {
+                if (t.Buff != 0 && (data.Row("BuffConfig", t.Buff) is not { } given || GameData.Int(given, "_iBuffID") <= 0
+                    || step.Actors.All(a => a.NpcId != t.On))) return [];
                 bool known = t.Kind switch
                 {
                     ReconstructedDungeons.TriggerKind.Interaction => step.Actors.Any(a => Interactions(a.NpcId).Contains(t.Id)),

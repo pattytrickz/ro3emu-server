@@ -170,9 +170,9 @@ public sealed class AchievementTests : IAsyncLifetime
         Assert.Equal(134, rows.Count);
         Assert.All(rows, r => Assert.All(r.Required, required => Assert.True(required > 0, $"{r.Id} has no R")));
         var blocked = rows.Where(r => r.Blocked).ToList();
-        Assert.Equal(17, blocked.Count);
+        Assert.Equal(15, blocked.Count); // 316002 (Echo Resonance) is read from the worn Soul Echoes
         Assert.All(blocked, r => Assert.Contains(r.Targets[0][0],
-            new long[] { 106007, 106008, 303001, 302007, 326003, 316002, 303004 }));
+            new long[] { 106007, 106008, 303001, 302007, 326003, 303004 }));
         Assert.Single(blocked, r => r.Targets[0][0] == 303004); // the fashion-grid variant only
         Assert.Equal(new[] { 1L, 1, 1 }, rows.Single(r => r.Id == TeamBoss).Required); // 210008 x3, R = p1
         Assert.Equal(40060010, rows.Single(r => r.Id == Phoenix).Required[0]); // 303002: R is the appearance id
@@ -437,7 +437,7 @@ public sealed class AchievementTests : IAsyncLifetime
         await Gm("alice", "!ach fill 100 10"); // 150 points: level 2
         await Until("Alice", s => s.Achievements!.AchievementLevelInfo[100].Level == 2, "level 2");
         await alice.SendGameAsync(AchievementService.GetAllReward, new GetAchievementAllRewardReq
-            { LevelRewards = { new LevelRewardInfo { Type = 100, Level = 2 } } });
+        { LevelRewards = { new LevelRewardInfo { Type = 100, Level = 2 } } });
         var levelsOnly = await Next(alice, AchievementService.GetAllReward, GetAchievementAllRewardResp.Parser);
         Assert.Equal(0, levelsOnly.Result);
         Assert.Empty(levelsOnly.SuccessTaskIds);
@@ -544,7 +544,7 @@ public sealed class AchievementTests : IAsyncLifetime
         await Full(alice);
         await Gm("alice", "!lvl 21");
         await alice.SendGameAsync(GuildService.Create, new GuildCreateReq
-            { Name = "Trophy", Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 } });
+        { Name = "Trophy", Icon = new GuildHeadIcon { BackgroundType = 100101, IconType = 200101 } });
         Assert.Equal(0, (await Next(alice, GuildService.Create, GuildCreateResp.Parser)).Result);
         await ReachedIncrement(alice, Guild);
         // 107003 [5, 20]: CheckGuildPosition with operator 5 (<): the leader (1) holds a position below 20.

@@ -18,7 +18,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 5100");
         await Gm("alice", $"!item {Dagger} 1");
-        var skills = app.Services.GetRequiredService<SkillService>();
+        var skills = _app.Services.GetRequiredService<SkillService>();
         long guid = await Loop.InvokeAsync(() =>
         {
             var dagger = Session("alice").Items.Single(i => i.Entry == Dagger);
@@ -49,8 +49,11 @@ public sealed partial class SkillCombatTests
         // Players start fights from the bar, so the window's Basic Attack goes on it (it was refused, "not learned").
         async Task<int> Bind(int group, int slot)
         {
-            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = SkillLoadOperation.SkillLoadOpLoad,
-                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 } });
+            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
+            {
+                OpType = SkillLoadOperation.SkillLoadOpLoad,
+                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 }
+            });
             return (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result;
         }
         Assert.Equal(0, await Bind(10050, 4));

@@ -51,7 +51,7 @@ public sealed partial class CharacterService
     }
 
     /// <summary>
-    /// A type-7 stage grant is staged in copies and committed with its claim blob on one SQLite connection. No
+    /// A stage reward grant (31178/31175, any type) is staged in copies and committed with its claim blob on one SQLite connection. No
     /// session mutation or success packet precedes commit; a failed transaction leaves the old state intact.
     /// </summary>
     public async Task<bool> GrantDailyStageAsync(GameSession session, IReadOnlyList<(int Entry, int Count, int Bind)> goods,
@@ -68,7 +68,7 @@ public sealed partial class CharacterService
             before.Claims.Except(after.Claims).Any() || questExp < 0 ||
             goods.Any(g => g.Count <= 0 || data.Row("ItemConfig", g.Entry) == null)) return false;
         var plan = new AwardPlan(0, 0, goods.Select(g => new AwardGrant(g.Entry, g.Count, g.Bind)));
-        // One stage (31178) or a batch (31175): the batch's source names all of its stages (upstream 733835d).
+        // One stage (31178) or a batch (31175): the batch's source names all of its stages.
         object outcome = stages is [int stage]
             ? new { Version = 1, Stage = stage, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp }
             : new { Version = 1, Stages = stages, Epoch = after.DailyEpoch, Grants = goods, QuestExp = questExp };
@@ -209,10 +209,13 @@ public sealed partial class CharacterService
                 while (left > 0)
                 {
                     int stack = Math.Min(left, stackLimit);
-                    var item = new InvItem { Entry = grant.Entry, Stack = stack, Pack = pack,
+                    var item = new InvItem
+                    {
+                        Entry = grant.Entry, Stack = stack, Pack = pack,
                         Sort = items.Where(i => i.Grid == 0 && i.Pack == pack).Select(i => i.Sort).DefaultIfEmpty(0).Max() + 1,
                         BindType = grant.BindType, BindExpire = grant.ExpireTimeStamp,
-                        Attrs = TotemAttrFactory?.Invoke(grant.Entry) ?? EmblemAttrFactory?.Invoke(grant.Entry) ?? RollAttrs(grant.Entry) };
+                        Attrs = TotemAttrFactory?.Invoke(grant.Entry) ?? EmblemAttrFactory?.Invoke(grant.Entry) ?? RollAttrs(grant.Entry)
+                    };
                     items.Add(item);
                     created.Add(item);
                     received.Add(item);
@@ -226,9 +229,12 @@ public sealed partial class CharacterService
                     continue;
                 }
             }
-            notification.Rewards.Add(ItemInfo(new InvItem { Entry = grant.Entry, Stack = grant.Count,
+            notification.Rewards.Add(ItemInfo(new InvItem
+            {
+                Entry = grant.Entry, Stack = grant.Count,
                 BindType = grant.BindType, ExpireTimeStamp = grant.ExpireTimeStamp,
-                Attrs = items.LastOrDefault(i => i.Entry == grant.Entry)?.Attrs }));
+                Attrs = items.LastOrDefault(i => i.Entry == grant.Entry)?.Attrs
+            }));
         }
         // Quest award auto returns are staged alongside the source grant, costs, tasks and daily state.
         // Other ApplyAward callers have no quest delivery boundary and retain their standalone behavior.
@@ -241,7 +247,7 @@ public sealed partial class CharacterService
         // TaskService can hold unsaved in-memory objective progress. Compare that snapshot above, then
         // use the persisted blob as the SQLite CAS baseline for this single award transaction.
         byte[]? persistedTasks = expectedTasks == null ? null : roles.LoadTasks(session.Role.Id);
-        var cardSight = StageFirstCardSight?.Invoke(session, gained.Select(g => g.Entry).ToList());
+        var cardSight = StageFirstCardSight?.Invoke(session, gained.Select(g => g.Entry).ToList(), 0);
         var vigorPlan = vigor > 0 ? StageVigorAward?.Invoke(session, vigor) : null;
         // No life-skill state to raise (or nothing would change): keep the Vigor as currency 407, as before.
         if (vigor > 0 && vigorPlan == null) staged.Currency[VigorRewardItem] = checked(staged.Currency.GetValueOrDefault(VigorRewardItem) + vigor);
@@ -316,7 +322,7 @@ public sealed partial class CharacterService
                     {
                         persist?.Invoke(builder);
                         cardSight?.Persist(builder);
-            vigorPlan?.Persist(builder);
+                        vigorPlan?.Persist(builder);
                         escrowAward = builder.HasEscrowEconomy;
                     }, expectedDaily, nextDaily, persistedTasks, expectedTasks != null)) return false;
             }
@@ -373,13 +379,16 @@ public sealed partial class CharacterService
 
     private void ApplyExp(RoleProgress p, long baseExp, long jobExp)
     {
+        int cap = LevelCap();
         p.Exp = checked(p.Exp + baseExp);
-        for (long need; p.Level < MaxLevel && (need = BaseExpNeed(p.Level)) > 0 && p.Exp >= need;)
+        for (long need; p.Level < cap && (need = BaseExpNeed(p.Level)) > 0 && p.Exp >= need;)
         {
             p.Exp -= need;
             p.Level++;
         }
         if (p.Level >= MaxLevel) p.Exp = 0;
+        // House cap (LevelCaps): the bar stops one point short of the next level, and the rest is lost.
+        else if (p.Level >= cap) p.Exp = Math.Min(p.Exp, Math.Max(0, BaseExpNeed(p.Level) - 1));
         p.JobExp = checked(p.JobExp + jobExp);
         SkipFreeJobLevels(p);
         int maxJob = MaxJobLevel(p.Career);
@@ -405,8 +414,11 @@ public sealed partial class CharacterService
 
     private static RoleProgress CloneProgress(RoleProgress source)
     {
-        var result = new RoleProgress { SourceRevision = source.SourceRevision, Career = source.Career, Level = source.Level, JobLevel = source.JobLevel,
-            Exp = source.Exp, JobExp = source.JobExp, BonusPoints = source.BonusPoints, StarterKit = source.StarterKit };
+        var result = new RoleProgress
+        {
+            SourceRevision = source.SourceRevision, Career = source.Career, Level = source.Level, JobLevel = source.JobLevel,
+            Exp = source.Exp, JobExp = source.JobExp, BonusPoints = source.BonusPoints, StarterKit = source.StarterKit
+        };
         Array.Copy(source.Stats, result.Stats, source.Stats.Length);
         foreach (var (key, value) in source.Currency) result.Currency[key] = value;
         foreach (var (key, value) in source.Skills) result.Skills[key] = value;
@@ -469,8 +481,11 @@ public sealed partial class CharacterService
         while (count > 0)
         {
             int stack = Math.Min(count, stackLimit);
-            var item = new InvItem { Entry = entry, Stack = stack, Pack = pack, Sort = NextSort(session, pack),
-                Attrs = TotemAttrFactory?.Invoke(entry) ?? EmblemAttrFactory?.Invoke(entry) ?? RollAttrs(entry), BindType = bind };
+            var item = new InvItem
+            {
+                Entry = entry, Stack = stack, Pack = pack, Sort = NextSort(session, pack),
+                Attrs = TotemAttrFactory?.Invoke(entry) ?? EmblemAttrFactory?.Invoke(entry) ?? RollAttrs(entry), BindType = bind
+            };
             if (persist) itemStore.Insert(session.Role!.Id, item);
             session.Items.Add(item);
             changed.Add(item);

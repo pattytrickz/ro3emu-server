@@ -19,7 +19,7 @@ public sealed partial class SkillCombatTests
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!job 3100");
         await Gm("alice", $"!item {Bow} 1");
-        var skills = app.Services.GetRequiredService<SkillService>();
+        var skills = _app.Services.GetRequiredService<SkillService>();
         long guid = await Loop.InvokeAsync(() =>
         {
             var bow = Session("alice").Items.Single(i => i.Entry == Bow);
@@ -30,8 +30,11 @@ public sealed partial class SkillCombatTests
         static int Learned(DBSkillData d, int group) => d.SkillAssignPlans[d.CurrentPlanIndex].SkillAssigns.TryGetValue(group, out var s) ? s.SkillLevel : 0;
         async Task<int> Load(SkillLoadOperation op, int group, int slot)
         {
-            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq { OpType = op,
-                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 } });
+            await alice.SendGameAsync(SkillService.SkillLoad, new SkillLoadReq
+            {
+                OpType = op,
+                IsManual = true, SocketNum = slot, Info = new SkillData { SkillId = group, SkillLevel = 1 }
+            });
             return (await Next(alice, SkillService.SkillLoad, SkillLoadResp.Parser)).Result;
         }
 

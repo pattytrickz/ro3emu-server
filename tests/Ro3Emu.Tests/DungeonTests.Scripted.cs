@@ -190,21 +190,31 @@ public sealed partial class DungeonTests
         await PlotEnd(alice, 140010);
 
         await Stage(alice, 2, quest: 1);
-        var actors = await ActorsIn(alice, 6);
-        Assert.Equal(3, actors.Count(a => a.NpcId == 400137)); // the bells
+        var actors = await ActorsIn(alice, 7);
+        Assert.Equal([29L, 30L, 31L], actors.Where(a => a.NpcId == 400137).Select(a => a.Point).Order()); // the bells
+        Assert.Equal([29L, 30L, 31L], actors.Where(a => a.NpcId is 400134 or 400135 or 400136).Select(a => a.Point).Order());
         var katie = actors.Single(a => a.NpcId == 400134);
         var wrong = actors.Single(a => a.NpcId == 400135);
         Assert.Equal(2, katie.EntityType); // TriggerNpcInteract looks the ring up as an NPC by its config id
+        // Fervor stands on the mark in front of Katie's bell (bells 29-31 at z 55, marks 33-35 at z 60).
+        var fervor = actors.Single(a => a.NpcId == 400244);
+        Assert.Equal(katie.Point + 4, fervor.Point);
         // Walking up opens the ring's dialogue (auto interaction 20003001, answered so the client runs action 53).
         await Beside(alice, wrong.X, wrong.Y, wrong.Z);
         Assert.Equal(0, await Interact(alice, wrong, 20004001));
         Assert.Equal(0, await Interact(alice, wrong, 5300041)); // 'Choose this one!': message 12, a wrong guess
         await Task.Delay(200);
         Assert.Equal(2, Session(alice).DungeonAttempt!.Wave + 1); // the game goes on
+        // The wrong bell shatters (buff 5402201); the others stay whole.
+        await ActorsIn(alice, 1, a => a.NpcId == 400137 && a.Point == wrong.Point && a.Buffs.Any(b => b.ConfigId == 5402201));
+        Assert.DoesNotContain(await ActorsIn(alice, 3, a => a.NpcId == 400137), a => a.Point != wrong.Point && a.Buffs.Count > 0);
         await Beside(alice, katie.X, katie.Y, katie.Z);
         Assert.Equal(0, await Interact(alice, katie, 20003001));
         Assert.Equal(2, Session(alice).DungeonAttempt!.Wave + 1); // opening the dialogue is not choosing
         Assert.Equal(0, await Interact(alice, katie, 5300040)); // message 11: Katie found
+        var right = actors.Single(a => a.NpcId == 400137 && a.Point == katie.Point);
+        await Next(alice, BuffService.BuffUpdate, BuffUpdateNotify.Parser,
+            n => n.UnitId == right.Uid && n.Buffs.Any(b => b.ConfigId == 5402101)); // her bell rings true
 
         var reveal = await Stage(alice, 3, quest: 1);
         Assert.Equal([1L, 1L], reveal.Vars.Single(v => v.VarId == 10003).Vi64); // the game's goal shows (1/1)
@@ -337,6 +347,28 @@ public sealed partial class DungeonTests
         var result = await Next(alice, DungeonService.Result, DungeonResNotify.Parser);
         Assert.Equal((DungeonRes)1, result.Res);
         await StoryMovesOn(alice, 201040, 201050);
+    }
+
+    [Fact]
+    public void AShuffleMovesItsPointListsByOneRandomOrderEachRun()
+    {
+        ReconstructedDungeons.SceneActor At(int npc, long point) => new(npc, point, []);
+        var step = new ReconstructedDungeons.ScriptedStep("shell game", 1, (0, 1),
+            [At(1, 29), At(1, 30), At(1, 31), At(2, 29), At(3, 30), At(4, 31), At(5, 35), At(6, 40)], 0,
+            [new(ReconstructedDungeons.TriggerKind.Message, 11)], [], 0, Shuffle: [[29, 30, 31], [33, 34, 35]]);
+        var seen = new HashSet<long>();
+        for (int seed = 0; seed < 50; seed++)
+        {
+            var run = DungeonService.Shuffled(step, new Random(seed));
+            long Of(int npc) => run.Single(a => a.NpcId == npc).Point;
+            Assert.Equal([29L, 30L, 31L], run.Where(a => a.NpcId == 1).Select(a => a.Point).Order());
+            Assert.Equal([29L, 30L, 31L], new[] { Of(2), Of(3), Of(4) }.Order());
+            Assert.Equal(Of(4) + 4, Of(5)); // the second list follows the first: 31 and 35 move together
+            Assert.Equal(40L, Of(6)); // a point in no list stays
+            seen.Add(Of(4));
+        }
+        Assert.Equal([29L, 30L, 31L], seen.Order());
+        Assert.Same(step.Actors, DungeonService.Shuffled(step with { Shuffle = [] }, new Random(0)));
     }
 
     [Fact]

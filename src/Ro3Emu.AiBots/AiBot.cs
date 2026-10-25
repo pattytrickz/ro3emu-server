@@ -49,7 +49,7 @@ public sealed class AiBot
     private bool _resting;
     private readonly Dictionary<ulong, DateTime> _avoid = new();
     private long _leader;
-    private DateTime _leaderSeen, _followTravelAt, _nextHeal, _nextHealLearn;
+    private DateTime _leaderSeen, _followTravelAt, _nextHeal, _nextHealLearn, _sceneAt;
     /// <summary>A map the leader is on that the bot cannot travel to (an instance, a dungeon): it waits instead.</summary>
     private long _cantFollowMap;
     /// <summary>The learned heal's SkillConfig row id (group * 100 + level), or 0.</summary>
@@ -198,6 +198,7 @@ public sealed class AiBot
             if (_view.Disconnected) throw new IOException("the server closed the connection");
             while (_view.Events.TryRead(out var e)) await HandleAsync(e, ct);
             if (_view.SceneEntry == 0 || _view.SceneGeneration != _handledScene) continue;
+            if (_atlas.IsDungeon(_view.SceneEntry) && await LeaveDungeonAsync()) continue;
             // Free to be invited again: a party whose players have all left (one from before a reconnect too).
             if (PartyRules.NoPlayerLeft(_view.PartyGuids(), _roleId, _hub.IsBot)) await LeavePartyAsync("no player left in it");
             if (_view.Dead) { await DeadAsync(); continue; }
@@ -220,6 +221,7 @@ public sealed class AiBot
                 _target = _locked = 0;
                 await LoadSceneAsync(s.SceneEntry);
                 _handledScene = s.Generation;
+                _sceneAt = DateTime.UtcNow;
                 Located();
                 _nextMapCheck = DateTime.UtcNow.AddSeconds(_random.Next(5, 15));
                 await JoinMapChatAsync();
@@ -230,6 +232,9 @@ public sealed class AiBot
                 break;
             case PartyInvite invite:
                 _ = Task.Run(() => AnswerInviteAsync(invite, ct), ct);
+                break;
+            case DungeonReadyCheck check when Volatile.Read(ref _leader) != 0:
+                await ReadyUpAsync(check);
                 break;
             case PartyChanged change:
                 if (change.Left == _roleId) { Volatile.Write(ref _leader, 0); _view.ForgetParty(); _log("was removed from the party"); break; }
@@ -452,6 +457,8 @@ public sealed class AiBot
     /// </summary>
     private bool LeaveToPlayers(Unit monster)
     {
+        // In a dungeon the party clears it together; the last hit there decides no one's share.
+        if (_atlas.IsDungeon(_view.SceneEntry)) return false;
         var party = _view.PartyGuids();
         if (party.Length == 0 || !PartyRules.LeaveToPlayer(monster.Hp, monster.MaxHp, _view.BiggestHit)) return false;
         foreach (long guid in party.Append(Volatile.Read(ref _leader)).Distinct())
@@ -781,7 +788,7 @@ public sealed class AiBot
         bool done = _pathIndex >= _path.Count;
         float dir = (MathF.Atan2(x - fx, z - fz) * 180f / MathF.PI + 360f) % 360f;
         await SendAsync(() => _bot.SendGameAsync(MsgId.Walk, new WalkReq
-            { Pos = new Vec3 { X = x, Y = y, Z = z }, Dir = dir, Face = dir, BStop = done, SpeedRate = 1 }));
+        { Pos = new Vec3 { X = x, Y = y, Z = z }, Dir = dir, Face = dir, BStop = done, SpeedRate = 1 }));
         _view.MovedTo(x, y, z);
         if (done)
         {
@@ -992,12 +999,8 @@ public sealed class AiBot
             var result = InviteeRespResp.Parser.ParseFrom((await reply.WaitAsync(TimeSpan.FromSeconds(10), ct)).Body).Result;
             if (!accept)
             {
-                // Say why, so the inviter is not left wondering whether the bot is away.
-                string? why = !player || !_hub.Options.AcceptPartyInvites ? null
-                    : !free ? "Sorry, I'm already in someone else's party right now."
-                    : PartyRules.LevelDecline(_view.Level, level);
+                // No whisper (owner decision, #99): one invite reached every bot nearby, and each declining one wrote.
                 if (!free || !inRange) _log($"declined a party invite from {invite.InviterId} (level {level?.ToString() ?? "unknown"})");
-                if (why != null) await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1, why, channelIndex: 5));
                 return;
             }
             if (result == ErrorCodes.AlreadyInParty)
@@ -1015,8 +1018,6 @@ public sealed class AiBot
             Volatile.Write(ref _leader, invite.InviterId);
             string name = _view.Find((ulong)invite.InviterId)?.Name ?? invite.InviterId.ToString();
             _log($"joined {name}'s party");
-            string thanks = _talker.Thanks();
-            await SendAsync(() => _bot.SendChatAsync(invite.InviterId.ToString(), 1, thanks, channelIndex: 5));
         }
         catch (Exception e) when (e is not OperationCanceledException) { _log($"party invite failed: {e.Message}"); }
     }
@@ -1039,6 +1040,38 @@ public sealed class AiBot
         }
         catch (Exception e) when (e is not OperationCanceledException) { _log($"level lookup for {roleId} failed: {e.Message}"); }
         return null;
+    }
+
+    /// <summary>
+    /// The party leader started a dungeon (a Phantom Realm queue's ready check, or Enter Challenge): the bot readies up
+    /// so the AI players do not lock the party out, and follows the leader in.
+    /// </summary>
+    private async Task ReadyUpAsync(DungeonReadyCheck check)
+    {
+        _log(check.MatchEntryId != 0 ? "ready for my party's Phantom Realm" : "ready for my party's dungeon");
+        if (check.MatchEntryId != 0)
+            await SendAsync(() => _bot.SendGameAsync(DungeonMatchService.Ready,
+                new MatchReadyReq { MatchEntryId = check.MatchEntryId, PlayerId = _roleId, IsReady = true }));
+        else await SendAsync(() => _bot.SendGameAsync(DungeonService.Confirm, new ConfirmTeamDungeonReq { IsAgree = true }));
+    }
+
+    /// <summary>
+    /// In a dungeon only with the party leader: once they have gone (left, finished or no longer in the party), the bot
+    /// leaves too rather than stand in an empty instance. A grace after loading in lets the leader's card catch up.
+    /// </summary>
+    private async Task<bool> LeaveDungeonAsync()
+    {
+        var now = DateTime.UtcNow;
+        long leader = Volatile.Read(ref _leader);
+        if (now - _sceneAt < TimeSpan.FromSeconds(20)) return false;
+        if (leader != 0 && (_view.Find((ulong)leader) != null
+            || _view.Member(leader) is { Offline: false } member && member.MapId == _view.SceneEntry)) return false;
+        if (now < _followTravelAt) return true;
+        _followTravelAt = now.AddSeconds(15);
+        _activity = "leaving the dungeon";
+        _log("leaving the dungeon: my party leader is not in it");
+        await SendAsync(() => _bot.SendGameAsync(DungeonService.Leave, new LeaveDungeonReq()));
+        return true;
     }
 
     private async Task LeavePartyAsync(string why)
