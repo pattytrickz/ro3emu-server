@@ -181,9 +181,15 @@ public sealed partial class CharacterService
                 if (id is >= 1 and <= 6) baseStats[id - 1] += value;
                 else Add(id, value);
             }
-        for (int i = 0; i < 6; i++) Add(i + 1, baseStats[i]);
+        // Buff STR..LUK (Blessing: BuffConfig 14001xx _kChangeAttri) feed AttributeConversionConfig like gear, card
+        // and talent points do (inferred).
         foreach (var buff in session.Buffs)
-            foreach (var (id, v) in buff.Changes) Add(id, v);
+            foreach (var (id, v) in buff.Changes)
+            {
+                if (id is >= 1 and <= 6) baseStats[id - 1] += v;
+                else Add(id, v);
+            }
+        for (int i = 0; i < 6; i++) Add(i + 1, baseStats[i]);
         if (BaseRow(p.Career, p.Level) is { } flat)
             foreach (var (id, v) in GameData.Pairs(flat, "_kAttri")) Add(id, v);
         foreach (var (id, v) in data.JobAttributes(p.Career)) Add(id, v);
