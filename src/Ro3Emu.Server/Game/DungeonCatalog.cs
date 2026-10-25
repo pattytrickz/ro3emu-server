@@ -321,7 +321,8 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
     /// A scripted scene's steps (ReconstructedDungeons.Scripted): one wave without monsters per step. Every reference
     /// must resolve in the client data and the scene's map, or the scene is refused like any unresolved encounter:
     /// the quests the tracker shows, the actors' NPCConfig rows, points and buffs, the stories, regions and points,
-    /// and the interactions and dungeon messages the step's actors can actually send.
+    /// the shuffled points, the buffs an event gives and the actor that takes them, and the interactions and dungeon
+    /// messages the step's actors can actually send.
     /// </summary>
     private IReadOnlyList<Wave> ScriptedWaves(ReconstructedDungeons.ScriptedScene scene, MapWorld map)
     {
@@ -336,8 +337,12 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
                     || actor.Buffs.Any(b => data.Row("BuffConfig", b) is not { } buff || GameData.Int(buff, "_iBuffID") <= 0)) return [];
             if (step.Story != 0 && data.Row("PlotInterpretation", step.Story) == null) return [];
             if (step.TeleportAfter != 0 && !map.Points.ContainsKey(step.TeleportAfter)) return [];
+            if (step.Shuffle is { Count: > 0 } lists && (lists[0].Count < 2 || lists.Any(l => l.Count != lists[0].Count
+                    || l.Distinct().Count() != l.Count || !l.All(map.Points.ContainsKey)))) return [];
             foreach (var t in step.Complete.Concat(step.Ignore))
             {
+                if (t.Buff != 0 && (data.Row("BuffConfig", t.Buff) is not { } given || GameData.Int(given, "_iBuffID") <= 0
+                    || step.Actors.All(a => a.NpcId != t.On))) return [];
                 bool known = t.Kind switch
                 {
                     ReconstructedDungeons.TriggerKind.Interaction => step.Actors.Any(a => Interactions(a.NpcId).Contains(t.Id)),

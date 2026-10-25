@@ -77,7 +77,7 @@ public sealed partial class DungeonService
     private async Task BeginStepAsync(Attempt a, ReconstructedDungeons.ScriptedStep step)
     {
         a.StepDone = false;
-        await SyncSceneActorsAsync(a, step.Actors);
+        await SyncSceneActorsAsync(a, Shuffled(step, Random.Shared));
         if (step.Slide && !a.Settled && !a.Room.Closed) await SetSlideAsync(a, true);
         if (step.Story != 0 && !a.Settled && !a.Room.Closed)
             // Once, in a var-change event: the client calls PlayCutSceneStory on every push of this var.
@@ -97,6 +97,22 @@ public sealed partial class DungeonService
                 foreach (var member in Present(a).Where(m => a.Loaded.Contains(m) && !m.SceneLoading).ToList())
                     await PlayerMovedAsync(member);
             }, "dungeon scripted step position");
+    }
+
+    /// <summary>
+    /// The step's actors for this run (inferred: the original shuffle was its server script, which the client does not
+    /// hold). One random order of the "shuffle" lists' positions moves the actor on the i-th point of every list to the
+    /// point at the order's i-th position, so actors on the same position of two lists stay together.
+    /// </summary>
+    internal static IReadOnlyList<ReconstructedDungeons.SceneActor> Shuffled(ReconstructedDungeons.ScriptedStep step, Random random)
+    {
+        if (step.Shuffle is not { Count: > 0 } lists) return step.Actors;
+        var order = Enumerable.Range(0, lists[0].Count).ToArray();
+        random.Shuffle(order);
+        var to = new Dictionary<long, long>();
+        foreach (var list in lists)
+            for (int i = 0; i < order.Length; i++) to[list[i]] = list[order[i]];
+        return step.Actors.Select(x => to.TryGetValue(x.Point, out long point) ? x with { Point = point } : x).ToArray();
     }
 
     // LC_DunGeon_Base decodes one value per EventParams for DungeonEventInvokeClientFunc.
@@ -213,7 +229,7 @@ public sealed partial class DungeonService
         if (a!.Dracula is { } dracula) await dracula.Owner.InteractedAsync(a, s, actor!.NpcId);
         var events = new List<(Kind, long)> { (Kind.Interaction, req.InteractionId) };
         if (_catalog.DungeonMessage(req.InteractionId) is { } message) events.Add((Kind.Message, message));
-        await StepEventAsync(a!, s, events);
+        await StepEventAsync(a!, s, events, actor);
         return true;
     }
 
@@ -301,10 +317,16 @@ public sealed partial class DungeonService
         }
     }
 
-    private async Task StepEventAsync(Attempt a, GameSession s, IReadOnlyList<(Kind Kind, long Id)> events)
+    private async Task StepEventAsync(Attempt a, GameSession s, IReadOnlyList<(Kind Kind, long Id)> events,
+        SceneActorUnit? from = null)
     {
         if (a.Settled || a.Room.Closed || a.Spawning || a.StepDone || Step(a) is not { } step) return;
         bool Matches(ReconstructedDungeons.StepTrigger t) => events.Any(e => e.Kind == t.Kind && e.Id == t.Id);
+        if (from != null && step.Complete.Concat(step.Ignore).FirstOrDefault(t => t.Buff != 0 && Matches(t)) is { } given)
+            // The actor beside the one that sent it shows the event (a guessed bell rings true or shatters); it keeps
+            // the buff until the step ends.
+            foreach (var unit in a.SceneActors.Where(u => u.NpcId == given.On && u.Point == from.Point).ToList())
+                await SetActorBuffsAsync(unit, [.. unit.Buffs.Select(b => b.ConfigId).Append(given.Buff).Distinct()]);
         if (!step.Complete.Any(Matches))
         {
             if (step.Ignore.Any(Matches))

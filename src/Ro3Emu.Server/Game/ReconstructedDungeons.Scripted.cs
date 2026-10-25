@@ -14,8 +14,12 @@ public sealed partial class ReconstructedDungeons
 {
     public enum TriggerKind { Interaction, Message, Region, Point, Plot }
 
-    /// <summary>A client event that completes (or, under "ignore", deliberately does not complete) a step.</summary>
-    public sealed record StepTrigger(TriggerKind Kind, long Id, float Radius = 0);
+    /// <summary>
+    /// A client event that completes (or, under "ignore", deliberately does not complete) a step. <paramref name="Buff"/>
+    /// is a BuffConfig id the event gives the step's actor of NPC <paramref name="On"/> standing at the point of the actor
+    /// that sent it (0: none).
+    /// </summary>
+    public sealed record StepTrigger(TriggerKind Kind, long Id, float Radius = 0, int Buff = 0, int On = 0);
 
     /// <summary>A scene actor: an NPCConfig id at a scene-editor point, with the buffs (BuffConfig ids) it carries.</summary>
     public sealed record SceneActor(int NpcId, long Point, IReadOnlyList<int> Buffs);
@@ -24,9 +28,12 @@ public sealed partial class ReconstructedDungeons
     /// One scripted step. <paramref name="Story"/> is a PlotInterpretation id the client plays at the step's start
     /// (0: none); <paramref name="TeleportAfter"/> a scene-editor point the participants are moved to when it
     /// completes (0: none). <paramref name="Goal"/> is the tracker's "(done/total)" while the step runs.
+    /// <paramref name="Shuffle"/> holds lists of points of equal length: each run of the step draws one order and moves
+    /// the actors on every list by it (DungeonService.Shuffled).
     /// </summary>
     public sealed record ScriptedStep(string Stage, int Quest, (int Done, int Total) Goal, IReadOnlyList<SceneActor> Actors,
-        long Story, IReadOnlyList<StepTrigger> Complete, IReadOnlyList<StepTrigger> Ignore, long TeleportAfter, bool Slide = false);
+        long Story, IReadOnlyList<StepTrigger> Complete, IReadOnlyList<StepTrigger> Ignore, long TeleportAfter, bool Slide = false,
+        IReadOnlyList<IReadOnlyList<long>>? Shuffle = null);
 
     /// <summary>
     /// A scene. <paramref name="Unplayed"/> are DungeonQuestConfig quests of the scene that no step shows: the branch
@@ -71,7 +78,10 @@ public sealed partial class ReconstructedDungeons
         return new ScriptedStep(s.GetProperty("stage").GetString() ?? "", s.GetProperty("quest").GetInt32(), goal, actors,
             s.TryGetProperty("story", out var story) ? story.GetInt64() : 0, complete, Triggers(s, "ignore"),
             s.TryGetProperty("after", out var after) && after.TryGetProperty("teleport", out var to) ? to.GetInt64() : 0,
-            s.TryGetProperty("slide", out var slide) && slide.GetBoolean());
+            s.TryGetProperty("slide", out var slide) && slide.GetBoolean(),
+            s.TryGetProperty("shuffle", out var shuffle)
+                ? shuffle.EnumerateArray().Select(l => (IReadOnlyList<long>)l.EnumerateArray().Select(p => p.GetInt64()).ToArray()).ToArray()
+                : null);
     }
 
     private static IReadOnlyList<StepTrigger> Triggers(JsonElement step, string field)
@@ -84,7 +94,8 @@ public sealed partial class ReconstructedDungeons
             if (kinds.Length != 1) throw new InvalidOperationException($"A scripted trigger names {kinds.Length} kinds: {t}");
             var kind = kinds[0];
             triggers.Add(new StepTrigger(kind, t.GetProperty(kind.ToString().ToLowerInvariant()).GetInt64(),
-                t.TryGetProperty("radius", out var r) ? r.GetSingle() : 0));
+                t.TryGetProperty("radius", out var r) ? r.GetSingle() : 0,
+                t.TryGetProperty("buff", out var buff) ? buff.GetInt32() : 0, t.TryGetProperty("on", out var on) ? on.GetInt32() : 0));
         }
         return triggers;
     }

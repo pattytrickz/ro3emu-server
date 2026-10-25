@@ -35,7 +35,7 @@ public sealed partial class DungeonTests
             var step = plan.Waves[wave].Step!;
             await Stage(alice, wave + 1, quest: step.Quest);
             await ActorsWhen(alice, shown => shown.Count == step.Actors.Count && step.Actors.All(spec => shown.Any(u =>
-                u.NpcId == spec.NpcId && u.Point == spec.Point && u.Buffs.Select(b => b.ConfigId).Order().SequenceEqual(spec.Buffs.Order()))));
+                u.NpcId == spec.NpcId && SamePlace(step, spec.Point, u.Point) && u.Buffs.Select(b => b.ConfigId).Order().SequenceEqual(spec.Buffs.Order()))));
             var t = step.Complete[0];
             switch (t.Kind)
             {
@@ -46,7 +46,7 @@ public sealed partial class DungeonTests
                                 .Where(i => t.Kind == ReconstructedDungeons.TriggerKind.Interaction ? i == t.Id : catalog.DungeonMessage(i) == t.Id)
                                 .Select(i => (u, i))).First()));
                         var npc = Service<GameData>().Row("NPCConfig", actor.NpcId)!.Value;
-                        var view = await ClientSees(alice, actor.Uid, step.Actors.First(a => a.NpcId == actor.NpcId && a.Point == actor.Point).Buffs);
+                        var view = await ClientSees(alice, actor.Uid, step.Actors.First(a => a.NpcId == actor.NpcId && SamePlace(step, a.Point, actor.Point)).Buffs);
                         // The entity the client creates: its unit class, template and place.
                         Assert.Equal((int)GameData.Int(npc, "_iNPCType"), view.Entity.EntityType);
                         Assert.Equal((ulong)actor.NpcId, view.Entity.EntityTemplateID);
@@ -126,6 +126,10 @@ public sealed partial class DungeonTests
         }
         Assert.Equal((DungeonRes)1, (await Next(alice, DungeonService.Result, DungeonResNotify.Parser)).Res);
     }
+
+    /// <summary>An actor listed at <paramref name="listed"/> stands there, or anywhere on the step's shuffle list of it.</summary>
+    private static bool SamePlace(ReconstructedDungeons.ScriptedStep step, long listed, long shown) =>
+        listed == shown || step.Shuffle?.Any(l => l.Contains(listed) && l.Contains(shown)) == true;
 
     private sealed record ClientUnit(EntityBase Entity, IReadOnlySet<long> BuffGroups);
 

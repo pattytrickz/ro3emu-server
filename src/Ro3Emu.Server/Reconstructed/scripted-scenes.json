@@ -233,12 +233,16 @@
         "DungeonQuestConfig 5300036 (quest 1 'Complete Louie's game', goal 'Find Kitty-Katie' [5,0,1]) and 5300037 (quest 2 'Retrieve Instrument', goal type 1 without a counter).",
         "PlotInterpretation 140010 and 140020 are run-time stories 1013 and 1014 that no task triggers. Story 1013 (StoryData_1013) shows Louie, Martha, Katie and Fervor in this Culvert, plays dialogues 1010627001-1010627003 ('Let's play a game ... The three of us will hide inside these three Bells, and you'll have to guess where each of us is') and walks Martha, Louie and Katie to x 40, 50 and 60. Story 1014 reveals them at (40, 55), (50, 55), (60, 55), Katie at x 60, and plays 1010627004 (they leave with the bow tie).",
         "NPCs 400134-400136 (bell ring effect 20002): their auto dialogues 20003001-20005001 say 'Here's Katie the kitty!' with 'Choose this one!' running action 211 TriggerNpcInteract on interaction 5300040, 5300041 or 5300042; these send dungeon messages 11 (400134) and 12 (400135, 400136). NPC 400137 is the Bell (bell model 33137).",
-        "Editor sc_pm_pve5sewb_001_dg02: point groups 24 (25-27 at z 65, where story 1013 leaves the gang) and 28 (29-31 at z 55, where story 1014 reveals them); mark point 37 at (32, 42.5) with guide point 38 leading to it from the game area."
+        "Editor sc_pm_pve5sewb_001_dg02: point groups 24 (25-27 at z 65, where story 1013 leaves the gang) and 28 (29-31 at z 55, where story 1014 reveals them); marks 33-35 at z 60, each 5 m in front of a bell on the born point's side (36 at z 75.9), and mark 37 at (32, 42.5) with guide point 38 leading to it from the game area (group 32 holds 33-35 and 37).",
+        "Louie, Martha and Katie (400131-400133) carry idle AI Branch_sxgd_1..3 and SkillConfig 5405101-5408101 name server script logics (Branchstory_sxgd1, Branchstory_sxgd_right, Branch_sxgd_kadi ...): the shuffle was the original server's script; the client holds only its effects (bell move fx_substorylingdang_move).",
+        "BuffConfig 5402101 (sound SFX_IO_BRANCHSTORY_SXGD_RIGHT, effects fx_substorylingdang_qinzhu and fx_substory_true) and 5402201 (SXGD_WRONG, fx_substorylingdang_sui 'the bell shatters' and fx_substory_false).",
+        "NPCConfig 400244 Fervor (unit 100136, the Knight Order's dog of this Culvert chain, type 2 without interaction, _iNoSelected 1): the Fervor of 400147 (monster type, follow AI Branch_jiang) and 400229 (dialogue NPC) without either."
       ],
       "guessed": [
         "The bells stand at group 28 (points 29-31), where story 1014 reveals the gang; the shuffle animation is not reproduced.",
-        "Katie's ring (400134, message 11) is under the bell at x 60 (point 31), where Katie stands in both stories; which of 400135/400136 is Louie's or Martha's bell does not matter (both send 12).",
-        "A wrong guess (message 12) changes nothing and the player may choose again; the original consequence ('join us as our lowest-ranking lackey') is not recovered.",
+        "Each run puts Katie's ring (400134, message 11) under a random bell, the other rings under the other two; which of 400135/400136 is Louie's or Martha's bell does not matter (both send 12). Story 1014 still reveals Katie at x 60: it is the client's, with fixed places.",
+        "Fervor sniffed out Katie (players' memory of the original): he stands on the mark in front of her bell (33-35, moved with the rings). He does not walk there.",
+        "A wrong guess (message 12) shatters that bell (buff 5402201 on it) and the player may choose again; the original consequence ('join us as our lowest-ranking lackey') is not recovered. The right one rings true (5402101) as story 1014 starts.",
         "Retrieving the instrument completes within 4 m of mark point 37, where guide point 38 leads; no instrument actor or item is named by the client data."
       ],
       "steps": [
@@ -254,18 +258,20 @@
           "quest": 1,
           "stage": "Louie's game: find Kitty-Katie under one of the three bells",
           "actors": [
-            { "npc": 400137, "point": 29, "why": "a Bell over Martha or Louie (group 28)" },
-            { "npc": 400137, "point": 30, "why": "a Bell over Louie or Martha (group 28)" },
-            { "npc": 400137, "point": 31, "why": "the Bell over Katie (x 60 in both stories)" },
+            { "npc": 400137, "point": 29, "why": "a Bell (group 28)" },
+            { "npc": 400137, "point": 30, "why": "a Bell (group 28)" },
+            { "npc": 400137, "point": 31, "why": "a Bell (group 28)" },
             { "npc": 400136, "point": 29, "why": "ring: 'Choose this one!' sends message 12" },
             { "npc": 400135, "point": 30, "why": "ring: 'Choose this one!' sends message 12" },
-            { "npc": 400134, "point": 31, "why": "Katie's ring: 'Choose this one!' sends message 11" }
+            { "npc": 400134, "point": 31, "why": "Katie's ring: 'Choose this one!' sends message 11" },
+            { "npc": 400244, "point": 35, "why": "Fervor on the mark in front of Katie's bell" }
           ],
+          "shuffle": [[29, 30, 31], [33, 34, 35]],
           "complete": [
-            { "message": 11, "why": "the one choice that sends a different message: interaction 5300040 of ring 400134" }
+            { "message": 11, "buff": 5402101, "on": 400137, "why": "the one choice that sends a different message: interaction 5300040 of ring 400134; its bell rings true" }
           ],
           "ignore": [
-            { "message": 12, "why": "the two other rings: a wrong guess, the game goes on" }
+            { "message": 12, "buff": 5402201, "on": 400137, "why": "the two other rings: a wrong guess, that bell shatters and the game goes on" }
           ]
         },
         {
