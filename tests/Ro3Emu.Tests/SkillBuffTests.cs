@@ -97,6 +97,36 @@ public sealed class SkillBuffTests : IAsyncLifetime
         Assert.Contains(Session("alice").Buffs, b => b.Guid == added.Buffs[0].BuffGuid);
     }
 
+    /// <summary>
+    /// #bug-reports "Blessing increases STR, INT, and DEX but doesn't increase PATK and MATK": Blessing Lv. 10
+    /// (BuffConfig 1400110, _kChangeAttri STR/DEX/INT +10) gives the same sheet as ten allocated points in each,
+    /// AttributeConversionConfig's derived ATK and MATK included.
+    /// </summary>
+    [ClientDataFact]
+    public async Task BlessingStatsFeedTheirDerivedAttributesLikeAllocatedPoints()
+    {
+        const int Blessing = 1400110;
+        await using var alice = await InWorld("Alice");
+        var session = Session("alice");
+        var character = _app.Services.GetRequiredService<CharacterService>();
+        var plain = await Run(() => Task.FromResult(character.Stats(session)));
+        var allocated = await Run(() =>
+        {
+            int[] stats = session.Progress!.Stats;
+            foreach (int stat in new[] { 1, 4, 5 }) stats[stat - 1] += 10;
+            var sheet = character.Stats(session);
+            foreach (int stat in new[] { 1, 4, 5 }) stats[stat - 1] -= 10;
+            return Task.FromResult(sheet);
+        });
+        await Run(() => Buffs.AddAsync(session, Blessing, 120000, session.Role!.Id));
+        var blessed = await Run(() => Task.FromResult(character.Stats(session)));
+
+        Assert.True(allocated[AttributeId.Atk] > plain[AttributeId.Atk]);
+        Assert.True(allocated[AttributeId.Matk] > plain[AttributeId.Matk]);
+        foreach (int id in new[] { 1, 4, 5, AttributeId.Atk, AttributeId.Matk, AttributeId.Hit })
+            Assert.Equal(allocated[id], blessed[id]);
+    }
+
     [ClientDataFact]
     public async Task HandRemovableBuffRequestRemovesTheOwnedInstance()
     {
