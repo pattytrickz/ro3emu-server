@@ -53,4 +53,32 @@ public sealed class HouseRateTests
         Assert.Equal(100, RewardService.RealPartyPercent(25, 1, 1)); // a solo player is never a party
         Assert.Equal(187, RewardService.HouseExp(100, 150 * 100 / 100 * 125 / 100)); // x1.5 house rate, then +25%
     }
+
+    [Fact]
+    public void HandsOnMeansAutoBattleOffLongEnough()
+    {
+        var options = new ServerOptions();
+        Assert.Equal((0, 0, 10), (options.HandsOnExpPercent, options.HandsOnLootPercent, options.HandsOnSeconds)); // off by default
+        var session = new GameSession(null!, null!) { Account = "player" };
+        Assert.True(session.HandsOn(10_000)); // auto-battle never turned on this login
+        session.AutoBattle = true;
+        Assert.False(session.HandsOn(0));
+        session.AutoBattle = false; // just turned off: not yet hands-on
+        Assert.False(session.HandsOn(10_000));
+        Assert.True(session.HandsOn(0));
+        long changed = session.AutoBattleChangedMs;
+        session.AutoBattle = false; // the client repeating the same state doesn't restart the wait
+        Assert.Equal(changed, session.AutoBattleChangedMs);
+    }
+
+    [Fact]
+    public void AHandsOnLootRollKeepsItemsAndCardsButNoExp()
+    {
+        const int Card = 1440100, Zeny = 2, BaseExp = 100;
+        void Roll(List<(int Entry, int Count)> into) { into.Add((BaseExp, 50)); into.Add((Zeny, 10)); into.Add((Card, 1)); }
+        var drops = new List<(int Entry, int Count)>();
+        RewardService.RollWithExtraCards(drops, Roll, e => e == Card, cardRolls: 1, dropRolls: 2); // hands-on: one more roll
+        Assert.Equal([(BaseExp, 50), (Zeny, 10), (Card, 1), (Zeny, 10), (Card, 1)], drops);
+        Assert.Equal(233, RewardService.HouseExp(100, 150 * 100 / 100 * 125 / 100 * 125 / 100)); // x1.5, party +25%, hands-on +25%
+    }
 }

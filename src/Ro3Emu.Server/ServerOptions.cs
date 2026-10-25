@@ -235,6 +235,17 @@ public sealed class ServerOptions
     public int RealPartyMinPlayers { get; set; } = 3;
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a kill made hands-on (auto-battle off for at least
+    /// <see cref="HandsOnSeconds"/>) gives this much more Base and Job EXP in percent (0-100), and has
+    /// <see cref="HandsOnLootPercent"/> percent chance of a second loot roll (items, Zeny and cards, never EXP). Auto-battle
+    /// keeps the normal rates, so players short on time aren't penalised. AI players (PartyShareExcludedAccounts) never get
+    /// it. 0: none.
+    /// </summary>
+    public int HandsOnExpPercent { get; set; }
+    public int HandsOnLootPercent { get; set; }
+    public int HandsOnSeconds { get; set; } = 10;
+
+    /// <summary>
     /// House rule (Sol RO3, not original behaviour): a monster kill's Base and Job EXP in percent, after the level gap
     /// correction and the party bonus (RewardService.ResolveKill), so a small realm levels faster. 100 keeps the data's.
     /// </summary>
