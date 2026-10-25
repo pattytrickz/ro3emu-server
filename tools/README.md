@@ -13,6 +13,7 @@ ignored `data/` and `re/` folders. The main [README](../README.md#1-export-the-g
 | `WorldData/` | reads the client's VFS: nav grids (`navexport.js`, `navparse.js`, `navquery.js`), scene editor data, single assets (`vfsget.js`) |
 | `Loc/` | the localization pipeline behind `Ro3Emu.Loc`: scans the client for Chinese text, builds the translation queue and the `loc_*.tsv` maps |
 | `ClientTextures/` | renders English versions of images with baked-in Chinese text from a texture dump of your client |
+| `ClassStatus/` | `class-status.mjs`: a status list per class line (tested / server logic / data only / open report / not found) from the exported data, the server code, the tests and the bug-report forum; `--post` edits the lists in a Discord channel in place (needs the exported `data/`; the Discord settings are in the script header) |
 | `EconomyProbe` | read-only economy snapshots and ledger checks against a server database (used by load scenario S3) |
 | `patch-client.ps1` | rebuilds the client hooks and patches the client in `RO3_CLIENT_DIR` against a local server |
 | `run-server.ps1` | runs the server and restarts it when it exits, logging to `data/logs/` |
