@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 using Romsg;
 
@@ -334,14 +335,14 @@ public sealed class DungeonCatalog(GameData data, WorldData worldData, MonsterSe
             foreach (var actor in step.Actors)
                 if (data.Row("NPCConfig", actor.NpcId) is not { } npc || GameData.Int(npc, "_iNPCType") is not (1 or 2)
                     || !map.Points.ContainsKey(actor.Point)
-                    || actor.Buffs.Any(b => data.Row("BuffConfig", b) is not { } buff || GameData.Int(buff, "_iBuffID") <= 0)) return [];
+                    || actor.Buffs.Any(b => data.Row("BuffConfig", b) is not { } buff || new BuffConfig(buff).BuffId <= 0)) return [];
             if (step.Story != 0 && data.Row("PlotInterpretation", step.Story) == null) return [];
             if (step.TeleportAfter != 0 && !map.Points.ContainsKey(step.TeleportAfter)) return [];
             if (step.Shuffle is { Count: > 0 } lists && (lists[0].Count < 2 || lists.Any(l => l.Count != lists[0].Count
                     || l.Distinct().Count() != l.Count || !l.All(map.Points.ContainsKey)))) return [];
             foreach (var t in step.Complete.Concat(step.Ignore))
             {
-                if (t.Buff != 0 && (data.Row("BuffConfig", t.Buff) is not { } given || GameData.Int(given, "_iBuffID") <= 0
+                if (t.Buff != 0 && (data.Row("BuffConfig", t.Buff) is not { } given || new BuffConfig(given).BuffId <= 0
                     || step.Actors.All(a => a.NpcId != t.On))) return [];
                 bool known = t.Kind switch
                 {
