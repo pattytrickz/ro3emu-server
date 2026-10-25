@@ -127,6 +127,27 @@ public sealed partial class CombatService
         return result;
     }
 
+    /// <summary>The _kDamageParam1/2 pair a player's hit on a monster takes: Heal's enemy branch, Magnus Exorcismus's
+    /// Undead and Demon one, or Sonic Blow's low-HP one.</summary>
+    internal int DamageBranch(GameSession s, MonsterUnit target, JsonElement row) => Script(row) switch
+    {
+        "Heal" => 1,
+        "Magnus_Exorcismus" or "Magnus_ExorcismusBD" => MagnusExorcismusBranch(target.Template),
+        _ => SonicBlowBranch(s, target, row),
+    };
+
+    /// <summary>
+    /// Magnus Exorcismus: "Damage dealt to enemies of the Undead Race or Demon Race, or with the Shadow property or Undead
+    /// property, is increased by ${9}%." Its damage pairs are [plain, +30%] (Lv 1 [500, 650]); Holy Cross Exorciser's
+    /// single-enemy pairs keep that order (TalentProcs.TargetCountRow).
+    /// </summary>
+    private static int MagnusExorcismusBranch(MonsterTemplate target) =>
+        target.Race is DemonRace or UndeadRace || target.Element is ShadowElement or UndeadElement ? 1 : 0;
+
+    // NPCConfig _iRace in the order of AttributeConfig 401-410 (animal_race, human_race, demon_race, plant_race,
+    // undead_race ...); _iElement in the order of the EleConfig columns (_iNone .. _iShadow, _iGhost, _iUndead).
+    private const int DemonRace = 3, UndeadRace = 5, ShadowElement = 8, UndeadElement = 10;
+
     /// <summary>
     /// Sonic Blow: "If the target's HP is at or below ${4}%, increases the percentage damage multiplier of [Sonic Blow] by
     /// ${5}%." Its damage pairs are [plain, +20%, +25%] and its _kLogicData [2000, 101, 5000] the 20% and the 50% (in basis
