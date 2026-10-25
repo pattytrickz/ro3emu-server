@@ -252,11 +252,11 @@ public sealed class ServerOptions
     public int KillExpPercent { get; set; } = 100;
 
     /// <summary>
-    /// House rule (Sol RO3, not original behaviour): a kill's drop tables roll this many times for cards (1-10), keeping
-    /// only the cards of the extra rolls, so a card is about that many times as likely and nothing else changes. 1 keeps
-    /// the data's odds.
+    /// House rule (Sol RO3, not original behaviour): a kill's drop tables roll this many times for cards (1-10, fractions
+    /// allowed: 1.5 rolls twice half the time), keeping only the cards of the extra rolls, so a card is about that many
+    /// times as likely and nothing else changes. 1 keeps the data's odds.
     /// </summary>
-    public int CardDropRolls { get; set; } = 1;
+    public double CardDropRolls { get; set; } = 1;
 
     /// <summary>
     /// House rule (Sol RO3, not original behaviour): timed rate windows (Bonus Sunday, a holiday event), on top of

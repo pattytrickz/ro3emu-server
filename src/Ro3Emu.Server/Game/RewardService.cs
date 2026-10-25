@@ -27,7 +27,8 @@ public sealed class RewardService
     private readonly Random _random = new();
     private Dictionary<int, long>? _expCorrection;
     private readonly DropAttenuation _attenuation;
-    private readonly int _killExpPercent, _cardDropRolls;
+    private readonly int _killExpPercent;
+    private readonly double _cardDropRolls;
     private readonly EventService? _events;
 
     /// <summary>Field AFK selects the enhanced _iDrop table only for qualified ordinary field kills.
@@ -214,7 +215,7 @@ public sealed class RewardService
                 }
             }
         }
-        RollWithExtraCards(drops, Roll, _character.IsCard, Math.Min(10, _cardDropRolls * eventCards), lootRolls);
+        RollWithExtraCards(drops, Roll, _character.IsCard, WholeRolls(Math.Min(10, _cardDropRolls * eventCards), _random), lootRolls);
         return drops;
     }
 
@@ -237,6 +238,11 @@ public sealed class RewardService
     /// <summary>Sol RO3 house rule (ServerOptions.KillExpPercent): a kill's EXP in percent. Job EXP is the same amount
     /// (ResolveKill), so it scales both; a kill that gave EXP still gives at least 1.</summary>
     internal static long HouseExp(long exp, int percent) => exp > 0 ? Math.Max(1, exp * percent / 100) : exp;
+
+    /// <summary>A card multiplier as a whole number of rolls for one kill: 1.5 is one roll, plus a second half of the time,
+    /// so a card is 1.5 times as likely on average.</summary>
+    internal static int WholeRolls(double rolls, Random random) =>
+        (int)rolls + (random.NextDouble() < rolls - Math.Floor(rolls) ? 1 : 0);
 
     /// <summary>Sol RO3 house rules (ServerOptions.CardDropRolls, EventRates): the drop tables roll once in full, then
     /// <paramref name="dropRolls"/> - 1 more times keeping every item but no EXP (event loot), then up to
