@@ -177,9 +177,14 @@ Reconstructed scripted scenes without a fight (`Reconstructed/scripted-scenes.js
 - The next step (or the settlement) after a completing event runs in its own owner scope (`GameLoop.PostLegacy`): the
   route of the message that completed it does not reserve the settlement's role locks. Scene actors are room props
   (`InstanceService.AddPropAsync`), removed at settlement and before the room's final cleanup.
+- A step may shuffle its actors: its "shuffle" lists of points draw one random order per run that moves the actors on
+  every list together (Louie's game: the rings on the bells 29-31 and Fervor on the mark in front of Katie's, 33-35).
+  A trigger may give a buff to the step's actor of one NPC at the point of the actor that sent it (the guessed bell
+  rings true, 5402101, or shatters, 5402201).
 - Guessed (see each scene's "guessed" list): the corridor region that ends 1000201's first stage, Bobo's place there,
-  the jump and the ride as teleports, no exploding ant eggs, no seamless 1000201 to 1000301 transfer, which bell hides
-  Katie (from both stories), a wrong guess changing nothing, the instrument retrieved within 4 m of mark point 37.
+  the jump and the ride as teleports, no exploding ant eggs, no seamless 1000201 to 1000301 transfer, Katie under a
+  random bell with Fervor standing (not walking) in front of it, no shuffle animation, a wrong guess costing nothing
+  but that bell, the instrument retrieved within 4 m of mark point 37.
 - `DungeonTests.Scripted` resolves each scene against the client data, plays each one through its client events (wrong
   and premature events included) to a clear, and checks that the story step is delivered and the next one offered.
   The story walk plays the three scenes with the same events and has no known-open blocker left.
