@@ -184,7 +184,7 @@ public sealed partial class CombatService
                 processed.Add(target);
                 if (damage)
                 {
-                    var (amount, result) = MonsterHitDamage(s, attacker, target, row, script);
+                    var (amount, result) = MonsterHitDamage(s, attacker, target, row);
                     long beforeHp = target.Hp;
                     target.Hp = Math.Max(0, beforeHp - amount);
                     long effective = beforeHp - target.Hp;
@@ -425,6 +425,10 @@ public sealed partial class CombatService
             .OrderBy(m => Distance(center, m.Pos)).ThenBy(m => m.Uid),
     ];
 
+    /// <summary>The monsters a cast's own area holds at its target point, as its hit would select them.</summary>
+    internal List<MonsterUnit> EnemiesInArea(GameSession s, ActiveSkillCast action) =>
+        SelectEnemies(s, action, action.Request.TargetPos ?? action.Origin);
+
     private bool RollBuff(JsonElement tuple, out int id, out int duration)
     {
         id = duration = 0;
@@ -590,6 +594,10 @@ public sealed partial class CombatService
                 // Description ${7}: "disappear early after being touched by enemies ${7} times".
                 if (script == "Fire_Wall") touches = (int)Numbers(row, "_kDescData").ElementAtOrDefault(6);
                 break;
+            // _kLogicData [22000009, 4, 8, ..]: the cross NPC, then 4 s and 8 strikes (inferred: they match the
+            // description's "For the next ${4} sec. ... every ${5} sec.", 4 and 0.5).
+            case "Magnus_Exorcismus" or "Magnus_ExorcismusBD" when logic is [_, > 0, > 0, ..]:
+                npc = (int)logic[0]; duration = (int)(logic[1] * 1000); interval = (int)(duration / logic[2]); break;
             case "Safety_Wall" or "Pneuma" when logic.Length >= 8:
                 npc = (int)logic[5]; duration = (int)logic[2]; radius = (float)(logic[7] / 100);
                 protection = script == "Safety_Wall" ? 1 : 2; charges = script == "Safety_Wall" ? (int)logic[1] : int.MaxValue; break;
@@ -694,9 +702,9 @@ public sealed partial class CombatService
     /// <summary>One monster's damage from a player's cast: the hit, the guardian factors, the shared adjusters and a
     /// guardian's resistance changes. A guardian's fixed hit takes only its direct-damage factor.</summary>
     private (long Amount, DamageHitResult Result) MonsterHitDamage(GameSession s, Fighter attacker, MonsterUnit target,
-        JsonElement row, string script)
+        JsonElement row)
     {
-        var (amount, result) = Damage(attacker, MonsterFighter(target), row, script == "Heal" ? 1 : SonicBlowBranch(s, target, row),
+        var (amount, result) = Damage(attacker, MonsterFighter(target), row, DamageBranch(s, target, row),
             GuardianPetRules.CriticalChance(row) + SkillParameterRules.CritChance(s, _data, row),
             GuardianPetRules.CriticalAtHp(row, target.Hp, target.Template.MaxHp), AuraBladeBonus(s, row));
         if (row.TryGetProperty("_ro3GuardianFixedHit", out var fixedValue))

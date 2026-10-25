@@ -387,7 +387,9 @@ public sealed partial class TalentProcs
         {
             if (!Rules.TryGetValue(buff, out var rule)) continue;
             if (rule.NormalAttack ? cast.IsNormalAtk != 1 : Array.IndexOf(rule.Groups, (int)cast.SkillId) < 0) continue;
-            var target = processed.FirstOrDefault(m => m.Uid == action.Request.TargetId && m.Hp > 0) ?? processed.FirstOrDefault(m => m.Hp > 0)
+            // A field (Magnus Exorcismus) has struck nothing yet at its cast: "enemies within the area" are those in it.
+            var enemies = rule.HitTargets && processed.Count == 0 ? _combat.EnemiesInArea(s, action) : processed;
+            var target = enemies.FirstOrDefault(m => m.Uid == action.Request.TargetId && m.Hp > 0) ?? enemies.FirstOrDefault(m => m.Hp > 0)
                 ?? (processed.Count == 0 && rule.Radius is int radius
                     ? _combat.MonstersNear(s, action.Request.TargetPos ?? s.Position, (float)Value(description, radius)).FirstOrDefault()
                     : null)
@@ -427,7 +429,7 @@ public sealed partial class TalentProcs
             }
             if (BuffConfig.Get(_data, buff)?.LogicData is not { } logic || rule.Logic >= logic.Length) continue;
             if (ProcRow(logic[rule.Logic]) is not { } row || target.Hp <= 0) continue;
-            await _combat.CastExtraAsync(s, row.Row, Targets(s, rule, description, row, target, processed));
+            await _combat.CastExtraAsync(s, row.Row, Targets(s, rule, description, row, target, enemies));
         }
     }
 
