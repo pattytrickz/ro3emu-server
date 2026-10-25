@@ -48,6 +48,14 @@ among them. `RealPartyExpPercent` adds a further bonus (0–100 %) when the kill
 `RealPartyMinPlayers` (default 3) **real** players on the killer's map. AI players (`PartyShareExcludedAccounts`) don't
 count. Sol RO3 uses 25 with 3 players, so a party of three people out-earns three soloists.
 
+## Hands-on play (`HandsOnExpPercent`, `HandsOnLootPercent`)
+
+Sol RO3's selling point is that playing at the keyboard pays more than letting the client play. A kill counts as
+hands-on when auto-battle has been off for at least `HandsOnSeconds` (default 10), so turning it off just before a
+kill doesn't count. A hands-on kill gives `HandsOnExpPercent` more Base and Job EXP, and has a `HandsOnLootPercent`
+chance of a second loot roll (items, Zeny, materials and cards, never EXP). Auto-battle keeps the normal rates, so
+players short on time aren't penalised. AI players never get it. Sol RO3 uses 25 and 25.
+
 ## Sol RO3 settings
 
 ```
@@ -55,6 +63,8 @@ Ro3Emu__BonusExpAlways=true
 Ro3Emu__BonusExpAlwaysBelowLevel=50
 Ro3Emu__BonusTimeMultiplier=2
 Ro3Emu__RealPartyExpPercent=25
+Ro3Emu__HandsOnExpPercent=25
+Ro3Emu__HandsOnLootPercent=25
 Ro3Emu__LevelCaps__0__From=<announce date>
 Ro3Emu__LevelCaps__0__Cap=70
 ```

@@ -48,6 +48,9 @@ public sealed class RewardService
         _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
         _realPartyPercent = Math.Clamp(options?.Value.RealPartyExpPercent ?? 0, 0, 100);
         _realPartyMinPlayers = options?.Value.RealPartyMinPlayers ?? 3;
+        _handsOnExp = Math.Clamp(options?.Value.HandsOnExpPercent ?? 0, 0, 100);
+        _handsOnLoot = Math.Clamp(options?.Value.HandsOnLootPercent ?? 0, 0, 100);
+        _handsOnMs = Math.Max(0, options?.Value.HandsOnSeconds ?? 10) * 1000L;
         _killExpPercent = Math.Max(1, options?.Value.KillExpPercent ?? 100);
         _cardDropRolls = Math.Clamp(options?.Value.CardDropRolls ?? 1, 1, 10);
         this._character = character;
@@ -183,7 +186,9 @@ public sealed class RewardService
             }
         }
         var (eventExp, eventDrops, eventCards) = _events?.Current ?? (100, 1, 1);
-        RollWithExtraCards(drops, Roll, _character.IsCard, Math.Min(10, _cardDropRolls * eventCards), eventDrops);
+        bool handsOn = HandsOn(player);
+        int lootRolls = eventDrops + (handsOn && _random.Next(100) < _handsOnLoot ? 1 : 0);
+        RollWithExtraCards(drops, Roll, _character.IsCard, Math.Min(10, _cardDropRolls * eventCards), lootRolls);
 
         if (ExtraKillDrops != null) drops.AddRange(ExtraKillDrops(player, monster));
         long baseExp = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
@@ -193,7 +198,8 @@ public sealed class RewardService
             long gap = player.Progress!.Level - monster.Template.Level;
             baseExp = baseExp * Correction((int)Math.Clamp(gap, -200, 200)) / 10000;
             baseExp = Math.Max(1, baseExp * _teams.ExpBonus(player) / 10000);
-            baseExp = HouseExp(baseExp, _killExpPercent * eventExp / 100 * RealPartyPercent(player) / 100);
+            baseExp = HouseExp(baseExp, _killExpPercent * eventExp / 100 * RealPartyPercent(player) / 100
+                * (handsOn ? 100 + _handsOnExp : 100) / 100);
         }
         // BaseExpAddConfig catch-up below the server level raises Base EXP only (CharacterService.LevelRules).
         return (items, _character.WithPursueBonus(player.Progress!.Level, baseExp), baseExp);
@@ -262,7 +268,12 @@ public sealed class RewardService
     private static long Share(long exp, int members) => exp > 0 ? Math.Max(1, exp / members) : 0;
 
     private readonly string[] _noShare;
-    private readonly int _realPartyPercent, _realPartyMinPlayers;
+    private readonly int _realPartyPercent, _realPartyMinPlayers, _handsOnExp, _handsOnLoot;
+    private readonly long _handsOnMs;
+
+    /// <summary>Sol RO3 house rule (ServerOptions.HandsOnExpPercent): the killer plays hands-on and is not an AI player.</summary>
+    private bool HandsOn(GameSession killer) =>
+        (_handsOnExp > 0 || _handsOnLoot > 0) && !ExcludedFromShare(killer.Account) && killer.HandsOn(_handsOnMs);
 
     /// <summary>Sol RO3 house rule (ServerOptions.RealPartyExpPercent): 100 plus the bonus when the killer's party has at
     /// least RealPartyMinPlayers real players (not PartyShareExcludedAccounts) on the killer's map, the killer included.</summary>

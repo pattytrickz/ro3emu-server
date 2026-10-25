@@ -420,7 +420,23 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public StatPlanState StatPlans { get; set; } = new(null);
 
     /// <summary>31054 SKILL_SET_AUTO_BATTLE: the client's auto-battle switch.</summary>
-    public bool AutoBattle { get; set; }
+    public bool AutoBattle
+    {
+        get => _autoBattle;
+        set
+        {
+            if (_autoBattle != value) AutoBattleChangedMs = Environment.TickCount64;
+            _autoBattle = value;
+        }
+    }
+    private bool _autoBattle;
+
+    /// <summary>When <see cref="AutoBattle"/> last changed (Environment.TickCount64); 0 = never this login.</summary>
+    public long AutoBattleChangedMs { get; private set; }
+
+    /// <summary>Sol RO3 house rule (ServerOptions.HandsOnExpPercent): auto-battle has been off for at least
+    /// <paramref name="minMs"/>, so turning it off just before a kill doesn't count.</summary>
+    public bool HandsOn(long minMs) => !AutoBattle && (AutoBattleChangedMs == 0 || Environment.TickCount64 - AutoBattleChangedMs >= minMs);
 
     /// <summary>5035 field Bonus Time, daily consumption and drop history; transient activity never survives logout.</summary>
     public WildAfkService.State? WildAfk { get; set; }
