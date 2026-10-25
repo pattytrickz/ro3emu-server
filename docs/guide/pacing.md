@@ -41,12 +41,20 @@ RO3 grants 60 minutes of battle time a day and banks up to 180 (`PublicParamConf
 `OnHookFightTimeLimit`). `BonusTimeMultiplier` multiplies both. Sol RO3 uses 2: 120 minutes a day, banking up to 360,
 so a player who skips two days loses nothing.
 
+## Playing together (`RealPartyExpPercent`)
+
+RO3's party bonus raises a kill's EXP by 25 % per extra party member on the map, and this realm splits field-kill EXP
+among them. `RealPartyExpPercent` adds a further bonus (0–100 %) when the killer's party has at least
+`RealPartyMinPlayers` (default 3) **real** players on the killer's map. AI players (`PartyShareExcludedAccounts`) don't
+count. Sol RO3 uses 25 with 3 players, so a party of three people out-earns three soloists.
+
 ## Sol RO3 settings
 
 ```
 Ro3Emu__BonusExpAlways=true
 Ro3Emu__BonusExpAlwaysBelowLevel=50
 Ro3Emu__BonusTimeMultiplier=2
+Ro3Emu__RealPartyExpPercent=25
 Ro3Emu__LevelCaps__0__From=<announce date>
 Ro3Emu__LevelCaps__0__Cap=70
 ```

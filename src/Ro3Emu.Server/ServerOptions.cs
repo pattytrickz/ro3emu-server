@@ -227,6 +227,14 @@ public sealed class ServerOptions
     public string[] PartyShareExcludedAccounts { get; set; } = [];
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): a kill's EXP rises by this percent (0-100) when the killer's party
+    /// has at least <see cref="RealPartyMinPlayers"/> real players on the killer's map (AI players in
+    /// PartyShareExcludedAccounts don't count), on top of the party bonus, so playing together beats soloing. 0: none.
+    /// </summary>
+    public int RealPartyExpPercent { get; set; }
+    public int RealPartyMinPlayers { get; set; } = 3;
+
+    /// <summary>
     /// House rule (Sol RO3, not original behaviour): a monster kill's Base and Job EXP in percent, after the level gap
     /// correction and the party bonus (RewardService.ResolveKill), so a small realm levels faster. 100 keeps the data's.
     /// </summary>

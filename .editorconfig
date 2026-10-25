@@ -117,7 +117,7 @@ dotnet_diagnostic.CA1854.severity = suggestion
 dotnet_diagnostic.CA1859.severity = suggestion
 # 1: avoid Enumerable.Any()
 dotnet_diagnostic.CA1860.severity = suggestion
-# 167: avoid constant arrays as arguments
+# 166: avoid constant arrays as arguments
 dotnet_diagnostic.CA1861.severity = suggestion
 # 8: use StringComparison for case-insensitive comparisons
 dotnet_diagnostic.CA1862.severity = suggestion
@@ -129,7 +129,7 @@ dotnet_diagnostic.CA1873.severity = suggestion
 dotnet_diagnostic.CA2208.severity = suggestion
 # 809: use a collection initializer or expression
 dotnet_diagnostic.IDE0028.severity = suggestion
-# 144: use a collection expression for an array
+# 143: use a collection expression for an array
 dotnet_diagnostic.IDE0300.severity = suggestion
 # 16: use a collection expression for an empty collection
 dotnet_diagnostic.IDE0301.severity = suggestion

@@ -41,4 +41,16 @@ public sealed class HouseRateTests
         Assert.Equal(1, rolls);
         Assert.Equal([(Zeny, 10), (Potion, 1), (Card, 1)], once);
     }
+
+    [Fact]
+    public void ARealPartyOfThreeEarnsTheBonus()
+    {
+        Assert.Equal(0, new ServerOptions().RealPartyExpPercent); // off unless the realm sets it
+        Assert.Equal(125, RewardService.RealPartyPercent(25, 3, 3));
+        Assert.Equal(125, RewardService.RealPartyPercent(25, 3, 5));
+        Assert.Equal(100, RewardService.RealPartyPercent(25, 3, 2)); // two real players and an AI player: no bonus
+        Assert.Equal(100, RewardService.RealPartyPercent(0, 3, 5));
+        Assert.Equal(100, RewardService.RealPartyPercent(25, 1, 1)); // a solo player is never a party
+        Assert.Equal(187, RewardService.HouseExp(100, 150 * 100 / 100 * 125 / 100)); // x1.5 house rate, then +25%
+    }
 }
