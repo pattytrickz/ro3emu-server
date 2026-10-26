@@ -1151,6 +1151,45 @@ public sealed class ActivityAdventuresTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// #bug-reports: players reached the Treasure Map's spot (the tracker at 0 m) and nothing followed. The hunt point's
+    /// TreasureHuntMapPointConfig _iAreaId names its map's "寻宝区域" region (a 40 m circle); walking into it sends 83251
+    /// InScene with the dig spot and walking out sends Leave ("You have left the treasure-digging area.").
+    /// </summary>
+    [ClientDataFact]
+    public async Task WalkingIntoAndOutOfTheTreasureAreaNotifiesTheHunter()
+    {
+        var window = _app.Services.GetRequiredService<ActivityClock>()
+            .Segments(1017, _clock.GetUtcNow().ToUnixTimeSeconds()).Single();
+        _clock.Set(window.Start + 60);
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99");
+        await Gm("alice", "!item 1112001 1");
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Alice");
+        long guid = session.Items.Single(i => i.Entry == 1112001).Guid;
+        await alice.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = guid, ItemCount = 1 });
+        Assert.Equal(0, (await Next(alice, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        var cursor = await Next(alice, 5064, DBTreasureInfoIncrement.Parser, i => i.PointId > 0);
+        var target = _app.Services.GetRequiredService<SceneService>().TreasurePoint(cursor.PointId)!.Value;
+        var point = Ro3Emu.Server.Data.Config.TreasureHuntMapPointConfig.Get(
+            _app.Services.GetRequiredService<Ro3Emu.Server.Data.GameData>(), cursor.PointId)!.Value;
+        var area = _app.Services.GetRequiredService<Ro3Emu.Server.Maps.WorldData>()
+            .Map(target.Scene)!.Regions[point.AreaId];
+        Assert.True(area.Contains(target.Position.X, target.Position.Z));
+
+        var outside = new Vec3 { X = area.X + area.Length + 10, Y = target.Position.Y, Z = area.Z };
+        await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = outside, BStop = true, SpeedRate = 1 });
+        var spot = new Vec3 { X = target.Position.X, Y = target.Position.Y, Z = target.Position.Z };
+        await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = spot, BStop = true, SpeedRate = 1 });
+        var entered = await Next(alice, MsgId.TreasureEvent, TreasureEventNotify.Parser,
+            e => e.Type == ETreasureEventNum.InScene);
+        Assert.Equal(target.Position.X, entered.PointPosition.X);
+        Assert.Equal(target.Position.Z, entered.PointPosition.Z);
+
+        await alice.SendGameAsync(MsgId.Walk, new WalkReq { Pos = outside, BStop = true, SpeedRate = 1 });
+        await Next(alice, MsgId.TreasureEvent, TreasureEventNotify.Parser, e => e.Type == ETreasureEventNum.Leave);
+    }
+
+    /// <summary>
     /// Lost Treasure (activity 106, _kTaskRenew [1013,13,132,..] and [0,13,131,..]) offers its season tasks while open:
     /// 110007 "Log in to the game" [106801,1] is met by the login it is accepted in and claimed in the panel with 31205;
     /// the daily group (TimeLimit 1013 "refreshTaskDaily") starts over the next game day, the other group does not.

@@ -177,6 +177,7 @@ public sealed class RoleSystems(Maps.World world, ChatService chat, CharacterSer
         combat.PlayerMoved(session);
         await emoji.PlayerMovedAsync(session);
         await dungeons.PlayerMovedAsync(session); // scripted scene regions and points
+        await scene.TreasureAreaAsync(session);
     }
 
     /// <summary>Each essential step runs through <paramref name="step"/>, which collects its failure.</summary>
