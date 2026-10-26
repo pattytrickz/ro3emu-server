@@ -67,6 +67,10 @@ public sealed class ServerOptions
     /// </summary>
     public int StallNameMaxLength { get; set; } = 24;
 
+    /// <summary>Sol house rule: allow any positive player-stall unit price up to TradeLimitPrice.
+    /// Requires the matching Sol client price editor; original price bands remain the default.</summary>
+    public bool FlexibleStallPricing { get; set; }
+
     /// <summary>
     /// House rule: a base level-up refills HP and SP, as in Ragnarok Online 1. Off by default: nothing in the RO3
     /// client (config, Lua, texts) says the original server did it, and its level-up only raises the maxima.

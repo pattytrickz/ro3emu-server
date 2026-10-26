@@ -102,6 +102,8 @@ namespace Ro3Emu.ClientHooks
                     global.Obf_RuA<Obf_R.Obf_ff>("LC_SeasonExplorationHelper") ?? Module(manager, global, "lc_seasonexplorationhelper"));
                 QuestAutoBattle.Install(global);
                 PersonalCards.Install((Obf_R.Obf_Cf)env, Module(manager, global, "lc_dal_personal"));
+                StallPrices.Install(global, Module(manager, global, "ui_com_stall_available_shelveswidgetctrl"),
+                    Module(manager, global, "ui_com_stall_available_tipwidgetbasectrl"), param);
                 Debug.Log("[Ro3Emu.LuaPatches] lc_itemshowfunc: " + added + " card show-func method(s) added; stall name limit "
                     + (param != null ? StallNameMaxLength.ToString() : "not set (publicparamconfig missing)"));
             }

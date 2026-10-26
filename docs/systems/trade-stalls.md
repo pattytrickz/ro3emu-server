@@ -49,6 +49,25 @@ The following decisions remain **(inferred)** and are not original-server captur
 
 Further concrete Lua evidence: `Logic/Asset/LC_DAL_Trade.lua` (5033, queries, commodity bytes, preorder receive), `Logic/Trade/LC_TradeServer.lua` (requests), `Config/CFG/Lua_CFG_TradeConfig.lua` (eligibility), `Config/CFG/Lua_CFG_TradeConfigTax.lua` (tax thresholds), `Logic/Asset/LC_DAL_Stall.lua` (5058, views, price rounding, closure), `Logic/Stall/LC_StallHelper.lua` (item gates and merchant slots), and `Logic/Unit/LC_Unit_Stall.lua` / `Utility/Lua_DB_Helper.lua` (AOI consumption). Configuration keys are cited beside their implementations.
 
+## Sol flexible player-stall prices
+
+Set `Ro3Emu:FlexibleStallPricing` to `true` (environment variable
+`Ro3Emu__FlexibleStallPricing=true`) and distribute the matching `Ro3Emu.ClientHooks`
+build to enable direct unit-price entry. It is off by default to preserve the original
+server rules. The Sol client hook enables the seller's existing numeric price path on
+the listing/edit screen, including PC text entry and the keypad. It preserves the saved
+price when reopening a listing and refreshes the total after an edit. Buyer controls are
+unchanged. Deploy the server setting before distributing the client update; an updated
+client against an unconfigured server will receive the original price-band refusals.
+
+Any whole-number price from 1 through the configured `TradeLimitPrice` is accepted for
+player listings, additions, and edits. Currency, eligibility, binding, locks, quantities,
+fees, taxes, stale-price checks, and escrow/mail ownership rules still apply. System
+stall prices are unchanged. The 33415 response retains the original bounded percentage
+list, without allocating an array of every possible price. Old clients can still buy
+and use their original bands for new listings. Update clients before editing existing
+flexibly priced listings: the original editor can snap those prices to a band.
+
 ## Canonical mailbox integration
 
 Trade and stall columns, datasets and login hooks coexist with the canonical mailbox ([mail.md](mail.md)). There is one game claim route, `MailService.ClaimMail` (31602), and one micro `MailService` registration. Market deliveries enter the role's ordinary `mailbox` blob in the same SQLite transaction that changes escrow, balances and stock. A failed transaction leaves neither a delivered letter nor an escrow transfer. Notifications follow commit and remain recoverable through mailbox login/reconnect reconciliation.

@@ -4,6 +4,7 @@ using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 
 namespace Ro3Emu.Server.Game;
@@ -32,6 +33,7 @@ public sealed partial class StallsService
     private readonly TimeProvider _clock;
     private readonly GameLoop _loop;
     private readonly int _nameMaxLength;
+    private readonly bool _flexiblePricing;
     private readonly Dictionary<(string Key, int Line), StallActor> _actors = new();
     private long _nextProjectionId = StallActor.ProjectionIdBase;
     private readonly HashSet<RuntimeMapKey> _activeLines = new();
@@ -52,6 +54,7 @@ public sealed partial class StallsService
         this._market = market; this._data = data; this._character = character; this._trade = trade; this._roles = roles;
         this._sessions = sessions; this._functions = functions; this._seasons = seasons; this._world = world;
         this._lines = lines; this._clock = clock; this._loop = loop; _nameMaxLength = options.Value.StallNameMaxLength;
+        _flexiblePricing = options.Value.FlexibleStallPricing;
         // C/D 15: the realm-wide stall maintenance (stall collection, owner roles, AOI actors) no longer runs inside the
         // scene's hook scope, nor delays the scene handoff. A scene's first visit starts its system stall population
         // as its own operation; later loads of a visited scene leave it to the one-second maintenance.
@@ -158,24 +161,8 @@ public sealed partial class StallsService
     private JsonElement? SaleConfig(int entry) => _data.Row("TradeConfig", entry) is { } row
         && GameData.Int(row, "_iTrade") == 2 && InSeason(row) ? row : null;
 
-    /// <summary>
-    /// DAL 2064–2221: Top uses 10/10; ordinary steps are floor(base*percent/10+0.5).
-    /// Choosing the configured stable range without hidden server supply dynamics is (inferred).
-    /// </summary>
-    private static (int Min, int Max) Range(JsonElement row)
-    {
-        var range = Field(row, "_kStableRange");
-        if (GameData.Int(row, "_iTradeType") == 1 || range.Length < 2) return (10, 10);
-        return ((int)Math.Clamp(range[0], 1, 1000), (int)Math.Clamp(range[1], range[0], 1000));
-    }
-
-    private bool ValidPrice(JsonElement row, int price, int currency)
-    {
-        if (price <= 0 || price > Param("TradeLimitPrice", 999999999) || currency != GameData.Int(row, "_iMoney")) return false;
-        var (min, max) = Range(row);
-        long basis = GameData.Int(row, "_iBasePrice");
-        return Enumerable.Range(min, max - min + 1).Any(step => (basis * step + 5) / 10 == price);
-    }
+    private bool ValidPrice(JsonElement row, int price, int currency) =>
+        StallPricePolicy.IsValid(new TradeConfig(row), price, currency, Param("TradeLimitPrice", 999999999), _flexiblePricing);
 
     private async Task PricesAsync(GameSession s, PlayerStallsQueryItemPriceReq req)
     {
@@ -183,7 +170,7 @@ public sealed partial class StallsService
         foreach (long id in req.ItemID.Distinct())
         {
             if (id is <= 0 or > int.MaxValue || SaleConfig((int)id) is not { } row) { reply.Result = ErrorCodes.NotForSale; break; }
-            var (min, max) = Range(row);
+            var (min, max) = StallPricePolicy.Range(new TradeConfig(row));
             reply.ItemPrice[id] = new StallItemPrice { MinPercent = min, MaxPercent = max };
         }
         if (req.ItemID.Count == 0) reply.Result = ErrorCodes.Parameter;
