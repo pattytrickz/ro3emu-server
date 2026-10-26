@@ -64,6 +64,23 @@ public sealed class MapLineSpawnTests : IAsyncLifetime
         Assert.Contains(world.AllUnits(), u => u.RuntimeMap == first && u.Uid == one[0].Uid);
     });
 
+    /// <summary>#bug-reports "Payon Cave - Unhittable Enemies": Payon Cave's scene editor puts spawn points inside blocked
+    /// cells (up to 6.6 m from the floor), where a monster could neither leave nor be reached by a melee attack.</summary>
+    [ClientDataFact]
+    public Task FieldMonstersSpawnAndRoamFromWalkableGround() => OnLoop(async () =>
+    {
+        var monsters = _app.Services.GetRequiredService<MonsterService>();
+        var world = _app.Services.GetRequiredService<World>();
+        var map = _app.Services.GetRequiredService<WorldData>().Map(10241)!;
+        // Each line rolls its own points; several lines cover most of them.
+        var lines = Enumerable.Range(1, 6).Select(line => RuntimeMapKey.Public(10241, line)).ToArray();
+        foreach (var line in lines) await monsters.EnsureSpawnedAsync(line);
+        var spawned = world.AllUnits().OfType<MonsterUnit>().Where(m => lines.Contains(m.RuntimeMap) && m.Group.Id >= 0).ToArray();
+        Assert.NotEmpty(spawned);
+        Assert.Empty(spawned.Where(m => !map.IsWalkable(m.X, m.Y, m.Z) || !map.IsWalkable(m.Home.X, m.Home.Y, m.Home.Z))
+            .Select(m => m.Home.Id));
+    });
+
     [ClientDataFact]
     public Task GatheringNodesHaveIndependentOccupancyAndRetireWithTheirLine() => OnLoop(async () =>
     {
