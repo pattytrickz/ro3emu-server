@@ -200,7 +200,10 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
         var point = at ?? group.Points.Where(p => !used.Contains(p.Id)).OrderBy(_ => _random.Next()).FirstOrDefault();
         if (point == null || Template(npcId) is not { } template) return false;
         used.Add(point.Id);
-        var pos = map.Grounded(new MapPoint(point.X, point.Y, point.Z, point.Face));
+        // #bug-reports "Payon Cave - Unhittable Enemies": scene-editor spawn points can sit inside blocked cells (Payon
+        // Cave 10241: 38 of 777, up to 6.6 m from the floor), where the monster can neither roam nor be reached in melee
+        // range. It stands, roams and walks home from the nearest walkable cell instead (inferred).
+        var pos = map.Standable(map.Grounded(new MapPoint(point.X, point.Y, point.Z, point.Face)));
         var monster = new MonsterUnit
         {
             Uid = UidBase | ++_serial,
@@ -208,7 +211,7 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
             X = pos.X, Y = pos.Y, Z = pos.Z, Face = point.Face,
             Template = template,
             Group = group,
-            Home = point,
+            Home = point with { X = pos.X, Y = pos.Y, Z = pos.Z },
             Hp = template.MaxHp,
             BornTimeMs = NowMs,
             NextRoamMs = NowMs + _random.Next(template.RoamTimeMs),
