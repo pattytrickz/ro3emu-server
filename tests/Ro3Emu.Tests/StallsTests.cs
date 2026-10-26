@@ -31,12 +31,15 @@ public sealed partial class StallsTests : IAsyncLifetime
     private List<InvItem> Items(BotClient bot) => Service<ItemStore>().Load(Id(bot));
     private long Money(BotClient bot, int currency) => Service<RoleStore>().LoadProgress(Id(bot)).Currency.GetValueOrDefault(currency);
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => StartServer();
+
+    private async Task StartServer(bool flexiblePricing = false)
     {
         var (port, microPort, gamePort) = TestPorts.FreePorts();
         _app = ServerHost.Create([], o =>
         {
             o.DataDir = _dataDir; o.GameDataDir = Path.Combine(RepoRoot(), "data");
+            o.FlexibleStallPricing = flexiblePricing;
             o.HttpPort = port; o.MicroGatePort = microPort; o.GameGatePort = gamePort;
         }, _clock);
         await _app.StartAsync(); _http = $"http://127.0.0.1:{port}";
