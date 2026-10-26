@@ -42,6 +42,24 @@ public sealed class AiBotPartyRulesTests
     public void APlayerOfUnknownLevelGetsNoFightsStartedForThem() => Assert.False(PartyRules.StartsOwnFights(40, 0));
 
     [Fact]
+    public void ThreeDeathsInTenMinutesLeaveTheParty()
+    {
+        var deaths = new Queue<DateTime>();
+        var t = new DateTime(2026, 10, 26, 15, 0, 0, DateTimeKind.Utc);
+        Assert.False(PartyRules.TooManyDeaths(deaths, t));
+        Assert.False(PartyRules.TooManyDeaths(deaths, t.AddMinutes(4)));
+        Assert.True(PartyRules.TooManyDeaths(deaths, t.AddMinutes(9)));
+    }
+
+    [Fact]
+    public void DeathsSpreadOverMoreThanTenMinutesKeepTheParty()
+    {
+        var deaths = new Queue<DateTime>();
+        var t = new DateTime(2026, 10, 26, 15, 0, 0, DateTimeKind.Utc);
+        for (int i = 0; i < 6; i++) Assert.False(PartyRules.TooManyDeaths(deaths, t.AddMinutes(6 * i)));
+    }
+
+    [Fact]
     public void APartyWithNoPlayerLeftIsLeft()
     {
         Func<long, bool> isBot = id => id >= 900;
