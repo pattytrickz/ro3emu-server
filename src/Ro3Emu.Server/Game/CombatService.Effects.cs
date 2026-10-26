@@ -328,6 +328,7 @@ public sealed partial class CombatService
                 await FinalizeLethalPublicationAsync(target);
             }
         }
+        if (field == null && !action.Request.IsExtraSkill && CanApplyMoreEffects()) await RicochetAsync(s, action, processed);
         // A player's own cast: not a field, not an extra cast such as a talent proc, so procs never chain.
         if (field == null && !action.Request.IsExtraSkill)
             foreach (var handler in CastResolved)
