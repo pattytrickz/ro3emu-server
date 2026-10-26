@@ -305,6 +305,29 @@ public sealed class LifeJobTests : IAsyncLifetime
         Assert.True(saved.LifeJobInfoMap[1].GatherInfo.ItemDetails.ContainsKey(100200));
     }
 
+    /// <summary>
+    /// #bug-reports "Mining lvl 2 ore", "gardening lvl 2 plant": Lv. 2 ore gave EXP but no ore. Its main drop 122 carries
+    /// condition 49000006 (Mining 3) and no _kUnlockcost, so it unlocks with the level like the resource itself, also for a
+    /// character whose Lv. 2 ore unlocked before its drops did.
+    /// </summary>
+    [ClientDataFact]
+    public async Task LevelTwoOreDropsItsOreAtMiningLevelThree()
+    {
+        await using var b = await InWorld("Alice"); Assert.Equal(0, await Learn(b, "alice", 1, 1));
+        var life = _app.Services.GetRequiredService<LifeJobService>();
+        await _app.Services.GetRequiredService<GameLoop>().InvokeAsync(async () =>
+        {
+            var s = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Account == "alice");
+            using var gate = await CharacterService.Lock(s);
+            s.LifeJob!.LifeJobInfoMap[1].JobLevel = 3;
+            s.LifeJob.LifeJobInfoMap[1].GatherInfo.ItemDetails[100200] = 1;
+            Assert.Equal(0, await life.CompleteGatherAsync(s, 100100, sceneEntry: 10522, pointId: 312));
+            Assert.True(s.LifeJob.LifeJobUnLockDrop.ContainsKey(122));
+            Assert.Equal(0, await life.CompleteGatherAsync(s, 100200, sceneEntry: 10522, pointId: 313));
+        });
+        Assert.True(await OnLoop("alice", s => s.Items.Where(i => i.Entry is 1291022 or 1291030 or 1291040).Sum(i => i.Stack)) > 0);
+    }
+
     [ClientDataTheory]
     [InlineData(1001801)]
     [InlineData(1291002)]
