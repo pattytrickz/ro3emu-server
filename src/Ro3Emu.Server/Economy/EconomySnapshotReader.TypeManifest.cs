@@ -75,7 +75,7 @@ public static partial class EconomySnapshotReader
     // Sol RO3 (live line, kept by the upstream sync): TaskRuntimeState.GrowthRanksClaimed is the legacy list of claimed
     // Growth Classroom ranks. No balance: GrowthClassService.MigrateLiveClaims copies it once into role.growth_class
     // (the claimed markers above) and nothing writes it any more.
-    public const string ExpectedFormatManifestHash = "PENDING-RECOMPUTE";
+    public const string ExpectedFormatManifestHash = "B599214D49EE26220DDAFCC3F2474DDEF7DC662181FC9D83002D26C9C7781CE2";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State
