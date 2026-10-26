@@ -264,7 +264,7 @@ public sealed partial class LifeJobService
             if (!next.LifeJobInfoMap.TryGetValue(job, out var known) || known.JobLevel == 0) next.LifeJobInfoMap[job] = NewJob(job);
             // (inferred) Free, condition-zero gathering entries are the initial profession curriculum.
             foreach (var c in _data.Table("LifeCollectionConfig").Values.Where(c => Current(c) && GameData.Int(c, "_iJobId") == job && GameData.Int(c, "_iCondition") == 0))
-                UnlockCollection(next, c);
+                UnlockCollection(s, next, c);
             UnlockEarnedCollections(s, next); // a profession learned again keeps the resources its level earned
             if (await CommitAsync(s, "cd13c/life-switch", next, s.Restrictions!.Clone(), Copy(s.LifeRuntime), cost, [],
                 result: new { Job = job, Slot = req.OpJobType }) == null)
@@ -326,7 +326,7 @@ public sealed partial class LifeJobService
             if (s.LifeJob!.LifeJobInfoMap[job].GatherInfo.ItemDetails.ContainsKey(req.CollectionID)) error = ErrorCodes.LifeCollectionLearned;
             else
             {
-                var next = s.LifeJob.Clone(); UnlockCollection(next, row.Value);
+                var next = s.LifeJob.Clone(); UnlockCollection(s, next, row.Value);
                 await CommitAsync(s, "cd13c/life-collection", next, s.Restrictions!.Clone(), Copy(s.LifeRuntime), [], [],
                     result: new { Collection = req.CollectionID });
             }
@@ -334,11 +334,23 @@ public sealed partial class LifeJobService
         await s.SendGameAsync(StudyCollection, new StudyCollectionResp { Result = error });
     }
 
-    private void UnlockCollection(DBLifeJobInfo next, JsonElement collection)
+    private void UnlockCollection(GameSession s, DBLifeJobInfo next, JsonElement collection)
     {
         next.LifeJobInfoMap[GameData.Int(collection, "_iJobId")].GatherInfo.ItemDetails[GameData.Int(collection, "_iCollectionId")] = 1;
+        UnlockEarnedDrops(s, next, collection);
+    }
+
+    /// <summary>
+    /// A free drop (empty LifeDropConfig._kUnlockcost) unlocks once its _iCondition holds. The Lv. 2+ drops carry the
+    /// profession's level (Lv. 2 ore 122: 49000006, LC_ConditionList 11001 [1, 3]), the same level as their resource, so
+    /// unlocking only condition-zero drops left Lv. 2 ore and plants yielding EXP without materials (#bug-reports
+    /// "Mining lvl 2 ore", "gardening lvl 2 plant"). (inferred) The client sends no StudyCollectionDrop for these.
+    /// </summary>
+    private void UnlockEarnedDrops(GameSession s, DBLifeJobInfo next, JsonElement collection)
+    {
         foreach (long id in Numbers(collection, "_iDropId"))
-            if (_data.Row("LifeDropConfig", id) is { } drop && GameData.Int(drop, "_iCondition") == 0 && Costs(drop, "_kUnlockcost").Count == 0)
+            if (!next.LifeJobUnLockDrop.ContainsKey(id) && _data.Row("LifeDropConfig", id) is { } drop
+                && Costs(drop, "_kUnlockcost").Count == 0 && EarnedBy(s, next, GameData.Int(drop, "_iCondition")))
                 next.LifeJobUnLockDrop[id] = 1;
     }
 
@@ -626,9 +638,10 @@ public sealed partial class LifeJobService
         {
             long job = GameData.Int(c, "_iJobId");
             if (!Current(c) || !next.ActiveLifejob.Values.Contains(job) || !next.LifeJobInfoMap.TryGetValue(job, out var info)
-                || info.JobLevel <= 0 || info.GatherInfo.ItemDetails.ContainsKey(GameData.Int(c, "_iCollectionId"))
-                || !EarnedBy(s, next, GameData.Int(c, "_iCondition"))) continue;
-            UnlockCollection(next, c);
+                || info.JobLevel <= 0) continue;
+            // A resource unlocked before its drops were (#bug-reports "Mining lvl 2 ore") catches its drops up here.
+            if (info.GatherInfo.ItemDetails.ContainsKey(GameData.Int(c, "_iCollectionId"))) UnlockEarnedDrops(s, next, c);
+            else if (EarnedBy(s, next, GameData.Int(c, "_iCondition"))) UnlockCollection(s, next, c);
         }
     }
 
