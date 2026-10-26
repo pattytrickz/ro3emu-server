@@ -44,7 +44,6 @@ public sealed class SkillService
         this._log = log;
         character.ProgressHandlers.Add(SyncAsync);
         character.EquipmentHandlers.Add(s => s.SkillPlans == null ? Task.CompletedTask : SyncAsync(s));
-        character.CardSkillsChanged.Add(s => s.SkillPlans == null ? Task.CompletedTask : SyncAsync(s));
     }
 
     /// <summary>SkillConfig row id of a group at a level (mode 0), or 0.</summary>
@@ -246,10 +245,10 @@ public sealed class SkillService
         int initial = InTree(p.Career, group) ? Initial(p, group) : 0;
         if (IsJobAttackGroup(p.Career, group)) initial = Math.Max(1, initial); // any weapon's, so it stays on a bar
         if (group > 0 && group == QueueGroup(p.Career)) initial = Math.Max(1, initial); // everyone has the Lineup button
-        int saved = p.Skills.GetValueOrDefault(group);
+        int saved = Math.Max(p.Skills.GetValueOrDefault(group), p.GrantedSkills.GetValueOrDefault(group));
         foreach (var (old, replacement) in Replacements(p.Career))
             if (replacement == group) saved = Math.Max(saved, p.Skills.GetValueOrDefault(old));
-        return Math.Max(Math.Max(saved, initial), p.CardSkills.GetValueOrDefault(group));
+        return Math.Max(saved, initial);
     }
 
     /// <summary>A card skill group (SkillConfig._iSystemType 3, enum_SkillSystemType.CardSkill): granted by a socketed card, never learned.</summary>
@@ -258,7 +257,6 @@ public sealed class SkillService
 
     private DBSkillData BuildFresh(GameSession session)
     {
-        _character.UpdateCardSkills(session);
         var p = session.Progress!;
         int atk = NormalAttack(session);
         int atkGroup = _data.Row("SkillConfig", atk) is { } a ? (int)GameData.Int(a, "_iSkillID") : 0;
@@ -267,7 +265,7 @@ public sealed class SkillService
         if (atkGroup > 0) skillData.SkillList.Add(atkGroup);
         skillData.SkillList.Add(tree.Select(t => t.Group).Where(g => g != atkGroup).Distinct());
         if (QueueGroup(p.Career) is > 0 and var queueGroup && !skillData.SkillList.Contains(queueGroup)) skillData.SkillList.Add(queueGroup);
-        skillData.SkillList.Add(p.CardSkills.Keys.Where(g => !skillData.SkillList.Contains(g)).Order());
+        skillData.SkillList.Add(p.GrantedSkills.Keys.Where(g => !skillData.SkillList.Contains(g)).Order());
 
         // One learned normal attack for GetNormalSkill, when the held one is a normal attack: a bow's Arrow Attack
         // (1300001) is not (_iIsNormalAtk 0), and zeroing Normal Attack left a bow Archer none; the bar's Normal Attack
@@ -592,7 +590,20 @@ public sealed class SkillService
     public async Task SyncAsync(GameSession session)
     {
         if (session.SkillPlans == null) await LoadAsync(session);
-        await CharacterService.SyncAsync(session, SkillDataSync, Build(session));
+        var state = Build(session);
+        // A granted skill (a socketed card's Skill(3)) is listed with its level in the current plan, where the skill panel's
+        // card skills read it (UI_Sys_SkillPanelModel.GetCardSkillList: ServerAllSkills = skillList, then the plan's
+        // skillAssigns with level > 0). It is sent, never saved in a plan: a plan switch checks its groups against the tree.
+        if (session.Progress is { GrantedSkills.Count: > 0 } progress)
+        {
+            var current = state.SkillAssignPlans[state.CurrentPlanIndex];
+            foreach (var (group, level) in progress.GrantedSkills)
+            {
+                if (!state.SkillList.Contains(group)) state.SkillList.Add(group);
+                current.SkillAssigns[group] = new SkillData { SkillId = group, SkillLevel = level };
+            }
+        }
+        await CharacterService.SyncAsync(session, SkillDataSync, state);
     }
 
     /// <summary>Build a role-progress candidate from an owned skill plan before a Build-window switch.</summary>

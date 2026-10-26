@@ -40,7 +40,7 @@ public sealed partial class CharacterService
             Rolebase = new RolePublicBaseInfo
             {
                 Roleid = role.Id, Name = role.Name, Career = p.Career, BaseLevel = p.Level,
-                JobLevel = p.JobLevel, Gender = role.Sex
+                JobLevel = p.JobLevel, Gender = role.Sex, Title = TitleOf?.Invoke(session) ?? 0
             },
             EquipInfo = BuildEquip(session),
             Selfproperty = new AllProperty { EntityID = role.Id },
@@ -214,6 +214,9 @@ public sealed partial class CharacterService
     /// <summary>Stats changed outside this service (buffs): the window, HP bars and the AOI.</summary>
     public Task RefreshStatsAsync(GameSession session) => SendStatsAsync(session);
 
+    /// <summary>The role's title rank (TitleService) for RolePublicBaseInfo.title.</summary>
+    public Func<GameSession, long>? TitleOf { get; set; }
+
     /// <summary>Configured contributions from other owned systems (pet lineup/collection).</summary>
     public List<Func<GameSession, IEnumerable<(long Id, double Value)>>> ExtraAttributes { get; } = new();
 
@@ -229,7 +232,6 @@ public sealed partial class CharacterService
     private async Task SendStatsAsync(GameSession session)
     {
         var oldIds = session.EntityProperties.Select(p => (int)p.Id).ToHashSet();
-        bool cardSkills = UpdateCardSkills(session);
         Refresh(session);
         var stats = Stats(session);
         var all = new AllProperty { EntityID = session.Role!.Id };
@@ -244,7 +246,6 @@ public sealed partial class CharacterService
         var aoi = new AOIAttrChange { EntityUuid = (ulong)session.Role.Id };
         foreach (var id in AoiProperties) aoi.Property.Add(new AoIProperty { Idx = id, Data = stats[id], BaseData = stats[id] });
         await ToSelfAndViewersAsync(session, AoiAttrChange, aoi);
-        if (cardSkills) foreach (var handler in CardSkillsChanged) await handler(session);
     }
 
     /// <summary>

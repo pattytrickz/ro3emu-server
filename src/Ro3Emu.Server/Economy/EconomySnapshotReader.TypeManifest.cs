@@ -30,6 +30,11 @@ public static partial class EconomySnapshotReader
     // Pass play: role.activity_runtime PassPlay (NewActivityService.PassPlay) holds the day's and week's challenge
     // progress, daily EXP caps, paid chapters and EXP counters. No balance and no asset: pass EXP is currency 132, granted
     // by the pass/play receipt that also saves these markers.
+    // Titles: role.title is DBTitleInfo (the title rank). Not a balance: a rank's Crests are paid by its own
+    // cd13a/character-title receipt that also saves it.
+    // Astral Level: role.paragon is DBParagonLevel (points per star and the installed Star Cores as ItemBaseInfo); the
+    // level and its EXP are role.paragon_level / paragon_exp, a progression counter. Not a balance: an installed core
+    // left the bag through its cd13b/paragon-* receipt (a ParagonCost sink) and comes back through one (ParagonGoods).
     // Valhalla Trials: role.heroic_spirit is DBOdinStatue (Blessing statue EXP and level). Not a balance: its EXP is
     // bought with Einherjar Coins by the cd13b/valhalla-pray receipt that also saves it. Cleared layers are
     // dungeons Records "valhalla:<layer>", written with the layer's reward by the dungeon obligation.
@@ -70,7 +75,7 @@ public static partial class EconomySnapshotReader
     // Sol RO3 (live line, kept by the upstream sync): TaskRuntimeState.GrowthRanksClaimed is the legacy list of claimed
     // Growth Classroom ranks. No balance: GrowthClassService.MigrateLiveClaims copies it once into role.growth_class
     // (the claimed markers above) and nothing writes it any more.
-    public const string ExpectedFormatManifestHash = "0C78C27DC636FBAB60EF6A7D5382F9CDDAD9312189446BF30FB84887BFE03991";
+    public const string ExpectedFormatManifestHash = "PENDING-RECOMPUTE";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State

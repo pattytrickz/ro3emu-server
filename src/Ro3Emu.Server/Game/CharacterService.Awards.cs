@@ -117,8 +117,8 @@ public sealed partial class CharacterService
         context.BindPresentation(session);
         var attachment = session.Attachment;
         if (taskBaseExp < 0) throw new ArgumentOutOfRangeException(nameof(taskBaseExp));
-        // 18 ManifestTypeRunRing is the wheel's notice: LC_DAL_Reward reads its rewardIndexes, so it needs them.
-        if (manifestType is < 1 or > 19 or 15 || manifestType == 18 && rewardIndexes is not { Count: > 0 })
+        // PBManifestType.ManifestTypeRunRing (18) needs the slots LC_DAL_Reward uses to stop the wheel.
+        if (manifestType is < 1 or > 19 or 15 || manifestType == TaskService.ManifestTypeRunRing && rewardIndexes is not { Count: > 0 })
             throw new ArgumentOutOfRangeException(nameof(manifestType));
         if ((expectedDaily == null) != (nextDaily == null)) throw new ArgumentException("Daily award requires before and after state");
         if (expectedTasks != null && deliveredTaskState == null) throw new ArgumentException("Task comparison requires next task state");
@@ -386,7 +386,13 @@ public sealed partial class CharacterService
             p.Exp -= need;
             p.Level++;
         }
-        if (p.Level >= MaxLevel) p.Exp = 0;
+        if (p.Level >= MaxLevel)
+        {
+            // Past the cap Base EXP feeds the Astral Level (CharacterService.Paragon) instead of being dropped.
+            long overflow = p.Exp;
+            p.Exp = 0;
+            if (overflow > 0) AddParagonExp(p, overflow);
+        }
         // House cap (LevelCaps): the bar stops one point short of the next level, and the rest is lost.
         else if (p.Level >= cap) p.Exp = Math.Min(p.Exp, Math.Max(0, BaseExpNeed(p.Level) - 1));
         p.JobExp = checked(p.JobExp + jobExp);
@@ -417,13 +423,14 @@ public sealed partial class CharacterService
         var result = new RoleProgress
         {
             SourceRevision = source.SourceRevision, Career = source.Career, Level = source.Level, JobLevel = source.JobLevel,
-            Exp = source.Exp, JobExp = source.JobExp, BonusPoints = source.BonusPoints, StarterKit = source.StarterKit
+            Exp = source.Exp, JobExp = source.JobExp, BonusPoints = source.BonusPoints, StarterKit = source.StarterKit,
+            ParagonLevel = source.ParagonLevel, ParagonExp = source.ParagonExp
         };
         Array.Copy(source.Stats, result.Stats, source.Stats.Length);
         foreach (var (key, value) in source.Currency) result.Currency[key] = value;
         foreach (var (key, value) in source.Skills) result.Skills[key] = value;
         foreach (var (key, value) in source.SkillBar) result.SkillBar[key] = value;
-        foreach (var (key, value) in source.CardSkills) result.CardSkills[key] = value;
+        foreach (var (key, value) in source.GrantedSkills) result.GrantedSkills[key] = value;
         return result;
     }
 
@@ -433,11 +440,12 @@ public sealed partial class CharacterService
         target.Career = source.Career; target.Level = source.Level; target.JobLevel = source.JobLevel;
         target.Exp = source.Exp; target.JobExp = source.JobExp; target.BonusPoints = source.BonusPoints;
         target.StarterKit = source.StarterKit;
+        target.ParagonLevel = source.ParagonLevel; target.ParagonExp = source.ParagonExp;
         Array.Copy(source.Stats, target.Stats, source.Stats.Length);
         target.Currency.Clear(); foreach (var (key, value) in source.Currency) target.Currency[key] = value;
         target.Skills.Clear(); foreach (var (key, value) in source.Skills) target.Skills[key] = value;
         target.SkillBar.Clear(); foreach (var (key, value) in source.SkillBar) target.SkillBar[key] = value;
-        target.CardSkills.Clear(); foreach (var (key, value) in source.CardSkills) target.CardSkills[key] = value;
+        target.GrantedSkills.Clear(); foreach (var (key, value) in source.GrantedSkills) target.GrantedSkills[key] = value;
     }
 
     private static void CopyItem(InvItem target, InvItem source)

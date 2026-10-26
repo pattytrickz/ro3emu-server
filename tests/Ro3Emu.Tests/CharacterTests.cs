@@ -54,6 +54,18 @@ public sealed class CharacterTests : IAsyncLifetime
         return bot;
     }
 
+    /// <summary>Socket observers (CardEffects) run after the reply; poll the loop-owned state.</summary>
+    private async Task Eventually(Func<bool> condition, string what)
+    {
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        for (int i = 0; i < 50; i++)
+        {
+            if (await loop.InvokeAsync(() => Task.FromResult(condition()))) return;
+            await Task.Delay(100);
+        }
+        Assert.Fail("timed out: " + what);
+    }
+
     private static async Task<T> Next<T>(BotClient bot, uint msgId, Google.Protobuf.MessageParser<T> parser, Func<T, bool>? match = null)
         where T : Google.Protobuf.IMessage<T>
     {
@@ -418,14 +430,14 @@ public sealed class CharacterTests : IAsyncLifetime
         var cardInfo = got.PackInfo[3].All?.Items.Values.Single(i => i.ItemEntry == Vitata) ?? got.PackInfo[3].Inc.Items.Values.Single(i => i.All?.ItemEntry == Vitata).All;
         var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Vita");
         var skills = _app.Services.GetRequiredService<SkillService>();
-        Assert.Empty(session.Progress!.CardSkills);
+        Assert.Empty(session.Progress!.GrantedSkills);
 
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = DivineLightLv1, TargetId = session.Role!.Id });
         Assert.Equal(ErrorCodes.SkillNotLearned, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
 
         await alice.SendGameAsync(CardService.SlotInsert, new EquipmentCardInsertReq { EquipPos = (EquipGridType)6, CardGuid = cardInfo.ItemGuid, SlotIndex = 1 });
         Assert.Equal(0, (await Next(alice, CardService.SlotInsert, EquipmentCardInsertResp.Parser)).Result);
-        Assert.Equal(1, session.Progress.CardSkills[DivineLight]);
+        await Eventually(() => session.Progress.GrantedSkills.GetValueOrDefault(DivineLight) == 1, "granted");
         var plans = skills.Build(session);
         Assert.Contains(DivineLight, plans.SkillList);
         Assert.Equal(1, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns[DivineLight].SkillLevel);
@@ -443,7 +455,7 @@ public sealed class CharacterTests : IAsyncLifetime
 
         await alice.SendGameAsync(CardService.SlotRemove, new EquipmentCardRemoveReq { EquipPos = (EquipGridType)6, SlotIndex = 1 });
         Assert.Equal(0, (await Next(alice, CardService.SlotRemove, EquipmentCardRemoveResp.Parser)).Result);
-        Assert.Empty(session.Progress.CardSkills);
+        await Eventually(() => session.Progress.GrantedSkills.Count == 0, "revoked");
         plans = skills.Build(session);
         Assert.DoesNotContain(DivineLight, plans.SkillList);
         Assert.DoesNotContain(DivineLight, plans.SkillAssignPlans[plans.CurrentPlanIndex].SkillAssigns.Keys);
