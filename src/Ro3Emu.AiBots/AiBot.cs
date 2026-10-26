@@ -49,6 +49,10 @@ public sealed class AiBot
     private bool _resting;
     private readonly Dictionary<ulong, DateTime> _avoid = new();
     private long _leader;
+    /// <summary>Deaths in the current player's party (PartyRules.TooManyDeaths).</summary>
+    private readonly Queue<DateTime> _partyDeaths = new();
+    /// <summary>Leaders whose party the bot left for dying too often, and until when it declines their invites.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, DateTime> _rejoinAfter = new();
     private DateTime _leaderSeen, _followTravelAt, _nextHeal, _nextHealLearn, _sceneAt;
     /// <summary>A map the leader is on that the bot cannot travel to (an instance, a dungeon): it waits instead.</summary>
     private long _cantFollowMap;
@@ -300,6 +304,19 @@ public sealed class AiBot
             }
             _lastDeath = DateTime.UtcNow;
             _log(_tooHard ? $"died again; looking for an easier field (hunting {_handicap} levels lower)" : "died");
+            long leader = Volatile.Read(ref _leader);
+            if (leader != 0 && !_atlas.IsDungeon(_view.SceneEntry) && PartyRules.TooManyDeaths(_partyDeaths, now))
+            {
+                // The leader's field is far too strong for the bot: leave, hunt somewhere easier, and do not rejoin at once.
+                _partyDeaths.Clear();
+                _rejoinAfter[leader] = now + PartyRules.RejoinAfter;
+                if (!_entry.Town)
+                {
+                    _handicap = Math.Min(40, _handicap + 10);
+                    _tooHard = true;
+                }
+                await LeavePartyAsync($"died {PartyRules.DeathLimit} times in {PartyRules.DeathWindow.TotalMinutes:F0} minutes");
+            }
             return;
         }
         if (now - _deadSince < TimeSpan.FromSeconds(6)) return;
@@ -992,7 +1009,8 @@ public sealed class AiBot
             // Only players within ten base levels (owner decision, #58), so the bot helps rather than carries.
             long? level = _hub.Options.AcceptPartyInvites && free && player ? await PlayerLevelAsync(invite.InviterId, ct) : null;
             bool inRange = PartyRules.InLevelRange(_view.Level, level);
-            bool accept = _hub.Options.AcceptPartyInvites && free && player && inRange;
+            bool waiting = _rejoinAfter.TryGetValue(invite.InviterId, out var rejoin) && rejoin > DateTime.UtcNow;
+            bool accept = _hub.Options.AcceptPartyInvites && free && player && inRange && !waiting;
             using var reply = _bot.Inbox.Expect(x => x.IsGame(TeamService.TeamInviteeResp));
             await SendAsync(() => _bot.SendGameAsync(TeamService.TeamInviteeResp,
                 new InviteeResp { TeamId = invite.TeamId, IsAgree = accept, InviteGuid = invite.InviterId }));
@@ -1000,7 +1018,8 @@ public sealed class AiBot
             if (!accept)
             {
                 // No whisper (owner decision, #99): one invite reached every bot nearby, and each declining one wrote.
-                if (!free || !inRange) _log($"declined a party invite from {invite.InviterId} (level {level?.ToString() ?? "unknown"})");
+                if (waiting && free && inRange) _log($"declined a party invite from {invite.InviterId} (kept dying in their party; again after {rejoin:HH:mm} UTC)");
+                else if (!free || !inRange) _log($"declined a party invite from {invite.InviterId} (level {level?.ToString() ?? "unknown"})");
                 return;
             }
             if (result == ErrorCodes.AlreadyInParty)
