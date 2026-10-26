@@ -1,5 +1,26 @@
 # Skill growth implementation
 
+## Mounted normal attacks
+
+`Lua_CFG_JobAttackConfig._getData` selects the career/weapon entry and then the active **battle** mount when
+`ActivationMounts[Battle].m_bIsRiding` is true, falling back to that weapon's mount-0 entry. Owning, leasing or
+selecting a mount does not select its attack until riding. Cosmetic mounts do not select battle attacks.
+`SkillService.NormalAttack(GameSession)` follows this contract for `currentAtkSkillId`, the wheel and combat.
+In the client export, a Rune Knight's dragon replaces on-foot Basic Attack with the mounted variant; a Ranger's
+warg replaces the on-foot attack with Warg Strike. Filtering JobAttackConfig to mount 0 left these attacks at 0/1.
+
+`LC_Actor_AutoAttack.GetNormalSkill` searches learned `_iIsNormalAtk` groups. The selected attack is therefore
+published at level 1 in 5025, and 32745/lease cancellation refreshes 5025 after the mount state commits. Existing
+manual/auto attack slots project onto the mounted attack and back onto the walking attack **(inferred continuity
+policy)**. Saved plans survive relogging; mounted-only attacks cannot be bound or cast while walking. Auto-attack
+continuations select the session's current attack. Mount unlock requirements remain in the career/mount services.
+
+`MountedAttackRulesTests` checks invented weapon/mount selection rules. `SkillCombatTests.MountedAttack` uses
+client data and the game wire to cover riding, bar assignment, damage, mounted relogging, forced dismount and
+rejection of mounted-only attacks after dismount, including a bow-equipped Ranger.
+
+## Plans and allocation
+
 `SkillService` owns AUTO_SYNC 5025 and requests 31151, 31152, 31153, 31156, 31157, 31159 and 31160. The durable `role.skill_plans` blob stores the selected zero-based index and each plan's levels, manual/auto positions, selected load levels, queue, name and genre. `RoleProgress.Skills` and `RoleProgress.SkillBar` remain the selected plan's projection for combat and quest consumers. A plan mutation saves the blob and the active projection in one SQLite transaction. `Learned` runs after an active allocation, reset or plan switch so subscribers can refresh derived effects.
 
 Lineup's "Skill Bar" action comes from `JobConfig._iQueueSkillId` (a `SkillConfig` row of system type 6), outside the learnable tree. Its group in `skillList` unlocks the tab. Once the selected plan has a nonempty queue, both `skillWheel.whellSkills` and `originSkillWheel.whellSkills` include its row at `SkillWheelSkillQueue` (7), alongside the separate `skillQueue` field. Sending only that separate field leaves the button unavailable: `LC_System_Skill._refreshJoystickSkill` copies the slot map, and `LC_SkillGrowthHelper.GetCanUseSkillQueueSkillId` reads slot 7 from it. The wheel is rebuilt on sync/login, so saved lineups acquire the slot and empty lineups lose it without a database migration.

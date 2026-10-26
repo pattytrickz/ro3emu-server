@@ -42,7 +42,7 @@ public sealed class MountService : IGameTicker
 
     public MountService(GameData data, CharacterService character, RoleStore roles, FunctionService functions,
         World world, GameLoop loop, SessionRegistry sessions, SceneService scenes, Deadlines deadlines, TimeProvider clock,
-        WardrobeService wardrobe)
+        WardrobeService wardrobe, SkillService skills)
     {
         this._wardrobe = wardrobe;
         this._data = data; this._character = character; this._roles = roles; this._functions = functions;
@@ -52,6 +52,7 @@ public sealed class MountService : IGameTicker
         wardrobe.MountGrant = PlanShopGrant;
         character.JobChanged.Add(ReconcileAsync);
         scenes.BeforeSelf.Add(ReconcileAsync);
+        RideChanged.Add(s => s.SkillPlans == null ? Task.CompletedTask : skills.SyncAsync(s));
     }
 
     public void Load(GameSession s)

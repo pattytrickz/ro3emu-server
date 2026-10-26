@@ -120,8 +120,10 @@ public sealed partial class CombatService
 
     private void TickEventPvP(long now)
     {
-        foreach (var (source, attack) in _eventAttacks.ToArray())
+        foreach (var (source, savedAttack) in _eventAttacks.ToArray())
         {
+            var attack = source.Progress is { } progress && _skills.IsNormalAttack(progress.Career, savedAttack.SkillId)
+                ? savedAttack with { SkillId = _skills.NormalAttack(source) } : savedAttack;
             if (!CanPlayerHit(source, attack.Target) || !GuardianCanObserve(source, attack.Target) || PlayerDistance(source, attack.Target) > 30
                 || MonsterService.Distance(attack.StartX, attack.StartZ, source.Position.X, source.Position.Z) > 1.5f)
             { _eventAttacks.Remove(source); continue; }

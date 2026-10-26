@@ -146,7 +146,7 @@ public sealed partial class CombatService
         // (LC_AutoAttackAppendState: GetNormalSkill). Repeating the cast skill itself bypassed its cooldown: Blade
         // Smash and Sonic Slash fired every swing.
         int loopSkill = GameData.Int(row!.Value, "_iIsNormalAtk") == 1 ? req.SkillId
-            : _skills.NormalAttack(s.Progress!.Career, WeaponType(s, 1), WeaponType(s, 2));
+            : _skills.NormalAttack(s);
         if (GameData.Int(row!.Value, "_iIfAutoAtk") == 2 && owned == null && target != null && CanHitMonster(s, target))
         {
             s.Attack = new AttackLoop
@@ -246,6 +246,8 @@ public sealed partial class CombatService
         if (GameData.Int(row, "_iID") == PublicSkill("WorldTreeSkillId")) return true; // paid item skill, LC_ReviveHelper.
         // A Survivor Battle career owns the match skill set (TimedBattleService.Chicken), not the job tree.
         if (MatchSkillRule?.Invoke(s, (int)GameData.Int(row, "_iID")) is { } granted) return granted;
+        if (_skills.IsMountOnlyAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID")))
+            return _skills.NormalAttack(s) == GameData.Int(row, "_iID");
         if (_skills.IsNormalAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID"))) return true;
         return _skills.Level(s.Progress, (int)GameData.Int(row, "_iSkillID")) >= GameData.Int(row, "_iLevel");
     }
