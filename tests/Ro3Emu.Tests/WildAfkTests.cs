@@ -184,6 +184,31 @@ public sealed class WildAfkTests : IAsyncLifetime
         Assert.Equal(3600, await Query(bot));
     }
 
+    /// <summary>
+    /// A player who stopped Bonus Time can turn it back on in town: the switch already stays on when they walk from a
+    /// field into town, so a town is no "dungeon" for 43409 either. It waits there suspended and consumes nothing.
+    /// </summary>
+    [ClientDataFact]
+    public async Task BonusTimeStoppedOnAFieldCanBeTurnedBackOnInTown()
+    {
+        await using var bot = await InWorld();
+        await Eligible(bot);
+        await Warp(bot, 10111);
+        await bot.SendGameAsync(WildAfkService.Pause, new PauseHighMultiplierTimeReq());
+        Assert.Equal(0, (await Next(bot, WildAfkService.Pause, PauseHighMultiplierTimeRsp.Parser)).Result);
+        await Warp(bot, 10100); // MapConfig._iSceneType=0, Prontera
+        await OnOwnedLoop(bot, "AFK toggle cooldown fixture", s =>
+        {
+            s.WildAfk!.LastToggleMs = 0;
+            return Task.CompletedTask;
+        });
+        await bot.SendGameAsync(WildAfkService.Start, new StartHighMultiplierTimeReq());
+        Assert.Equal(0, (await Next(bot, WildAfkService.Start, StartHighMultiplierTimeRsp.Parser)).Result);
+        Assert.True(await State(bot, s => s.WildAfk!.Info.IsHighMagnification && s.WildAfk.Info.IsSuspended));
+        await Task.Delay(1200);
+        Assert.Equal(3600, await Query(bot));
+    }
+
     [ClientDataFact]
     public async Task FavoritesValidateCapDuplicatesRemovalAndSurviveReconnect()
     {
