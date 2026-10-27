@@ -115,8 +115,8 @@ public sealed class ServerOptions
     public LevelCapPhase[] LevelCaps { get; set; } = [];
 
     /// <summary>
-    /// Hours a settled monster-kill receipt keeps its full payload before <see cref="Accounts.ReceiptCompaction"/>
-    /// empties it (0 keeps everything). Only a retry of the same operation, seconds after the kill, reads it.
+    /// Hours a settled monster-kill or pass/play receipt keeps its full payload before <see cref="Accounts.ReceiptCompaction"/>
+    /// empties it (0 keeps everything). Only a retry of the same operation, seconds after the commit, reads it.
     /// </summary>
     public int ReceiptRetentionHours { get; set; } = 24;
 
