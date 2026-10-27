@@ -5,7 +5,7 @@ using Romsg;
 namespace Ro3Emu.Server.Game;
 
 /// <summary>Dungeons, the tower, daily and timed activities, festivals, training, lottery, AFK and build plans.</summary>
-public sealed class ActivitiesMessages(PraiseService praise, CasualBattleService casual, DailyActivityService daily, TowerService tower, ValhallaService valhalla, MonsterHuntService monsterHunt, FirstHeartService firstHeart, DungeonService dungeons, DungeonMatchService dungeonMatches, WildAfkService afk, NewActivityService activities, TimedEventService timedEvents, TimedBattleService timedBattles, FestivalService festival, TrainingService training, LotteryService lottery, GenreService genre, GuildHuntingService hunting) : Messaging.IMessageModule
+public sealed class ActivitiesMessages(PraiseService praise, CasualBattleService casual, DailyActivityService daily, TowerService tower, ValhallaService valhalla, FlyingDragonService dragon, MonsterHuntService monsterHunt, FirstHeartService firstHeart, DungeonService dungeons, DungeonMatchService dungeonMatches, WildAfkService afk, NewActivityService activities, TimedEventService timedEvents, TimedBattleService timedBattles, FestivalService festival, TrainingService training, LotteryService lottery, GenreService genre, GuildHuntingService hunting) : Messaging.IMessageModule
 {
     private const uint SetAutoBattle = 31054;
 
@@ -245,6 +245,16 @@ public sealed class ActivitiesMessages(PraiseService praise, CasualBattleService
             await timedBattles.UpgradeAsync(session, ChickenItemUpgradeReq.Parser.ParseFrom(body.Span)));
         routes.Map(TimedBattleService.ItemUpgradeAll, "timedBattles", async (session, msgId, body) =>
             await timedBattles.UpgradeAllAsync(session));
+        routes.Map(TimedBattleService.AdventureSelect, "timedBattles", async (session, msgId, body) =>
+            await timedBattles.SelectAdventureAsync(session, AdventureEventSelectReq.Parser.ParseFrom(body.Span)));
+        routes.Map(TimedBattleService.AdventureRefresh, "timedBattles", async (session, msgId, body) =>
+            await timedBattles.RefreshAdventureAsync(session, AdventureRefreshReq.Parser.ParseFrom(body.Span)));
+        routes.Map(TimedBattleService.SelectFollow, "timedBattles", async (session, msgId, body) =>
+            await timedBattles.SelectFollowAsync(session, SelectFollowReq.Parser.ParseFrom(body.Span)));
+        routes.Map(TimedBattleService.ChangeWatch, "timedBattles", async (session, msgId, body) =>
+            await timedBattles.ChangeWatchAsync(session, ChickenChangeWatchPlayerReq.Parser.ParseFrom(body.Span)));
+        routes.Map(TimedBattleService.OpenPanel, "timedBattles", async (session, msgId, body) =>
+            await timedBattles.OpenPanelAsync(session, ChickenOpenPanelReq.Parser.ParseFrom(body.Span)));
         routes.Map(83351, "timedBattles", async (session, msgId, body) =>
         {
             await timedBattles.OnePieceInfoAsync(session, HiddenTreasureRoundInfoReq.Parser.ParseFrom(body.Span));
@@ -328,6 +338,14 @@ public sealed class ActivitiesMessages(PraiseService praise, CasualBattleService
         {
             await monsterHunt.ClaimAreaAsync(session, AreaConcurGainAreaAwardReq.Parser.ParseFrom(body.Span));
         });
+        // The Starshatter ritual is one per server: its requests keep the default realm-wide admission.
+        routes.Map(FlyingDragonService.Start, "flyingDragon", async (session, msgId, body) =>
+            await dragon.StartAsync(session, FlyingDragonStartProduceReq.Parser.ParseFrom(body.Span)));
+        routes.Map(FlyingDragonService.Assist, "flyingDragon", async (session, msgId, body) => await dragon.AssistAsync(session));
+        routes.Map(FlyingDragonService.Query, "flyingDragon", async (session, msgId, body) => await dragon.QueryAsync(session));
+        routes.Map(FlyingDragonService.Accelerate, "flyingDragon", async (session, msgId, body) => await dragon.AccelerateAsync(session));
+        routes.Map(FlyingDragonService.Complete, "flyingDragon", async (session, msgId, body) => await dragon.CompleteAsync(session));
+        routes.Map(FlyingDragonService.ThumbsUp, "flyingDragon", async (session, msgId, body) => await dragon.ThumbsUpAsync(session));
         routes.Map(ValhallaService.Challenge, "valhalla", async (session, msgId, body) =>
         {
             await valhalla.ChallengeAsync(session, HeroicSpiritChallengeReq.Parser.ParseFrom(body.Span));

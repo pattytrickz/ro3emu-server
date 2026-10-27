@@ -23,7 +23,7 @@ public sealed class KafraArrivalTests
     {
         var path = DataFiles.Find(Path.Combine(ClientData.RepoRoot, "data", "sceneeditor"), "MapLinkData.json")!;
         using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
-        return doc.RootElement.GetProperty("Capra").EnumerateObject().Select(p => long.Parse(p.Name)).ToList();
+        return [.. doc.RootElement.GetProperty("Capra").EnumerateObject().Select(p => long.Parse(p.Name, System.Globalization.CultureInfo.InvariantCulture))];
     }
 
     [ClientDataFact]

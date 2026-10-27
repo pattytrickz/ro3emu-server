@@ -9,19 +9,20 @@ public sealed partial class DungeonTests
     /// <summary>
     /// A cleared story instance (DungeonConfig _iGamePlayType 6) returns its player to the map: the next quest's plot
     /// waits on the field (1051001 "Ferocious Mother Bird" → 10103130's plot 130141 in 10510), and players stayed
-    /// inside not knowing they had to leave. A banner notice first, then the return after StoryReturnSeconds.
+    /// inside not knowing they had to leave. A banner notice first, then the return after StoryReturnSeconds. Desert
+    /// Crossroad (elite) is one wave with one monster (Payon Forest 1022001 plays as a scripted scene since the
+    /// 26 Oct upstream sync; it returns the same way, through the same finish).
     /// </summary>
     [ClientDataFact]
     public async Task ClearedStoryInstanceAnnouncesAndReturnsThePlayerToTheMap()
     {
-        const long story = 1022001;
+        const long story = 1051051;
         Assert.True(DungeonService.StoryInstance(Service<DungeonCatalog>().Resolve(new EnterDungeonReq { SceneEntry = story })!));
         await using var alice = await InWorld("Alice");
         long outside = Session(alice).SceneEntry;
-        await Gm(alice, "!quest accept 10102200"); // exported condition 1000000 requires this task Running
         Assert.Equal(0, await Enter(alice, new EnterDungeonReq { SceneEntry = story }));
         long instance = await Load(alice, story);
-        var boss = await BossIn(instance, 5300001);
+        var boss = await BossIn(instance, 5000022); // the elite Scorpion (dungeon-monsters.json)
         await OnLoop(() => Service<SceneService>().TeleportInMapAsync(Session(alice),
             new MapPoint(boss.X + 1, boss.Y, boss.Z, boss.Face)));
         await Kill(alice, boss);
@@ -41,7 +42,7 @@ public sealed partial class DungeonTests
     public void OnlySoloStoryInstancesReturnOnTheirOwn()
     {
         var catalog = Service<DungeonCatalog>();
-        Assert.True(DungeonService.StoryInstance(catalog.Resolve(new EnterDungeonReq { SceneEntry = 1022001 })!));
+        Assert.True(DungeonService.StoryInstance(catalog.Resolve(new EnterDungeonReq { SceneEntry = 1051051 })!));
         // A multiplayer boss run keeps its own exit (vote, auction, leave button).
         Assert.False(DungeonService.StoryInstance(catalog.Resolve(Request(100101, 1, 3020101))!));
     }

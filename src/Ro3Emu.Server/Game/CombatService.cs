@@ -19,6 +19,12 @@ public sealed class AttackLoop
     public float StartZ { get; set; }
     /// <summary>When the target was first seen out of reach (0 = in reach); see CombatService.AttackOutOfReachMs.</summary>
     public long OutOfReachSinceMs { get; set; }
+    /// <summary>Started while the player still walked: the stop that follows at once is where the loop really starts.</summary>
+    public bool StartedWalking { get; set; }
+    public long StartMs { get; init; }
+    /// <summary>The walk speed (m/s) and the last walk message when the loop started (CombatService.PlayerMoved).</summary>
+    public float ArrivalSpeed { get; init; }
+    public DateTime WalkFromUtc { get; init; }
 }
 
 /// <summary>
@@ -543,7 +549,7 @@ public sealed partial class CombatService : IGameTicker
 
     private async Task MonsterAttackAsync(MonsterUnit m, GameSession p)
     {
-        if (m.Dead || m.Hp <= 0 || _buffs.UnitForbidden(m, ForbiddenState.NormalAttack) || GuardianStealthed(p) || !_buffs.CanSeePosition(m, p.Position)) return;
+        if (m.Dead || m.Hp <= 0 || _buffs.UnitForbidden(m, ForbiddenState.NormalAttack) || Stealthed(p) || !_buffs.CanSeePosition(m, p.Position)) return;
         var targetRole = p.Role;
         if (targetRole == null) return;
         long targetScene = p.WorldScene;
@@ -562,7 +568,7 @@ public sealed partial class CombatService : IGameTicker
             && GameData.Int(swingRow, "_iSkillEffectLevel") > 0);
         ScheduleRuntime(m.WorldScene, TimeSpan.FromSeconds(m.Template.HitPointSeconds), async () =>
         {
-            if (m.Dead || m.Hp <= 0 || _buffs.UnitForbidden(m, ForbiddenState.NormalAttack) || GuardianStealthed(p) || p.Dead || p.Role == null || p.SceneLoading || p.WorldScene != m.WorldScene) return;
+            if (m.Dead || m.Hp <= 0 || _buffs.UnitForbidden(m, ForbiddenState.NormalAttack) || Stealthed(p) || p.Dead || p.Role == null || p.SceneLoading || p.WorldScene != m.WorldScene) return;
             if (!ReferenceEquals(p.Role, targetRole) || p.WorldScene != targetScene
                 || p.SceneGeneration != targetGeneration || !ReferenceEquals(p.Attachment, targetLease)
                 || targetLease?.Cancelled == true) return;
@@ -710,7 +716,7 @@ public sealed partial class CombatService : IGameTicker
         var ratios = Numbers(skill, "_kDamageParam1");
         var flats = Numbers(skill, "_kDamageParam2");
         double p1 = (ratios.Length > branch ? ratios[branch] : 10000) + ratioBonus, p2 = flats.Length > branch ? flats[branch] : 0;
-        double dmg = (magic ? a.Matk : a.Atk) * p1 / 10000 + p2;
+        double dmg = (magic || ScalesWithMatk(skill) ? a.Matk : a.Atk) * p1 / 10000 + p2;
         // Defense: def / (def + ParDef 20 × the defender's level), the shape of the client's damage-reduction tooltip.
         double def = magic ? b.Mdef : b.Def;
         dmg *= 1 - def / (def + 20.0 * Math.Max(1, b.Level));
@@ -718,6 +724,14 @@ public sealed partial class CombatService : IGameTicker
         int element = (int)GameData.Int(skill, "_iEleType") is var se and > 1 ? se : a.Element;
         return dmg * Math.Clamp(1 + ElementFactor(element, b.Element) / 10000.0, 0.1, 10);
     }
+
+    /// <summary>
+    /// Magic Crasher (12201, both its row and its Magic Cannon row 1220111): "Deals Neutral Ranged Physical damage equal
+    /// to MATK * ^{1}${2}%+${3}^{2}" (_iDescription 10110301152). Its _iDmgType is 1, so PDEF and crits still apply,
+    /// but the ratio multiplies MATK. No other SkillConfig description makes physical damage from MATK.
+    /// </summary>
+    private static bool ScalesWithMatk(JsonElement skill) => GameData.Int(skill, "_iSkillID") == MagicCrasherGroup;
+    private const int MagicCrasherGroup = 12201;
 
     /// <summary>
     /// Aura Blade (11201): "increasing the percentage damage multiplier of Normal Attack skills by ${1}%" while its buff
@@ -946,13 +960,24 @@ public sealed partial class CombatService : IGameTicker
         finally { ReleaseReviveClaim(p); }
     }
 
-    /// <summary>Publish an already committed resurrection; never changes the dead/alive state.</summary>
+    /// <summary>Test seam: runs after the first revive packet so a role handover can detach the session mid-publication.</summary>
+    internal Func<GameSession, Task>? ReviveBroadcastedForTest;
+
+    /// <summary>Publish an already committed resurrection; never changes the dead/alive state. A role handover can
+    /// detach the session (Role = null, RoleHandover.cs:100) at any await; the reconnect reloads the committed state,
+    /// so each step first checks that the role is still attached.</summary>
     public async Task PublishReviveAsync(GameSession p, MapPoint? point)
     {
+        if (p.Role == null) return;
         await ToPlayerAndViewersAsync(p, EntityBaseChange, LifeState(p));
+        if (ReviveBroadcastedForTest is { } seam) await seam(p);
+        if (p.Role == null) return;
         if (point is { } at) await _scene.TeleportInMapAsync(p, at);
+        if (p.Role == null) return;
         await _character.SetHpSpAsync(p, null, null); // send committed/current health; never overwrite later damage
+        if (p.Role == null) return;
         await p.SendGameAsync(ReviveInfo, new SyncClientPlayerReviveInfoNtf { BDead = p.Dead, SceneEntry = p.SceneEntry });
+        if (p.Role == null) return;
         await RefreshRevivedAsync(p);
     }
 

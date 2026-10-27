@@ -29,7 +29,7 @@ public sealed partial class CombatService
         CanEventHit(source, target) || CanTerritoryHit(source, target);
 
     private GameSession? EventTarget(GameSession source, long id) => _sessions.All()
-        .FirstOrDefault(target => target.Role?.Id == id && CanPlayerHit(source, target) && GuardianCanObserve(source, target));
+        .FirstOrDefault(target => target.Role?.Id == id && CanPlayerHit(source, target) && CanSee(source, target));
 
     private static float PlayerDistance(GameSession a, GameSession b) =>
         MonsterService.Distance(a.Position.X, a.Position.Z, b.Position.X, b.Position.Z);
@@ -45,7 +45,7 @@ public sealed partial class CombatService
     {
         if (source.Role == null || source.Progress == null) return;
         using var held = await CharacterService.Lock(source);
-        if (!CanPlayerHit(source, target) || !GuardianCanObserve(source, target) || source.SkillCast is { Cancelled: false }
+        if (!CanPlayerHit(source, target) || !CanSee(source, target) || source.SkillCast is { Cancelled: false }
             || EffectiveSkillRow(source, skillId) is not { } row || !Learned(source, row)
             || !SkillModeAllowed(source, row) || _buffs.HasForbidden(source, ForbiddenState.NormalAttack)) return;
         var request = new CastSkillReq
@@ -124,7 +124,7 @@ public sealed partial class CombatService
         {
             var attack = source.Progress is { } progress && _skills.IsNormalAttack(progress.Career, savedAttack.SkillId)
                 ? savedAttack with { SkillId = _skills.NormalAttack(source) } : savedAttack;
-            if (!CanPlayerHit(source, attack.Target) || !GuardianCanObserve(source, attack.Target) || PlayerDistance(source, attack.Target) > 30
+            if (!CanPlayerHit(source, attack.Target) || !CanSee(source, attack.Target) || PlayerDistance(source, attack.Target) > 30
                 || MonsterService.Distance(attack.StartX, attack.StartZ, source.Position.X, source.Position.Z) > 1.5f)
             { _eventAttacks.Remove(source); continue; }
             if (now < attack.NextSwing || source.SkillCast is { Cancelled: false } || _data.Row("SkillConfig", attack.SkillId) is not { } row

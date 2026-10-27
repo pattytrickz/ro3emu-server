@@ -62,7 +62,7 @@ public sealed partial class EmblemService
     /// <summary>Set by PowerService: publish 31502/31503/5066 after a Soul Echo change (the caller holds the lock).</summary>
     internal Func<GameSession, Task>? PublishPower { get; set; }
 
-    /// <summary>Load before 5009 and ENTITYSELF; roll missing old instance attrs and repair stale active refs (inferred).</summary>
+    /// <summary>Load before 5009 and ENTITYSELF; roll missing old instance attrs and elements, repair stale active refs (inferred).</summary>
     public async Task LoadAsync(GameSession session)
     {
         var saved = _roles.LoadEmblems(session.Role!.Id);
@@ -94,6 +94,8 @@ public sealed partial class EmblemService
                 item.Attrs = GenerateAttrs(item.Entry);
                 changed = true;
             }
+            // Echoes levelled before random elements were rolled kept 0 ("?") in their reached slots.
+            else if (AddMarks(item.Attrs, item.Entry, (int)item.Attrs[Level])) changed = true;
         }
         var active = next.Plans[next.CurrentPlan];
         var seen = new HashSet<long>();
@@ -594,17 +596,37 @@ public sealed partial class EmblemService
         }
     }
 
-    private void AddMarks(Dictionary<int, long> attrs, int entry, int level)
+    /// <summary>
+    /// Light the _kInitialMark [level, mark] slots the level reached; true when a slot changed. Mark 0 is
+    /// EmblemMarkConfig's empty element (icon_emblem_element_s1_00_null, the "?" slot): such a slot rolls one of the
+    /// configured elements once and keeps it ("every @{2} levels, a Soul Echo unlocks an element", rule text
+    /// 灵魂残响每升@{2}级会点亮一个元素). Equal odds per element are inferred.
+    /// </summary>
+    private bool AddMarks(Dictionary<int, long> attrs, int entry, int level)
     {
-        if (_data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kInitialMark", out var list) || list.ValueKind != JsonValueKind.Array) return;
+        if (_data.Row("EmblemConfig", entry) is not { } row || !row.TryGetProperty("_kInitialMark", out var list) || list.ValueKind != JsonValueKind.Array) return false;
         int slot = 0;
+        bool changed = false;
         foreach (var pair in list.EnumerateArray())
         {
             if (slot >= 10 || pair.ValueKind != JsonValueKind.Array || pair.GetArrayLength() < 2) break;
             if ((long)(GameData.Number(pair[0]) ?? 0) > level) break;
-            attrs[1021 + slot] = (long)(GameData.Number(pair[1]) ?? 0);
+            long mark = (long)(GameData.Number(pair[1]) ?? 0);
+            bool held = attrs.TryGetValue(1021 + slot, out long current);
+            if (mark == 0) mark = held && current > 0 ? current : RandomMark();
+            if (!held || current != mark) { attrs[1021 + slot] = mark; changed = true; }
             slot++;
         }
+        return changed;
+    }
+
+    /// <summary>One of the current season's elements: EmblemMarkConfig mark ids with a resonance stage.</summary>
+    private long RandomMark()
+    {
+        var marks = _data.Table("EmblemMarkConfig").Values
+            .Where(r => GameData.Int(r, "_iEmblemMarkID") > 0 && GameData.Int(r, "_iMarkStage") > 0 && SeasonRowsValid(r))
+            .Select(r => GameData.Int(r, "_iEmblemMarkID")).Distinct().Order().ToArray();
+        return marks.Length == 0 ? 0 : marks[Random.Shared.Next(marks.Length)];
     }
 
     /// <summary>Positive-weight rows selected without replacement by actual attribute ID (inferred selection).</summary>

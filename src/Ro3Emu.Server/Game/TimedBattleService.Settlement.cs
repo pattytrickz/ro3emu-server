@@ -195,7 +195,7 @@ public sealed partial class TimedBattleService
                     new TimedBattleObligationRow(source, match.Room.Id, match.Entry, original.Id,
                         JsonSerializer.SerializeToUtf8Bytes(grants), JsonSerializer.SerializeToUtf8Bytes(costs),
                         JsonSerializer.SerializeToUtf8Bytes(next), result),
-                    _tasks.StageTimedBattleSettlement(player, match.Entry, source)));
+                    _tasks.StageTimedBattleSettlement(player, match.Entry, source, ChickenWeekly(match, player))));
             }
             frozen = staged.ToArray();
             var tx = _roles.NewTransaction();
@@ -275,6 +275,7 @@ public sealed partial class TimedBattleService
         {
             try
             {
+                if (match.Chicken != null) ClearChickenCustom(player);
                 if (match.Room != null && player.InstanceId == match.Room.Id)
                     await _instances.LeaveAsync(player, recoverDeadOnReturn: match.Chicken != null);
             }
@@ -351,7 +352,8 @@ public sealed partial class TimedBattleService
         {
             SourceRevision = source.SourceRevision, Career = source.Career,
             Level = source.Level, JobLevel = source.JobLevel, Exp = source.Exp, JobExp = source.JobExp,
-            BonusPoints = source.BonusPoints, StarterKit = source.StarterKit
+            BonusPoints = source.BonusPoints, StarterKit = source.StarterKit,
+            ParagonLevel = source.ParagonLevel, ParagonExp = source.ParagonExp
         };
         source.Stats.CopyTo(copy.Stats, 0);
         foreach (var (entry, amount) in source.Currency) copy.Currency[entry] = amount;
