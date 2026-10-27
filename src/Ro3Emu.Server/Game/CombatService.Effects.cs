@@ -361,6 +361,7 @@ public sealed partial class CombatService
             }
         }
         if (field == null && !action.Request.IsExtraSkill && CanApplyMoreEffects()) await RicochetAsync(s, action, processed);
+        if (field == null && !action.Request.IsExtraSkill && CanApplyMoreEffects()) await FearBreezeAsync(s, action, processed, hit);
         // A player's own cast: not a field, not an extra cast such as a talent proc, so procs never chain.
         if (field == null && !action.Request.IsExtraSkill)
             foreach (var handler in CastResolved)
