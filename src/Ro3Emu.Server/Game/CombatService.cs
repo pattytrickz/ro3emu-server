@@ -716,7 +716,7 @@ public sealed partial class CombatService : IGameTicker
         var ratios = Numbers(skill, "_kDamageParam1");
         var flats = Numbers(skill, "_kDamageParam2");
         double p1 = (ratios.Length > branch ? ratios[branch] : 10000) + ratioBonus, p2 = flats.Length > branch ? flats[branch] : 0;
-        double dmg = (magic ? a.Matk : a.Atk) * p1 / 10000 + p2;
+        double dmg = (magic || ScalesWithMatk(skill) ? a.Matk : a.Atk) * p1 / 10000 + p2;
         // Defense: def / (def + ParDef 20 × the defender's level), the shape of the client's damage-reduction tooltip.
         double def = magic ? b.Mdef : b.Def;
         dmg *= 1 - def / (def + 20.0 * Math.Max(1, b.Level));
@@ -724,6 +724,14 @@ public sealed partial class CombatService : IGameTicker
         int element = (int)GameData.Int(skill, "_iEleType") is var se and > 1 ? se : a.Element;
         return dmg * Math.Clamp(1 + ElementFactor(element, b.Element) / 10000.0, 0.1, 10);
     }
+
+    /// <summary>
+    /// Magic Crasher (12201, both its row and its Magic Cannon row 1220111): "Deals Neutral Ranged Physical damage equal
+    /// to MATK * ^{1}${2}%+${3}^{2}" (_iDescription 10110301152). Its _iDmgType is 1, so PDEF and crits still apply,
+    /// but the ratio multiplies MATK. No other SkillConfig description makes physical damage from MATK.
+    /// </summary>
+    private static bool ScalesWithMatk(JsonElement skill) => GameData.Int(skill, "_iSkillID") == MagicCrasherGroup;
+    private const int MagicCrasherGroup = 12201;
 
     /// <summary>
     /// Aura Blade (11201): "increasing the percentage damage multiplier of Normal Attack skills by ${1}%" while its buff
