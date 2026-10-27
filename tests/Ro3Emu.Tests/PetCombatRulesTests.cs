@@ -33,6 +33,17 @@ public sealed class PetCombatRulesTests
         Assert.Equal(700, stats[113]); // star scaling must not multiply NPC movement speed.
     }
 
+    [ClientDataFact]
+    public void PanelStatsMatchWhatThePetPanelShows()
+    {
+        // A player's panel of Elena Bokba Lv.55 at star 3: HP 3534, PATK/MATK 82, PDEF/MDEF 34, SP 1463.
+        var panel = Assert.IsType<Dictionary<int, double>>(
+            PetCombatRules.PanelAttributes(Data, 32003, new PetData { PetId = 32003, Level = 55, Star = 3 }));
+        Assert.Equal(3534, panel[101]); Assert.Equal(1463, panel[102]);
+        Assert.Equal(82, panel[103]); Assert.Equal(82, panel[104]);
+        Assert.Equal(34, panel[105]); Assert.Equal(34, panel[106]);
+    }
+
     [Fact]
     public void MissingOwnershipInputsOrUnknownProgressionHaveNoCombatTemplate()
     {
