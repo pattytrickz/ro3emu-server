@@ -182,7 +182,7 @@ public sealed partial class GuildService
         var transaction = roles.NewTransaction();
         long[] prior = guild.Members.Keys.Concat(removed ?? []).Distinct().ToArray();
         // The last leaver may already be removed from the staged roster; resolve the durable actor.
-        transaction.WithEconomy(EnlistDisband(guild, transaction, prior, prior.First()));
+        transaction.WithEconomy(EnlistDisband(guild, transaction, prior, prior[0]));
         await roles.CommitAsync(transaction, "guild/disband-recovery");
     }
 
