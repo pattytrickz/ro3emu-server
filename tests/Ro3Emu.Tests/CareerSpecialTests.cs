@@ -297,6 +297,39 @@ public sealed class CareerSpecialTests : IAsyncLifetime
         Assert.DoesNotContain(1131801, await BuffsAsync());
     }
 
+    // JobAttackConfig row 39 (_iJobID 6400, _iMountID 1500300): a Mechanic on the Madogear attacks with Normal Punch
+    // 1631001, and the skill window shows it in Basic Attack's place (CartRemouldTable 1500300 _kSkillShow [16000]).
+    // Reported (Lobonatico, 24 Oct): on the Madogear the punch stayed 0/1 and could not be used, even after a reset and save.
+    [ClientDataFact]
+    public async Task TheRiddenMadogearsNormalPunchIsTheLearnedNormalAttack()
+    {
+        const int Madogear = 1500300, NormalPunch = 1631001, PunchGroup = 16310, AxeAttack = 1600001, AxeGroup = 16000;
+        await using var a = await InWorld("Alice");
+        await Become("alice", 6400, 50, 16309); // Mechanic, Madogear License (_kUnlockSkillID 1630901)
+        var skills = _app.Services.GetRequiredService<SkillService>();
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        async Task<int> LearnedAsync(int group)
+        {
+            int level = 0;
+            await loop.InvokeAsync(() =>
+            {
+                var d = skills.Build(Session("alice"));
+                level = d.SkillAssignPlans[d.CurrentPlanIndex].SkillAssigns.TryGetValue(group, out var s) ? s.SkillLevel : 0;
+                return Task.CompletedTask;
+            });
+            return level;
+        }
+
+        await RideAsync(a, Madogear);
+        await Next(a, SkillService.SkillDataSync, DBSkillDataIncrement.Parser, m => m.HasCurrentAtkSkillId && m.CurrentAtkSkillId == NormalPunch);
+        Assert.Equal(1, await LearnedAsync(PunchGroup));
+        Assert.Equal(0, await LearnedAsync(AxeGroup)); // one learned normal attack for GetNormalSkill
+
+        Assert.Equal(0, await CancelAsync(a, Madogear));
+        await Next(a, SkillService.SkillDataSync, DBSkillDataIncrement.Parser, m => m.HasCurrentAtkSkillId && m.CurrentAtkSkillId == AxeAttack);
+        Assert.Equal(1, await LearnedAsync(AxeGroup));
+    }
+
     [ClientDataFact]
     public async Task JobChangeRepairsALeaseTheNewCareerCannotHoldAndReleasesTheBattleSlot()
     {
