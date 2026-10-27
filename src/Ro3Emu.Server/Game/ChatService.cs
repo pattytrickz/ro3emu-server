@@ -6,6 +6,7 @@ using Tencent.IM;
 using Microsoft.Extensions.Options;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -145,7 +146,7 @@ public sealed partial class ChatService
 
     /// <summary>
     /// Join, then replay the group's recent lines as ordinary pushes (the client's history request must stay empty:
-    /// a non-empty text list without an audio list breaks its Lua).
+    /// a non-empty text list without an audio list breaks its Lua). A barrage channel gets no replay: see <see cref="Barrage"/>.
     /// </summary>
     public async Task JoinAsync(GameSession session, JoinChatChannelReq req)
     {
@@ -158,7 +159,7 @@ public sealed partial class ChatService
         await session.SendGameAsync(JoinChannel, new JoinChatChannelRsp { Result = 0, Req = req });
         // Repeated subscriptions still need their ACK, but replaying history would duplicate
         // lines already delivered to this session. Leaving/rejoining starts a fresh subscription.
-        if (!newlyJoined) return;
+        if (!newlyJoined || Barrage(req.GroupId)) return;
         List<TextChatMessage> recent;
         lock (_sync) recent = _recent.TryGetValue(HistoryKey(req.GroupId, session), out var lines) ? lines.ToList() : new();
         long runtime = session.WorldScene, generation = session.SceneGeneration;
@@ -171,6 +172,20 @@ public sealed partial class ChatService
     }
 
     private const int RecentLines = 20;
+
+    /// <summary>
+    /// ChatChannelConfig.IsBarrage: the client scrolls each new line of such a channel (2 guild, 3 party) across the
+    /// screen, so a replayed line would scroll again at every login. The channel is the group's prefix ("2_&lt;guild&gt;",
+    /// "@TGS#_1_&lt;cluster&gt;"). Entry 1 is the PC client's flag (inferred: nearby chat, [1, 0], is not seen scrolling).
+    /// </summary>
+    private bool Barrage(string group)
+    {
+        var name = group.StartsWith("@TGS#_", StringComparison.Ordinal) ? group.AsSpan(6) : group.AsSpan();
+        int end = name.IndexOf('_');
+        return end > 0 && long.TryParse(name[..end], out long channel)
+            && ChatChannelConfig.Get(_data, channel) is { IsBarrage: [_, not 0, ..] };
+    }
+
     private static bool GuildChannel(string group) => group.StartsWith("2_", StringComparison.Ordinal);
 
     private bool GuildAllowed(GameSession session, string group)

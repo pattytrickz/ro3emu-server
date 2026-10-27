@@ -25,6 +25,7 @@ public readonly partial record struct BuffConfig(JsonElement Row)
     [ConfigField("_iTime")] public partial long Time { get; }
     [ConfigField("_iType")] public partial long Type { get; }
     [ConfigField("_kBuffAttributeList")] public partial JsonElement? BuffAttributeList { get; }
+    [ConfigField("_kBuffScript")] public partial string BuffScript { get; }
     [ConfigField("_kBuffCategory")] public partial long[] BuffCategory { get; }
     [ConfigField("_kChangeAttri")] public partial long[][] ChangeAttri { get; }
     [ConfigField("_kDamageFormulaExtra")] public partial string[] DamageFormulaExtra { get; }

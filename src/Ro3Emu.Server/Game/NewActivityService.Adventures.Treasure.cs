@@ -168,7 +168,7 @@ public sealed partial class NewActivityService
                     ItemInfos = { [10001] = new ItemAttrValue { LongVal = 0 } }
                 };
             if (monsterId != 0) notice.Param.Add(monsterId);
-            await session.SendGameAsync(83251, notice);
+            await session.SendGameAsync(MsgId.TreasureEvent, notice);
             _tasks.OnTreasureDug(session); // quest target 106802, after the dig's commit
             return 0;
         }

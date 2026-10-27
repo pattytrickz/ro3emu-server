@@ -66,6 +66,7 @@ public readonly partial record struct SkillConfig(JsonElement Row)
     [ConfigField("_kShowDmg")] public partial long[] ShowDmg { get; }
     [ConfigField("_kSkillCategory")] public partial long[] SkillCategory { get; }
     [ConfigField("_kSkillHighParam")] public partial JsonElement? SkillHighParam { get; }
+    [ConfigField("_kSkilltag")] public partial long[] Skilltag { get; }
     [ConfigField("_kSpSkillParam")] public partial long[] SpSkillParam { get; }
 
     /// <summary>
