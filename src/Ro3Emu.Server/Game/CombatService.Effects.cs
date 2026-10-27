@@ -95,11 +95,28 @@ public sealed partial class CombatService
             or SkillRelease.DragCircle)) center = action.Origin;
         float height = GameData.Int(row, "_iAreaHeightRange") / 100f;
         // A radius override is a plain circle around the given center; otherwise the row's own area.
+        var strip = DashStrip(row);
         bool InShape(MonsterUnit m) => radiusOverride is { } radius
             ? (height <= 0 || MathF.Abs(m.Y - center.Y) <= height) && Distance(center, m.Pos) <= radius + 0.1f
+            : strip is { } dash ? InStrip(action.Origin, action.Request.Face, dash.Width, dash.Length, m.Pos)
             : SkillAreaContains(row, action.Origin, center, action.Request.Face, m.Pos);
         return _world.Map(s.WorldScene).Units.OfType<MonsterUnit>().Where(m => m.Hp > 0 && CanHitMonster(s, m) && Relation(row, false, race: m.Template.Race) && InShape(m))
             .OrderBy(m => Distance(center, m.Pos)).ThenBy(m => m.Uid).Take(max).ToList();
+    }
+
+    /// <summary>
+    /// Flowing Shadow (1532101): "dash ${1} meters as a phantom, dealing ... to up to @{1} enemies in a ${2}-meter-wide,
+    /// ${3}-meter-long rectangular area in that direction" (_kDescData [7, 3, 9, ..]). Its row's own area, a 1 m fixed
+    /// circle (_kRange [100]), would only reach the enemies where the dash starts; the strip starts there (inferred).
+    /// </summary>
+    private static (float Width, float Length)? DashStrip(JsonElement row) =>
+        Script(row) == "yingliu" && Numbers(row, "_kDescData") is [_, > 0 and var width, > 0 and var length, ..]
+            ? ((float)width, (float)length) : null;
+
+    private static bool InStrip(Vec3 origin, float face, float width, float length, Vec3 point)
+    {
+        var (forward, side) = FacingOffset(point.X - origin.X, point.Z - origin.Z, face);
+        return forward >= 0 && forward <= length + 0.1f && Math.Abs(side) <= width / 2 + 0.1f;
     }
 
     /// <summary>
@@ -453,12 +470,14 @@ public sealed partial class CombatService
         return id > 0 && Rolls.Proc(10000) < (GameData.Number(tuple[1]) ?? 0);
     }
 
-    internal enum DisplaceKind { CasterForward, CasterBack, TargetPush, TargetPull }
+    internal enum DisplaceKind { CasterForward, CasterBack, CasterToTarget, TargetPush, TargetPull }
 
     /// <summary>
     /// Skills whose show has a displacement EffectData (m_kPoint.m_bMovement) and whose description names the
     /// distance: _kDescData index, or -1 for a pull "in front of you". Who moves and which way comes from the
     /// description and the effect's curve name (击退 knockback, 拉人 pull); the server choice of skills is (inferred).
+    /// A charge to the target stops that distance short of it: Dark Illusion "Charges to a point ${5} meters in front
+    /// of the target" (on the caster's side, inferred). Flowing Shadow "Choose a direction to dash ${1} meters".
     /// ShieldsProtection's 1161341 knockback belongs to its periodic aura, which is not simulated.
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, (DisplaceKind Kind, int DescIndex)> Displacements =
@@ -471,6 +490,8 @@ public sealed partial class CombatService
             ["HighspeedSlide"] = (DisplaceKind.CasterForward, 0),
             ["HighspeedSlideMecha"] = (DisplaceKind.CasterForward, 0),
             ["PinpointAttack"] = (DisplaceKind.CasterForward, 3),
+            ["yingliu"] = (DisplaceKind.CasterForward, 0),
+            ["hesehuanying"] = (DisplaceKind.CasterToTarget, 4),
             ["ArrowRepel"] = (DisplaceKind.TargetPush, 3),
             ["PileBunker"] = (DisplaceKind.TargetPush, 5),
             ["PhantomThrust"] = (DisplaceKind.TargetPull, -1),
@@ -515,10 +536,9 @@ public sealed partial class CombatService
 
     private async Task MoveCasterAsync(GameSession s, ActiveSkillCast action)
     {
-        if (Displacement(action.Row) is not { Kind: DisplaceKind.CasterForward or DisplaceKind.CasterBack } move) return;
-        float face = action.Request.Face + (move.Kind == DisplaceKind.CasterBack ? 180 : 0);
-        double angle = face * Math.PI / 180;
-        var end = WalkableEnd(s.SceneEntry, s.Position, (float)Math.Sin(angle) * move.Distance, (float)Math.Cos(angle) * move.Distance);
+        if (Displacement(action.Row) is not { } move || move.Kind is DisplaceKind.TargetPush or DisplaceKind.TargetPull) return;
+        if (CasterOffset(s, action, move.Kind, move.Distance) is not { } offset) return;
+        var end = WalkableEnd(s.SceneEntry, s.Position, offset.Dx, offset.Dz);
         var start = s.Position.Clone();
         await ToPlayerAndViewersAsync(s, SkillMove, new SkillStartMoveNotify
         {
@@ -530,6 +550,25 @@ public sealed partial class CombatService
         s.PreviousPosition = start;
         s.Position = end;
         await _world.MoveAsync(s, new WalkReq { Pos = end, Dir = s.Face, Face = s.Face, BStop = true }, forceTeleport: true);
+    }
+
+    /// <summary>
+    /// How far the caster moves: along the cast's face (backwards for a retreat), or toward the locked target until it is
+    /// <paramref name="distance"/> metres away. Null when the target is gone or already that close.
+    /// </summary>
+    private (float Dx, float Dz)? CasterOffset(GameSession s, ActiveSkillCast action, DisplaceKind kind, float distance)
+    {
+        if (kind != DisplaceKind.CasterToTarget)
+        {
+            double angle = (action.Request.Face + (kind == DisplaceKind.CasterBack ? 180 : 0)) * Math.PI / 180;
+            return ((float)Math.Sin(angle) * distance, (float)Math.Cos(angle) * distance);
+        }
+        var target = FindMonster(s.WorldScene, action.Request.TargetId)?.Pos ?? EventTarget(s, action.Request.TargetId)?.Position;
+        if (target == null) return null;
+        float dx = target.X - s.Position.X, dz = target.Z - s.Position.Z;
+        float length = MathF.Sqrt(dx * dx + dz * dz);
+        if (length <= distance) return null;
+        return (dx / length * (length - distance), dz / length * (length - distance));
     }
 
     private async Task DisplaceTargetAsync(GameSession s, ActiveSkillCast action, MonsterUnit target)
