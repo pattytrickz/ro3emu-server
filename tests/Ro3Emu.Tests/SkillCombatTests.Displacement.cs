@@ -167,7 +167,8 @@ public sealed partial class SkillCombatTests
         Assert.Equal(150, moved.MoveTimeMs);
         Assert.InRange(MonsterService.Distance(start.X, start.Z, moved.EndPos.X, moved.EndPos.Z), 6.9f, 7.01f);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
-        Assert.Equal([ahead.Uid], hit.Dsts.Where(d => d.Damage > 0).Select(d => d.DstID).ToArray());
+        long[] struck = [.. hit.Dsts.Where(d => d.Damage > 0).Select(d => d.DstID)];
+        Assert.Equal([ahead.Uid], struck);
     }
 
     /// <summary>Two stationary enemies on a walkable line from the caster, at <paramref name="near"/> and

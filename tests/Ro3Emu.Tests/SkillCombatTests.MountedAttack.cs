@@ -68,7 +68,7 @@ public sealed partial class SkillCombatTests
         long guid = await Loop.InvokeAsync(() =>
         {
             var item = Session("alice").Items.Single(i => i.Entry == weapon);
-            (item.Attrs ??= new())[CharacterService.AttrAppraise] = 1;
+            (item.Attrs ??= [])[CharacterService.AttrAppraise] = 1;
             return Task.FromResult(item.Guid);
         });
         await bot.SendGameAsync(CharacterService.EquipItemOpr,
