@@ -44,6 +44,7 @@ namespace Ro3Emu.ClientHooks
                 QuitButton.Tick();
                 LuaPatches.Tick();
                 PassChallenges.Tick();
+                PlayerIdentity.Tick();
                 PassButton.Tick();
                 QuestAutoBattle.Tick();
                 TitleButton.Tick();

@@ -354,7 +354,8 @@ public sealed class WorldCoreTests : IAsyncLifetime
             await alice.SendGameAsync(WorldCoreService.MonitorCustom, new MonitorCustomDataReq { EntityIds = { s.Role!.Id } });
             Assert.Equal(0, (await Next(alice, WorldCoreService.MonitorCustom, MonitorCustomDataResp.Parser)).Result);
             await Service<GameLoop>().InvokeAsync(() => core.SetCustomAsync(s, new CustomData { Id = 123, CustomParam = new CustomParam { Tp = (CustomParam.Types.ParamType)3, LongParam = 42 } }));
-            Assert.Equal(42, Assert.Single((await Next(alice, WorldCoreService.MonitorSync, CustomDataChange.Parser)).CustomDatas).CustomParam.LongParam);
+            Assert.Equal(42, Assert.Single((await Next(alice, WorldCoreService.MonitorSync, CustomDataChange.Parser,
+                p => p.CustomDatas.Any(d => d.Id == 123))).CustomDatas).CustomParam.LongParam);
             await Service<GameLoop>().InvokeAsync(() => core.BeginTemporaryLeaveAsync(s, 30));
             Assert.Equal(30, (await Next(alice, WorldCoreService.TempLeave, TempLeaveNtf.Parser)).CountdownSeconds);
             await alice.SendGameAsync(WorldCoreService.RecoverLeave, new RecureTempLeaveReq());

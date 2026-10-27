@@ -42,6 +42,7 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
     }
 
     private volatile Dictionary<string, JsonElement>? _f2pShop;
+    private volatile Dictionary<string, JsonElement>? _identityCosmetics;
 
     /// <summary>
     /// ServerOptions.F2P: ShopCommodityConfig as Ro3Emu.Shared.F2PRules prices and caps it, for every reader (the shop's
@@ -49,6 +50,7 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
     /// </summary>
     private IReadOnlyDictionary<string, JsonElement> Overlaid(string name, Dictionary<string, JsonElement> table)
     {
+        if (name == "SocialOutfitConfig") return _identityCosmetics ??= Config.SupporterIdentityOverlay.Apply(table);
         if (name != "ShopCommodityConfig" || !options.Value.F2P.Enabled) return table;
         return _f2pShop ??= F2PShop(table);
     }

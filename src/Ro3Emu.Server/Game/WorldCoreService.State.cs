@@ -80,7 +80,8 @@ public sealed partial class WorldCoreService
     /// <summary>Authoritative typed custom data; operator producers are explicit, never accepted from a client push id.</summary>
     public async Task SetCustomAsync(GameSession s, CustomData value)
     {
-        if (!Ready(s) || value.Id <= 0 || value.CustomParam == null) throw new ArgumentException("Custom data needs a positive id and typed value.");
+        if (!Ready(s) || value.Id <= 0 || value.CustomParam == null || value.Id == Ro3Emu.Shared.SupporterIdentityRules.BadgeCustomData)
+            throw new ArgumentException("Custom data needs an unreserved positive id and typed value.");
         s.WorldState.CustomData[value.Id] = value.Clone();
         var packet = new CustomDataChange { EntityId = s.Role!.Id, CustomDatas = { value } };
         await ToSelfAndViewersAsync(s, CustomChange, packet);
