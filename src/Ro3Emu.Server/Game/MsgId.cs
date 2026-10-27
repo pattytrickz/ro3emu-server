@@ -22,5 +22,7 @@ public static class MsgId
     public const uint SelfInfoEndFrameNotify = 31053;
     public const uint Walk = 31082;
     public const uint SwitchSceneLine = 70010;
+    /// <summary>TT_TREASURE_EVENT_NOTIFY: the hunt's dig result and area notices (TreasureEventNotify).</summary>
+    public const uint TreasureEvent = 83251;
     public const uint ImSdkUserSig = 77001;
 }
