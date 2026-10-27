@@ -249,6 +249,8 @@ public sealed partial class CombatService
         if (GameData.Int(row, "_iID") == PublicSkill("WorldTreeSkillId")) return true; // paid item skill, LC_ReviveHelper.
         // A Survivor Battle career owns the match skill set (TimedBattleService.Chicken), not the job tree.
         if (MatchSkillRule?.Invoke(s, (int)GameData.Int(row, "_iID")) is { } granted) return granted;
+        if (_skills.IsMountOnlyAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID")))
+            return _skills.NormalAttack(s) == GameData.Int(row, "_iID");
         if (_skills.IsNormalAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID"))) return true;
         return _skills.Level(s.Progress, (int)GameData.Int(row, "_iSkillID")) >= GameData.Int(row, "_iLevel");
     }

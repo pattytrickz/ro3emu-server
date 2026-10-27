@@ -12,7 +12,7 @@ namespace Ro3Emu.Server.Game;
 public sealed class AttackLoop
 {
     public required MonsterUnit Target { get; init; }
-    public required int SkillId { get; init; }
+    public required int SkillId { get; set; }
     public long NextSwingMs { get; set; }
     /// <summary>Where the loop started: the cast position, or the client's arrival stop right after it.</summary>
     public float StartX { get; set; }
@@ -999,6 +999,7 @@ public sealed partial class CombatService : IGameTicker
                 foreach (var unit in s.SkillObjects.ToArray()) _loop.TrackRuntimeDetached("skill object tick", () => TickSkillObjectAsync(unit));
             if (s.Attack is { } a && !s.Dead && now >= a.NextSwingMs)
             {
+                if (_skills.IsNormalAttack(s.Progress.Career, a.SkillId)) a.SkillId = _skills.NormalAttack(s);
                 if (s.SceneLoading || !CanHitMonster(s, a.Target) || MonsterService.Distance(a.Target, s) > 30)
                     StopAttack(s, a.Target.Dead ? "target dead" : s.SceneLoading ? "scene change" : "target lost",
                         SkillInterruptedInfo.Types.SkillInterruptType.LockerInvalid, quiet: a.Target.Dead);

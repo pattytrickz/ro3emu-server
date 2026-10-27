@@ -57,7 +57,6 @@ public sealed class RidingEffects : IGameTicker
         _ridingBuffs = AllRidingBuffs(data);
         character.ExtraAttributes.Add(RideAttributes);
         mounts.RideChanged.Add(SyncAsync);
-        mounts.RideChanged.Add(skills.SyncAsync); // a ridden mount's JobAttackConfig attack (SkillService.NormalAttack)
         // It touches only the loaded session's own buffs, inside the scene load's scope.
         scenes.AddOwnedAfterLoaded(SyncAsync);
         skills.Learned.Add(SyncAsync);
