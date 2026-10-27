@@ -326,6 +326,42 @@ public sealed partial class EmblemTests : IAsyncLifetime
         Assert.Equal(1200, (await Next(alice, 31502, PlayerChangePowerNtf.Parser, m => m.CurPower.SeasonPower == 1200)).CurPower.SeasonPower);
     }
 
+    [ClientDataFact]
+    public async Task RandomElementSlotsRollAnElementOnLevelUpAndAtLogin()
+    {
+        long guid;
+        await using (var alice = await InWorld("Alice"))
+        {
+            await Gm("alice", "!quest done 10103040");
+            await Gm("alice", "!item 1850101"); // _kInitialMark [[5, 0], [10, 0], [15, 0], [20, 0]]: random elements
+            guid = Granted(await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser, m => m.PackInfo.ContainsKey(5)), 1850101).ItemGuid;
+            await Gm("alice", "!item 1257002 3");
+            var req = new UpgradeEmblemReq { EmblemGuid = guid }; req.ConsumeItems[1257002] = 3;
+            await alice.SendGameAsync(EmblemService.Upgrade, req);
+            Assert.Equal(0, (await Next(alice, EmblemService.Upgrade, UpgradeEmblemResp.Parser)).Result);
+            var changed = await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser,
+                m => m.PackInfo.ContainsKey(5) && m.PackInfo[5].Inc?.Items.ContainsKey(guid) == true
+                    && m.PackInfo[5].Inc.Items[guid].Inc?.ItemInfos.ContainsKey(1022) == true);
+            var attrs = changed.PackInfo[5].Inc.Items[guid].Inc.ItemInfos;
+            Assert.Equal(11, attrs[1001].Inc.LongVal);
+            Assert.InRange(attrs[1021].All.LongVal, 1001, 1004); // EmblemMarkConfig's four elements
+            Assert.InRange(attrs[1022].All.LongVal, 1001, 1004);
+            Assert.False(attrs.ContainsKey(1023));
+        }
+        // An echo levelled before random elements were rolled kept 0 ("?") in its reached slots.
+        var store = _app.Services.GetRequiredService<ItemStore>();
+        var stored = store.Load(_app.Services.GetRequiredService<RoleStore>().ForAccount("alice").Single().Id).Single(i => i.Guid == guid);
+        stored.Attrs![1021] = 0;
+        stored.Attrs[1022] = 0;
+        Assert.Equal(1, FixtureSql.Execute(_app.Services.GetRequiredService<AccountStore>(),
+            "UPDATE item SET attrs = $a WHERE guid = $g", ("$a", System.Text.Json.JsonSerializer.Serialize(stored.Attrs)), ("$g", guid)));
+        await using var again = await InWorld("Alice", create: false);
+        var repaired = (await Next(again, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser)).PackInfo[5].All.Items[guid].ItemInfos;
+        Assert.InRange(repaired[1021].LongVal, 1001, 1004);
+        Assert.InRange(repaired[1022].LongVal, 1001, 1004);
+        Assert.False(repaired.ContainsKey(1023));
+    }
+
     [ClientDataTheory]
     [InlineData(5, 4700, 5700)]
     [InlineData(6, 6700, 7030)]
