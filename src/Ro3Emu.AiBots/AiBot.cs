@@ -432,14 +432,14 @@ public sealed class AiBot
         if (Attacker() is { } attacker)
         {
             // Too strong to take alone, or the players' to finish: back to the leader rather than to the revive point.
-            if (attacker.Level <= _view.Level + 3 && !LeaveToPlayers(attacker)) { await EngageAsync(attacker); return; }
+            if (PartyRules.CanFight(_view.Level, attacker.Level) && !LeaveToPlayers(attacker)) { await EngageAsync(attacker); return; }
             if (toLeader > 3) PathTo(leader.X, leader.Z, TimeSpan.Zero, slack: 2);
             return;
         }
         if (_healSkill == 0 && await RestAsync()) return;
         // Far stronger than the leader: only their fights, never a fresh monster they could have taken (owner, #40).
         var target = toLeader < 12 && PartyRules.StartsOwnFights(_view.Level, leader.Level)
-            ? PickTarget(leader.X, leader.Z, 10, long.MaxValue, leaderId) : null;
+            ? PickTarget(leader.X, leader.Z, 10, _view.Level + PartyRules.FightsUpTo, leaderId) : null;
         if (target != null) { await EngageAsync(target); return; }
         _target = 0;
         if (toLeader > 4 && (_path == null || now - _pathAt > TimeSpan.FromSeconds(1.5)))
@@ -450,18 +450,20 @@ public sealed class AiBot
     }
 
     /// <summary>
-    /// The leader's fight: monsters hitting the leader first, then what the leader is hitting, then the bot's own target,
-    /// leaving out those low enough for the players' last hit.
+    /// The leader's fight: what the leader is hitting first (the monster the player picked, #general 27 Oct: "the bots
+    /// seem to ignore my selection"), then monsters hitting the leader, then the bot's own target, leaving out those low
+    /// enough for the players' last hit and those too strong for the bot (PartyRules.CanFight).
     /// </summary>
     private Unit? PartyTarget(Unit leader)
     {
         var window = TimeSpan.FromSeconds(6);
         var candidates = _view.AttackersOf(leader.Uid, window).Select(_view.Find)
-            .Append(_view.Find(_view.LastTargetOf(leader.Uid, window)))
+            .Prepend(_view.Find(_view.LastTargetOf(leader.Uid, window)))
             .Append(CurrentTarget());
         foreach (var unit in candidates)
         {
             if (unit is not { Type: 1, Dead: false } || Flat(unit.X, unit.Z, leader.X, leader.Z) > 20
+                || !PartyRules.CanFight(_view.Level, unit.Level)
                 || _avoid.TryGetValue(unit.Uid, out var until) && until > DateTime.UtcNow || LeaveToPlayers(unit)) continue;
             return unit;
         }
@@ -625,7 +627,7 @@ public sealed class AiBot
     /// <summary>Fight back, unless the attacker is well above the bot's level: then run for the revive point.</summary>
     private async Task DefendAsync(Unit attacker)
     {
-        if (attacker.Level <= _view.Level + 3) { await EngageAsync(attacker); return; }
+        if (PartyRules.CanFight(_view.Level, attacker.Level)) { await EngageAsync(attacker); return; }
         if (_path != null && DateTime.UtcNow - _pathAt < TimeSpan.FromSeconds(3)) return;
         _target = 0;
         _activity = "running from something way too strong";

@@ -21,6 +21,16 @@ public static class PartyRules
     public const int StrongerBy = 5;
 
     /// <summary>
+    /// A monster more than this many levels above the bot is too strong for it, even in the leader's fight (owner, 27 Oct:
+    /// in Orc Dungeon the bots joined fights with Orc Zombies and Orc Archers far above them, died three times and left
+    /// the party). The bot already fought back only up to this margin.
+    /// </summary>
+    public const int FightsUpTo = 3;
+
+    /// <summary>Whether the bot takes on a monster of this level; an unknown level (0) counts as fair.</summary>
+    public static bool CanFight(long botLevel, long monsterLevel) => monsterLevel <= 0 || monsterLevel <= botLevel + FightsUpTo;
+
+    /// <summary>
     /// Whether the bot may start on a fresh monster near the player, one they are not fighting: not when it is far
     /// stronger than them (it only joins their fights then), nor when their level is unknown.
     /// </summary>
