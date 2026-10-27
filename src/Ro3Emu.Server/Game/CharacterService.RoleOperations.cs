@@ -203,14 +203,20 @@ public sealed partial class CharacterService
         if (result == 0) await SyncItemsAsync(session);
     }
 
-    /// <summary>31324 sets the equipped arrow entry; count comes from actually owned bag stacks.</summary>
+    /// <summary>
+    /// 31324 sets the equipped arrow entry; count comes from actually owned bag stacks. The default arrow
+    /// (PublicParamConfig.ArrowsDefaultItemId, the plain Arrow: _iStackLimit 0, no _iAcquire) is never held in the bag,
+    /// so it needs no stack; any other arrow does.
+    /// </summary>
     public async Task ArrowSwitchAsync(GameSession session, ItemArrowSwitchReq req)
     {
         using var gate = await LockAsync(session);
         int count = session.Items.Where(i => i.Grid == 0 && i.Entry == req.ItemId).Sum(i => i.Stack);
+        bool isDefault = data.Table("PublicParamConfig").TryGetValue("ArrowsDefaultItemId", out var fallback)
+            && GameData.Number(fallback) == req.ItemId;
         int result = req.ItemId <= 0 ? ErrorCodes.Parameter
             : data.Row("ItemConfig", req.ItemId) is not { } row || GameData.Int(row, "_iType") != 2 || GameData.Int(row, "_iSubType") != 207
-                ? ErrorCodes.ItemNoConfig : count == 0 ? ErrorCodes.ItemMissing : 0;
+                ? ErrorCodes.ItemNoConfig : count == 0 && !isDefault ? ErrorCodes.ItemMissing : 0;
         if (result == 0)
         {
             var next = session.BagState.Info.Clone();
