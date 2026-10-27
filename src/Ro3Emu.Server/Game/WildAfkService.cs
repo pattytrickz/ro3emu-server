@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Game.Ownership;
 using Ro3Emu.Server.Maps;
 
@@ -102,6 +103,13 @@ public sealed class WildAfkService : IGameTicker
     private bool Unlocked(GameSession s) => s.Progress != null && _functions.IsOpen(s, 18);
     private bool Field(GameSession s) => s.InstanceId == 0 && _data.Row("MapConfig", s.SceneEntry) is { } map
         && GameData.Int(map, "_iSceneType") == 1; // enum scene type: field; private/dungeon maps never qualify.
+    /// <summary>
+    /// Where 43409 may turn Bonus Time back on: the fields and the towns (enum scene type 0). Localization_en
+    /// 10960000077 only refuses "Dungeons and similar Locations", and the switch already stays on, suspended, when a
+    /// player walks from a field into town, so refusing a town (AfkDungeon) left a stopped switch off (inferred).
+    /// Caves, the Realm sandbox and instances stay refused; consumption still needs <see cref="Field"/>.
+    /// </summary>
+    private bool Startable(GameSession s) => Field(s) || s.InstanceId == 0 && MapConfig.Get(_data, s.SceneEntry)?.SceneType == 0;
     /// <summary>
     /// enum_SceneType Cave (6): the shared hunting dungeons beside the fields (Undersea Tunnel, Abandoned Mine, Hidden
     /// Forest; MapConfig _iCaveBelongsTo names their field), home of the level 34-45 monsters. Bonus Time cannot be
@@ -450,7 +458,7 @@ public sealed class WildAfkService : IGameTicker
             await ReconcileCoreAsync(s, now);
             var info = state.Info;
             int error = !Unlocked(s) ? ErrorCodes.FeatureUnavailable
-                : enabled && !Field(s) ? ErrorCodes.AfkDungeon
+                : enabled && !Startable(s) ? ErrorCodes.AfkDungeon
                 : enabled && info.HighMultiplierTimeSeconds <= 0 ? ErrorCodes.AfkTimeEmpty
                 : enabled == info.IsHighMagnification ? (enabled ? ErrorCodes.AfkAlreadyActive : ErrorCodes.AfkNotActive)
                 : now - state.LastToggleMs < Param("OnHookPauseButtonCD", 1) * 1000 ? ErrorCodes.AfkToggleCooldown : 0;
