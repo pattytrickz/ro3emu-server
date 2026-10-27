@@ -29,6 +29,8 @@ public sealed class ActiveSkillCast
     public required int ActionMs { get; init; }
     public bool Cancelled { get; set; }
     public bool Resolved { get; set; }
+    /// <summary>Replaced by the next skill before its impact, which still lands (CombatService.LandsBeforeInterrupt).</summary>
+    public bool Superseded { get; set; }
     public SkillObject? Operator { get; init; }
     /// <summary>Extra effects remain bound to their equipped source after asynchronous publication.</summary>
     internal Func<bool>? SourceEligible { get; init; }
@@ -540,7 +542,7 @@ public sealed partial class CombatService
         return (int)Math.Max(0, Math.Round(ms));
     }
 
-    private static bool Live(GameSession s, ActiveSkillCast action) => !action.Cancelled && ReferenceEquals(s.SkillCast, action)
+    private static bool Live(GameSession s, ActiveSkillCast action) => !action.Cancelled && (ReferenceEquals(s.SkillCast, action) || action.Superseded)
         && !s.Dead && !s.SceneLoading && s.Role?.Id == action.OwnerId && s.WorldScene == action.WorldScene
         && (action.Operator == null || !action.Operator.Removing && action.Operator.ExpiresMs > Now);
 
@@ -595,13 +597,31 @@ public sealed partial class CombatService
     {
         s.WorldState.ResurrectionCastId = 0;
         if (s.SkillCast is not { } action) return;
-        action.Cancelled = true;
+        action.Superseded = cause == SkillInterruptedInfo.Types.SkillInterruptType.Skill && LandsBeforeInterrupt(action);
+        action.Cancelled = !action.Superseded;
         s.SkillCast = null;
         await ToPlayerAndViewersAsync(s, SkillEnd, new SkillEndNotify
         {
             SrcID = action.SourceId, SessionId = action.Id, Type = SkillEndNotify.Types.SkillEndType.Interrupted,
             ClearEffect = true, InterruptedInfo = new SkillInterruptedInfo { Type = cause },
         });
+    }
+
+    /// <summary>
+    /// A cast that deals no damage and that the next skill replaces before its impact still lands its effects. The
+    /// client lets another skill interrupt one only from its template's m_fInterruptTime, which is at or after the last
+    /// attack point in 585 of the 598 templates that have both: Mystical Amplification's buff lands at 0.083 s and the
+    /// skill can be interrupted at 0.333 s (skill_12203). The next request can still reach the server before the impact,
+    /// and the buff was lost after its SP and cooldown were paid (inferred: requests bunched in transit). Damaging casts
+    /// are left out so that alternating skills cannot land more hits than their actions allow (inferred).
+    /// </summary>
+    private bool LandsBeforeInterrupt(ActiveSkillCast action)
+    {
+        if (action.Resolved || Now < action.StartMs + action.ChantMs || Numbers(action.Row, "_kDamageParam1").Any(v => v > 0)) return false;
+        if (_data.SkillTemplate(GameData.Int(action.Row, "_iScriptShow")) is not { } template
+            || !template.TryGetProperty("m_fInterruptTime", out var value) || GameData.Number(value) is not { } interrupt) return false;
+        var points = Numbers(template, "m_kAtkPoints");
+        return points.Length > 0 && points.Max() <= interrupt;
     }
 
     /// <summary>
