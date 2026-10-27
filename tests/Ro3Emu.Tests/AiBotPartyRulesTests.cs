@@ -41,6 +41,14 @@ public sealed class AiBotPartyRulesTests
     [Fact]
     public void APlayerOfUnknownLevelGetsNoFightsStartedForThem() => Assert.False(PartyRules.StartsOwnFights(40, 0));
 
+    [Theory]
+    [InlineData(40, 40, true)]
+    [InlineData(40, 43, true)]  // up to three levels above
+    [InlineData(40, 44, false)] // Orc Zombies and Orc Archers for a low bot: left to the players
+    [InlineData(40, 0, true)]   // level unknown
+    public void ABotFightsMonstersUpToThreeLevelsAboveIt(long bot, long monster, bool fights) =>
+        Assert.Equal(fights, PartyRules.CanFight(bot, monster));
+
     [Fact]
     public void ThreeDeathsInTenMinutesLeaveTheParty()
     {

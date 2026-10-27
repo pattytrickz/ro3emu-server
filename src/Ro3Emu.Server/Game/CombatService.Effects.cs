@@ -247,7 +247,8 @@ public sealed partial class CombatService
                             await _buffs.AddSupportAsync(target, id, duration, castingRole.Id,
                                 attributeMultiplier: GuardianPetRules.BuffMultiplier(row), guardianOwned: IsGuardianEffect(row));
                 if (CanApplyMoreEffects() && script is ("Provoke" or "Taunt")) _monsters.Engage(target, s);
-                if (CanApplyMoreEffects() && !target.Dead && target.Hp > 0) await DisplaceTargetAsync(s, action, target);
+                if (CanApplyMoreEffects() && !target.Dead && target.Hp > 0)
+                    await DisplaceTargetAsync(s, action, target, center);
                 if (CanApplyMoreEffects() && script == "Fire_Wall" && field?.Touches is int touches)
                 {
                     // Description ${5}: each touch knocks the enemy back that many metres; away from the caster is (inferred).
@@ -470,7 +471,7 @@ public sealed partial class CombatService
         return id > 0 && Rolls.Proc(10000) < (GameData.Number(tuple[1]) ?? 0);
     }
 
-    internal enum DisplaceKind { CasterForward, CasterBack, CasterToTarget, TargetPush, TargetPull }
+    internal enum DisplaceKind { CasterForward, CasterBack, CasterToTarget, TargetPush, TargetPull, TargetPullToCenter }
 
     /// <summary>
     /// Skills whose show has a displacement EffectData (m_kPoint.m_bMovement) and whose description names the
@@ -479,6 +480,10 @@ public sealed partial class CombatService
     /// A charge to the target stops that distance short of it: Dark Illusion "Charges to a point ${5} meters in front
     /// of the target" (on the caster's side, inferred). Flowing Shadow "Choose a direction to dash ${1} meters".
     /// ShieldsProtection's 1161341 knockback belongs to its periodic aura, which is not simulated.
+    /// Tetra Vortex hits "enemies within a ${2}-meter radius of the target ... while applying 【Pull】" and
+    /// Gravitational Impact "up to ${3} enemies in total within ${2} meters of that enemy, continuously 【pulling them
+    /// in】": both pull toward the centre of their area, the target point or the locked enemy, and stop 1 m short of it
+    /// (inferred).
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, (DisplaceKind Kind, int DescIndex)> Displacements =
         new Dictionary<string, (DisplaceKind, int)>
@@ -497,6 +502,14 @@ public sealed partial class CombatService
             ["PhantomThrust"] = (DisplaceKind.TargetPull, -1),
             ["PetSkill_2_2_BuChongJin"] = (DisplaceKind.TargetPush, 3),
             ["Pet_AncientTree_23452"] = (DisplaceKind.TargetPull, -1),
+            ["TetraVortex"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["TetraVortex2"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["TetraVortexcopy"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["TetraVortex2copy"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["VectorShock"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["VectorShock_Copy"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["VectorShock1"] = (DisplaceKind.TargetPullToCenter, -1),
+            ["VectorShock1_Copy"] = (DisplaceKind.TargetPullToCenter, -1),
         };
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<long, (int Id, int Ms)> _movementEffects = new();
@@ -504,11 +517,13 @@ public sealed partial class CombatService
     /// <summary>
     /// The show's displacement EffectData: the lowest id in [scriptShow*100, scriptShow*100+99] with m_kPoint.m_bMovement
     /// (BackSlide 15104 -> 1510403, PileBunker 16314 -> 1631405 knockback). The client's SkillStartMove ignores a 31112
-    /// without it (LC_PerformEffect_Agent.lua SkillStartMove returns on effectId nil/0).
+    /// without it (LC_PerformEffect_Agent.lua SkillStartMove returns on effectId nil/0). A show whose m_kShows name
+    /// 8-digit EffectData (12354 -> 12354012..12354020) keeps its displacement among them (12354021).
     /// </summary>
     internal (int Id, int Ms) MovementEffect(long scriptShow) => _movementEffects.GetOrAdd(scriptShow, show =>
     {
         var (id, ms, _) = FindMovementEffect(_data, show);
+        if (id == 0) (id, ms, _) = FindMovementEffect(_data, show * 10);
         return (id, ms);
     });
 
@@ -529,14 +544,15 @@ public sealed partial class CombatService
         if (!Displacements.TryGetValue(Script(row), out var rule)) return null;
         var (effect, ms) = MovementEffect(GameData.Int(row, "_iScriptShow"));
         if (effect == 0) return null;
-        float distance = rule.DescIndex < 0 ? 1 // (inferred) "pulling them in front of you": 1 m ahead of the caster
+        // (inferred) "pulling them in front of you": 1 m ahead of the caster, or short of a pull's centre.
+        float distance = rule.DescIndex < 0 ? 1
             : (float)Numbers(row, "_kDescData").ElementAtOrDefault(rule.DescIndex);
         return distance > 0 ? (rule.Kind, distance, effect, ms) : null;
     }
 
     private async Task MoveCasterAsync(GameSession s, ActiveSkillCast action)
     {
-        if (Displacement(action.Row) is not { } move || move.Kind is DisplaceKind.TargetPush or DisplaceKind.TargetPull) return;
+        if (Displacement(action.Row) is not { } move || MovesTarget(move.Kind)) return;
         if (CasterOffset(s, action, move.Kind, move.Distance) is not { } offset) return;
         var end = WalkableEnd(s.SceneEntry, s.Position, offset.Dx, offset.Dz);
         var start = s.Position.Clone();
@@ -571,16 +587,18 @@ public sealed partial class CombatService
         return (dx / length * (length - distance), dz / length * (length - distance));
     }
 
-    private async Task DisplaceTargetAsync(GameSession s, ActiveSkillCast action, MonsterUnit target)
+    private async Task DisplaceTargetAsync(GameSession s, ActiveSkillCast action, MonsterUnit target, Vec3 center)
     {
-        if (Displacement(action.Row) is not { Kind: DisplaceKind.TargetPush or DisplaceKind.TargetPull } move) return;
-        var from = s.Position;
+        if (Displacement(action.Row) is not { } move || !MovesTarget(move.Kind)) return;
+        var from = move.Kind == DisplaceKind.TargetPullToCenter ? PullCenter(s, action, center) : s.Position;
         float dx = target.X - from.X, dz = target.Z - from.Z;
         float length = MathF.Sqrt(dx * dx + dz * dz);
         if (length < 0.001f) return;
-        // A push goes away from the caster; a pull stops the given distance in front of it.
+        // A push goes away from the caster; a pull stops the given distance in front of it (or of its centre).
         float distance = move.Kind == DisplaceKind.TargetPush ? move.Distance : -(length - move.Distance);
-        if (move.Kind == DisplaceKind.TargetPull && length <= move.Distance) return;
+        if (move.Kind != DisplaceKind.TargetPush && length <= move.Distance) return;
+        // An immobile target (training dummy, siege crystal: speed 0) is not drawn in, as Jupitel Thunder (inferred).
+        if (move.Kind == DisplaceKind.TargetPullToCenter && target.Template.SpeedCm <= 0) return;
         var start = target.Pos;
         var end = WalkableEnd(s.SceneEntry, start, dx / length * distance, dz / length * distance);
         target.Moving = false;
@@ -593,6 +611,14 @@ public sealed partial class CombatService
         });
         await _world.MoveUnitAsync(target, new MovementChangeNtf { Uid = target.Uid, MovementInfo = target.CurrentMovement(Now) });
     }
+
+    private static bool MovesTarget(DisplaceKind kind) =>
+        kind is DisplaceKind.TargetPush or DisplaceKind.TargetPull or DisplaceKind.TargetPullToCenter;
+
+    /// <summary>Where a pull to the centre goes: where the locked enemy now stands, else the area centre.</summary>
+    private Vec3 PullCenter(GameSession s, ActiveSkillCast action, Vec3 center) =>
+        new SkillConfig(action.Row).Release == SkillRelease.Lock
+        && FindMonster(s.WorldScene, action.Request.TargetId) is { } locked ? locked.Pos : center;
 
     /// <summary>Knocks a monster back <paramref name="distance"/> metres away from the cast origin (Fire Wall, Jupitel Thunder).</summary>
     private async Task RepelAsync(GameSession s, ActiveSkillCast action, MonsterUnit target, float distance)

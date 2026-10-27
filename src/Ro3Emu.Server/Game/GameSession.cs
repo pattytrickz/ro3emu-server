@@ -454,6 +454,12 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     /// <summary>Property list (AoIProperty idx, value) for ENTITYSELF / AOI bases, kept current by CharacterService.Refresh.</summary>
     public (long Id, long Value)[] EntityProperties { get; set; } = [];
 
+    /// <summary>Server-derived public role marker and supporter entitlement last published to this attachment.</summary>
+    public int PublicIdentityBadge { get; set; }
+    public bool SupporterIdentity { get; set; }
+    /// <summary>The connected client registered the new cosmetic row before asking to receive its id.</summary>
+    public bool IdentityClientReady { get; set; }
+
     /// <summary>Property ids already sent in 31008; retained across local Refresh until a zero is sent.</summary>
     public HashSet<int> SentPropertyIds { get; } = new();
 

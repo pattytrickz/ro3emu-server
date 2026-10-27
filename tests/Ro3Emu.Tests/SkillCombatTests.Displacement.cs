@@ -36,7 +36,7 @@ public sealed partial class SkillCombatTests
         // The skills the old reading moved (Stasis, Choral, VolleyArrows, ShieldsProtection...) are no rules.
         var unlocked = skills.Where(r => GameData.Int(r, "_bMovement") == 1).Select(r => Script(r)).ToHashSet();
         Assert.True(unlocked.Count > 40);
-        Assert.Equal(["BackSlide", "RetreatingShadows", "RetreatingShadowsS1"],
+        Assert.Equal(["BackSlide", "RetreatingShadows", "RetreatingShadowsS1", "VectorShock", "VectorShock1"],
             unlocked.Where(CombatService.Displacements.ContainsKey).Order().ToArray());
     }
 
@@ -167,6 +167,86 @@ public sealed partial class SkillCombatTests
         Assert.Equal(150, moved.MoveTimeMs);
         Assert.InRange(MonsterService.Distance(start.X, start.Z, moved.EndPos.X, moved.EndPos.Z), 6.9f, 7.01f);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
-        Assert.Equal([ahead.Uid], hit.Dsts.Where(d => d.Damage > 0).Select(d => d.DstID).ToArray());
+        long[] struck = [.. hit.Dsts.Where(d => d.Damage > 0).Select(d => d.DstID)];
+        Assert.Equal([ahead.Uid], struck);
     }
+
+    /// <summary>Two stationary enemies on a walkable line from the caster, at <paramref name="near"/> and
+    /// <paramref name="far"/> metres; every other monster is moved out of the way.</summary>
+    private async Task<(MonsterUnit Near, MonsterUnit Far, float Dx, float Dz)> TwoInLine(
+        GameSession session, float near, float far)
+    {
+        var start = session.Position.Clone();
+        var (dx, dz) = WalkableDirection(session, far + 1);
+        var first = await Target("alice", stationary: true);
+        var second = await Target("alice", stationary: true);
+        await Loop.InvokeAsync(() =>
+        {
+            var map = _app.Services.GetRequiredService<World>().Map(session.WorldScene);
+            foreach (var other in map.Units.OfType<MonsterUnit>().Where(m => m != first && m != second))
+            {
+                other.Moving = false; other.X = start.X + 100; other.Z = start.Z + 100;
+            }
+            foreach (var m in new[] { first, second }) { m.Moving = false; m.Hp = 1_000_000; m.Y = start.Y; }
+            first.X = start.X + dx * near; first.Z = start.Z + dz * near;
+            second.X = start.X + dx * far; second.Z = start.Z + dz * far;
+            return Task.CompletedTask;
+        });
+        return (first, second, dx, dz);
+    }
+
+    /// <summary>
+    /// Tetra Vortex Lv 1 (1231601, TetraVortex, show 12316) "deals ... to up to ${3} enemies within a ${2}-meter radius
+    /// of the target within ${1} meters of You, while applying 【Pull】" (_kDescData 12, 7, 5). Reported: the enemies are
+    /// not pulled in and just walk to the caster. Both, 3 m either side of the target point, are drawn toward it with
+    /// the show's displacement EffectData 1231665 (200 ms).
+    /// </summary>
+    [ClientDataFact]
+    public async Task TetraVortexPullsTheEnemiesTowardItsTargetPoint()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99"); await Gm("alice", "!job 2400"); await Teach("alice", 12316);
+        var session = Session("alice");
+        var start = session.Position.Clone();
+        var (near, far, dx, dz) = await TwoInLine(session, 2, 8);
+        var point = new Vec3 { X = start.X + dx * 5, Y = start.Y, Z = start.Z + dz * 5 };
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1231601, TargetPos = point });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        foreach (var target in new[] { near, far })
+        {
+            var moved = await Next(alice, CombatService.SkillMove, SkillStartMoveNotify.Parser, m => m.EntityID == (ulong)target.Uid);
+            Assert.Equal(1231665, moved.EffectId);
+            Assert.Equal(2, moved.MoveType);
+            Assert.Equal(200, moved.MoveTimeMs);
+            Assert.InRange(MonsterService.Distance(point.X, point.Z, moved.EndPos.X, moved.EndPos.Z), 0.9f, 1.1f);
+        }
+    }
+
+    /// <summary>
+    /// Gravitational Impact Lv 1 (1234201, VectorShock, show 12342) hits "a selected ST enemy ... and up to ${3}
+    /// enemies in total within ${2} meters of that enemy, continuously 【pulling them in】". The enemy 3 m behind the
+    /// locked one is drawn toward it with effect 1234212 (200 ms); the locked enemy stays where it is.
+    /// </summary>
+    [ClientDataFact]
+    public async Task GravitationalImpactPullsTheEnemiesTowardItsTarget()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99"); await Gm("alice", "!job 2400"); await Teach("alice", 12342);
+        var session = Session("alice");
+        var (locked, behind, _, _) = await TwoInLine(session, 5, 8);
+        var center = locked.Pos;
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1234201, TargetId = locked.Uid });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        var moved = await Next(alice, CombatService.SkillMove, SkillStartMoveNotify.Parser, m => m.EntityID == (ulong)behind.Uid);
+        Assert.Equal(1234212, moved.EffectId);
+        Assert.Equal(200, moved.MoveTimeMs);
+        Assert.InRange(MonsterService.Distance(center.X, center.Z, moved.EndPos.X, moved.EndPos.Z), 0.9f, 1.1f);
+        Assert.DoesNotContain(alice.Inbox.Snapshot(), e => e.IsGame(CombatService.SkillMove)
+            && SkillStartMoveNotify.Parser.ParseFrom(e.Body).EntityID == (ulong)locked.Uid);
+    }
+
+    /// <summary>Gravitational Impact's enhanced show 12354 numbers its EffectData 12354xxx; its pull is 12354021.</summary>
+    [ClientDataFact]
+    public void AnEightDigitShowKeepsItsDisplacementInItsOwnRange() =>
+        Assert.Equal((12354021, 200), Combat.MovementEffect(12354));
 }

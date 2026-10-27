@@ -184,6 +184,7 @@ namespace Ro3Emu.ClientHooks
                 "_kTaskRenew", List(List(0L, TaskType, DailySonType, 0L), List(0L, TaskType, WeeklySonType, 0L))));
             NovicePass.Inject(dbm, texts);
             ShopPrices.Apply(dbm, texts);
+            PlayerIdentity.ApplyCosmetics(dbm, texts);
             return Present();
         }
 

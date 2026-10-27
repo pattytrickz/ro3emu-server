@@ -89,13 +89,13 @@ public sealed partial class EmblemService
                 item.Sort = nextSort;
                 changed = true;
             }
-            if (item.Attrs == null || !item.Attrs.ContainsKey(Level))
+            if (item.Attrs == null || !item.Attrs.TryGetValue(Level, out long level))
             {
                 item.Attrs = GenerateAttrs(item.Entry);
                 changed = true;
             }
             // Echoes levelled before random elements were rolled kept 0 ("?") in their reached slots.
-            else if (AddMarks(item.Attrs, item.Entry, (int)item.Attrs[Level])) changed = true;
+            else if (AddMarks(item.Attrs, item.Entry, (int)level)) changed = true;
         }
         var active = next.Plans[next.CurrentPlan];
         var seen = new HashSet<long>();
