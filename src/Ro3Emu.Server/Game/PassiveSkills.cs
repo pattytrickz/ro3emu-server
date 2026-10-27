@@ -14,9 +14,10 @@ namespace Ro3Emu.Server.Game;
 /// only in the description, as for the talents' procs (inferred). Double Attack, Deadly Poison's Venom and Advanced Katar
 /// Mastery are in TalentProcs.Passives, next to the talents that change them; Supersonic Blow and Arcane Mastery change a
 /// skill's damage in CombatService.Passives; the mount passives (Riding, Dragon Training, Wolf Taming, Wolf's Fang) are
-/// RidingEffects; Sight Sprout's detection is CombatService.Stealth.
+/// RidingEffects; Sight Sprout's detection is CombatService.Stealth. Reading Spellbook's extra casts are in
+/// PassiveSkills.Spellbook.
 /// </summary>
-public sealed class PassiveSkills : IGameTicker
+public sealed partial class PassiveSkills : IGameTicker
 {
     private const int DoubleHolyLight = 14311, Judex = 14309, EnchantBlade = 11313, EnergyCoat = 12003,
         EmergencyTreatment = 16303, SoulDrain = 12209, PreyOnTheWeak = 15316, PrayerOfGratitude = 14306,
@@ -105,6 +106,7 @@ public sealed class PassiveSkills : IGameTicker
         if (s.Role == null || processed.Count == 0) return;
         var cast = new SkillConfig(action.Row);
         var target = processed.FirstOrDefault(m => m.Uid == action.Request.TargetId) ?? processed[0];
+        await SpellbookAsync(s, cast, processed);
         // Double Holy Light: "[Judex] cast by you has a ${1}% Chance to deal one Extra instance of Neutral ranged magic damage
         // ... and a ${1}% Chance to deal one Extra instance of Neutral ranged Physical damage ... (The two Chances are
         // calculated independently.)" _kLogicData [chance, row, chance, row] in basis points.

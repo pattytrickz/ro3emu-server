@@ -132,6 +132,16 @@ public sealed partial class BuffService
         }
     }
 
+    /// <summary>Takes <paramref name="amount"/> from a meter that holds that much (a skill's own cost, 31334 reason 5)
+    /// and tells whether it did.</summary>
+    internal async Task<bool> SpendEnergyAsync(GameSession p, int id, long amount)
+    {
+        if (amount < 0 || !p.Energy.TryGetValue(id, out var meter) || meter.Value < amount) return false;
+        meter.Value -= amount;
+        await SendEnergyAsync(p, id, (EPlayerEnergyChangeReason)5);
+        return true;
+    }
+
     /// <summary>SkillConfig._kHitRecoverEnergy [energy id, amount], after an accepted hit (inferred server trigger).</summary>
     public async Task RecoverEnergyOnHitAsync(GameSession p, JsonElement skill)
     {
