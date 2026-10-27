@@ -18,7 +18,7 @@ public sealed partial class CombatService
     /// bounces (inferred: both are the same at every level, and the talent adds its bounce to _kLogicData[0]). Each bounce
     /// strikes a different enemy than the target and the earlier bounces (inferred).
     /// </summary>
-    private async Task RicochetAsync(GameSession s, ActiveSkillCast action, IReadOnlyList<MonsterUnit> processed)
+    private async Task RicochetAsync(GameSession s, ActiveSkillCast action, List<MonsterUnit> processed)
     {
         var skill = new SkillConfig(action.Row);
         if (skill.ScriptLogic != PoisonBlade || skill.LogicData is not [var blades, ..] || skill.DescData.Length < 4
