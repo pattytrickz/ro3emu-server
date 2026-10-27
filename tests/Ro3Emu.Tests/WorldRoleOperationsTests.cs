@@ -5,6 +5,8 @@ using Ro3Emu.Bot;
 using Ro3Emu.Server;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Game;
+using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Tests;
 
@@ -71,6 +73,17 @@ public sealed class WorldRoleOperationsTests : IAsyncLifetime
         {
             var login = await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
             potion = login.PackInfo[1].All.Items.Values.Single(i => i.ItemEntry == 1000000).ItemGuid;
+            // Every bar slot is present from login: the client only updates slots it already has.
+            Assert.Equal([0, 1, 2, 3, 4, 5], login.ShortcutBarInfos.All.Value.Select(s => s.SlotIndex));
+            Assert.All(login.ShortcutBarInfos.All.Value, s => Assert.Equal(0, s.ItemGuid));
+
+            // The tutorial drags a potion onto slot 5. The client applies element-wise increments, never a new list.
+            await alice.SendGameAsync(CharacterService.ShortcutBarSave, new ShortcutBarSaveReq { SlotIndex = 4, ItemGuid = potion });
+            Assert.Equal(0, (await Next(alice, CharacterService.ShortcutBarSave, ShortcutBarSaveRes.Parser)).Result);
+            var slotFive = await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser, m => m.ShortcutBarInfos != null);
+            Assert.Null(slotFive.ShortcutBarInfos.All);
+            Assert.Equal(6, slotFive.ShortcutBarInfos.Inc.Value.Count);
+            Assert.Equal(potion, slotFive.ShortcutBarInfos.Inc.Value[4].ItemGuid);
 
             await alice.SendGameAsync(CharacterService.ShortcutBarSave, new ShortcutBarSaveReq { SlotIndex = 0, ItemGuid = potion });
             Assert.Equal(0, (await Next(alice, CharacterService.ShortcutBarSave, ShortcutBarSaveRes.Parser)).Result);
@@ -94,6 +107,8 @@ public sealed class WorldRoleOperationsTests : IAsyncLifetime
         var persisted = await Next(again, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
         Assert.Equal(19, persisted.PackInfo[1].All.Items[potion].Stack);
         Assert.Contains(persisted.ShortcutBarInfos.All.Value, s => s.SlotIndex == 0 && s.ItemGuid == potion);
+        Assert.Contains(persisted.ShortcutBarInfos.All.Value, s => s.SlotIndex == 4 && s.ItemGuid == 0);
+        Assert.Equal(6, persisted.ShortcutBarInfos.All.Value.Count);
         Assert.Equal(1000000, Assert.Single(persisted.QuickUseInfos.All.Value).ItemEntry);
     }
 
@@ -219,7 +234,23 @@ public sealed class WorldRoleOperationsTests : IAsyncLifetime
     {
         await using (var alice = await InWorld("Alice"))
         {
-            await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
+            var fresh = await Next(alice, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
+            // A new role still gets both configs with every window slot, or the client's Add buttons hit a nil config.
+            Assert.Equal([0, 0, 0], fresh.MedicinesAutoUse.All.HpConfig.ItemEntrys);
+            Assert.Equal([0, 0, 0], fresh.MedicinesAutoUse.All.SpConfig.ItemEntrys);
+
+            // Add All and Add send every slot, with 0 for the empty ones.
+            var addAll = new MedicinesAutoUseSetReq
+            {
+                Type = MedicineAutoUseType.Hp, OpType = MedicineAutoUseOpType.Medicine,
+                SetData = new MedicinesAutoUse { Condition = 60 },
+            };
+            addAll.SetData.ItemEntrys.Add([1000000, 0, 0]);
+            await alice.SendGameAsync(CharacterService.MedicinesAutoUseSet, addAll);
+            var added = await Next(alice, CharacterService.MedicinesAutoUseSet, MedicinesAutoUseSetResp.Parser);
+            Assert.Equal(0, added.Result);
+            Assert.Equal([1000000, 0, 0], added.SetData.ItemEntrys);
+
             var medicine = new MedicinesAutoUseSetReq
             {
                 Type = MedicineAutoUseType.Hp, OpType = MedicineAutoUseOpType.Switch,
@@ -230,6 +261,7 @@ public sealed class WorldRoleOperationsTests : IAsyncLifetime
             var saved = await Next(alice, CharacterService.MedicinesAutoUseSet, MedicinesAutoUseSetResp.Parser);
             Assert.Equal(0, saved.Result);
             Assert.Equal(50, saved.SetData.Condition);
+            Assert.Equal([1000000, 0, 0], saved.SetData.ItemEntrys);
 
             await alice.SendGameAsync(CharacterService.ArrowSwitch, new ItemArrowSwitchReq { ItemId = 1002011 });
             Assert.Equal(ErrorCodes.ItemMissing, (await Next(alice, CharacterService.ArrowSwitch, ItemArrowSwitchResp.Parser)).Result);
@@ -353,7 +385,9 @@ public sealed class WorldRoleOperationsTests : IAsyncLifetime
         // #bug-reports "Dodo Pink Gem hard lock": the wheel (UI_Sys_Main_EntrustLotteryPanelCtrl) stays locked until a
         // GetRewardNotify of ManifestTypeRunRing (18) names the slots it stops on. The slots are award 84011's preview.
         const int Gem = 1250001, RunRing = 18;
-        var slots = new[] { (1250701, 10), (1301007, 1), (1200000, 5), (1200002, 5), (1250709, 3), (1200701, 10), (1250709, 5), (1300072, 1) };
+        var data = _app.Services.GetRequiredService<GameData>();
+        long award = MultiverseGroupConfig.Get(data, 84011)!.Value.ValueDefault;
+        var slots = Assert.Single(AwardConfig.Get(data, award)).Preview.Select(t => ((int)t[0], (int)t[1])).ToArray();
         await using (var alice = await InWorld("Alice"))
         {
             var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "Alice");

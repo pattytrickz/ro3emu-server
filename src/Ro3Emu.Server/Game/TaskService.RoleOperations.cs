@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Ro3Emu.Server.Data.Config;
 using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Data;
@@ -153,7 +154,7 @@ public sealed partial class TaskService
     }
 
     /// <summary>PBManifestType.ManifestTypeRunRing (MG_Common.proto), the rewardType LC_DAL_Reward routes to the wheel.</summary>
-    private const int ManifestTypeRunRing = 18;
+    internal const int ManifestTypeRunRing = 18;
 
     /// <summary>The wheel's slots in order: the award's AwardConfig _kPreview, as GetSeasonAwardPreview lists them (the
     /// default value, the one <see cref="AwardService.Resolve"/> rolls here).</summary>

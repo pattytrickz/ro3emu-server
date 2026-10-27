@@ -466,11 +466,11 @@ public sealed partial class TaskService
     /// Adds progress from an event to every running task's matching targets: <paramref name="amount"/> returns how much a
     /// target gains (long.MaxValue = complete it); <paramref name="type"/> limits it to one target type.
     /// </summary>
-    private async Task ProgressAsync(GameSession session, int? type, Func<long[], long> amount)
+    private async Task ProgressAsync(GameSession session, int? type, Func<long[], long> amount, Func<TaskDef, bool>? eligible = null)
     {
         using var gate = await LockTasksAsync(session);
         if (BeforeProgress is { } before) await before(session);
-        await ProgressCoreAsync(session, type, amount);
+        await ProgressCoreAsync(session, type, amount, eligible);
     }
 
     private async Task ProgressCoreAsync(GameSession session, int? type, Func<long[], long> amount, Func<TaskDef, bool>? eligible = null)
@@ -532,6 +532,7 @@ public sealed partial class TaskService
         var context = RequireTaskOwner(session);
         bool debtIncomplete = false;
         bool requiredFollowup = _roles.HasTaskFollowup(session.Role!.Id);
+        var chickenFinished = new List<long>();
         for (int round = 0; round < 64; round++)
         {
             bool moved = false, storageFailed = false;
@@ -545,7 +546,12 @@ public sealed partial class TaskService
                     if (info.Status == Finished) { info.Status = Running; moved = true; }
                     continue;
                 }
-                if (info.Status != Finished) { info.Status = Finished; moved = true; }
+                if (info.Status != Finished)
+                {
+                    info.Status = Finished;
+                    moved = true;
+                    if (def.Type == ChickenTaskType) chickenFinished.Add(def.Id);
+                }
                 if (def.Deliver == ReceiveAuto)
                 {
                     int result = await DeliverCoreAsync(session, context, def.Id);
@@ -570,6 +576,7 @@ public sealed partial class TaskService
         // can still be present on a reused GameSession, so readiness is bound to this attachment.
         bool cardSourceReady = ReferenceEquals(session.CardLibraryReadyAttachment, session.Attachment);
         await FlushAsync(session, !debtIncomplete && (!requiredFollowup || cardSourceReady));
+        await NotifyChickenFinishedAsync(session, chickenFinished.Where(id => session.Tasks.Infos.GetValueOrDefault(id)?.Status == Finished));
     }
 
     private async Task FlushAsync(GameSession session, bool settled = false)
@@ -679,7 +686,8 @@ public sealed partial class TaskService
             Accept(session, id);
             accepted++;
         }
-        return accepted + AcceptGrowthTitle(session) + AcceptGrowthClass(session) + AcceptActivityTasks(session);
+        return accepted + AcceptGrowthTitle(session) + AcceptGrowthClass(session) + AcceptActivityTasks(session)
+            + AcceptChickenTasks(session);
     }
 
     private const int TaskTypeMain = 1, TaskTypeSide = 2, TaskTypeGuide = 3; // enum_TaskType
