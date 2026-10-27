@@ -3,6 +3,8 @@ using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
+using Ro3Emu.Shared;
 
 namespace Ro3Emu.Server.Game;
 
@@ -39,10 +41,12 @@ public sealed class SocialOutfitService
     private readonly CharacterService _character;
     private readonly Deadlines _deadlines;
     private readonly TimeProvider _clock;
+    private readonly AccessList _access;
 
-    public SocialOutfitService(GameData data, RoleStore roles, CharacterService character, Deadlines deadlines, TimeProvider clock)
+    public SocialOutfitService(GameData data, RoleStore roles, CharacterService character, Deadlines deadlines, TimeProvider clock, AccessList access)
     {
         this._data = data; this._roles = roles; this._character = character; this._deadlines = deadlines; this._clock = clock;
+        _access = access;
         character.JobChanged.Add(s => s.Synced.ContainsKey(Sync) ? SyncAsync(s) : Task.CompletedTask);
         character.RegisterItemAction(UnlockAction, UseUnlockItemAsync);
     }
@@ -57,19 +61,29 @@ public sealed class SocialOutfitService
         await SyncAsync(s);
     }
 
-    private Task SyncAsync(GameSession s)
+    internal Task SyncAsync(GameSession s)
     {
         ArmExpiry(s);
-        return CharacterService.SyncAsync(s, Sync, View(_data, s.Role!.Sex, s.Progress?.Career ?? s.Role.Career, s.SocialOutfit, Now));
+        return CharacterService.SyncAsync(s, Sync, View(_data, s.Role!.Sex, s.Progress?.Career ?? s.Role.Career, s.SocialOutfit, Now,
+            s.IdentityClientReady && _access.IsSupporter(s.Account)));
     }
 
     /// <summary>The 5044 the client sees: the defaults, then the stored unlocks still in time and the worn choices.</summary>
-    internal static DBSocialOutfit View(GameData data, int sex, int career, DBSocialOutfit? stored, long now)
+    internal static DBSocialOutfit View(GameData data, int sex, int career, DBSocialOutfit? stored, long now, bool supporter = false)
     {
         var info = Build(data, sex, career);
+        if (supporter)
+        {
+            if (!info.SocialOutfitContainer.TryGetValue(SupporterIdentityRules.FrameSlot, out var frames))
+                info.SocialOutfitContainer[SupporterIdentityRules.FrameSlot] = frames = new DBSocialOutfitContainer();
+            frames.SocialOutfitInfos[SupporterIdentityRules.Frame] = new DBSocialOutfitInfo { CfgId = SupporterIdentityRules.Frame, Status = Permanent };
+            if (stored?.SocialOutfitEquip.ContainsKey(SupporterIdentityRules.FrameSlot) != true)
+                info.SocialOutfitEquip[SupporterIdentityRules.FrameSlot] = new DBSocialOutfitEquip { CfgId = SupporterIdentityRules.Frame };
+        }
         foreach (var (type, container) in stored?.SocialOutfitContainer ?? [])
             foreach (var (id, owned) in container.SocialOutfitInfos)
             {
+                if (id == SupporterIdentityRules.Frame) continue; // entitlement comes only from AccessList, never a stored unlock
                 if (owned.Status == TimeLimit && owned.ExpireTimestamp <= now) continue;
                 if (!info.SocialOutfitContainer.TryGetValue(type, out var into))
                     info.SocialOutfitContainer[type] = into = new DBSocialOutfitContainer();
@@ -83,27 +97,27 @@ public sealed class SocialOutfitService
     }
 
     /// <summary>Slot type to worn outfit, for another player's RoleAdditionBaseInfo.socialOutfitData.</summary>
-    internal static SocialOutfitData Worn(GameData data, int sex, int career, DBSocialOutfit? stored, long now)
+    internal static SocialOutfitData Worn(GameData data, int sex, int career, DBSocialOutfit? stored, long now, bool supporter = false)
     {
         var worn = new SocialOutfitData();
-        foreach (var (type, equip) in View(data, sex, career, stored, now).SocialOutfitEquip) worn.SocialOutfit[type] = equip.CfgId;
+        foreach (var (type, equip) in View(data, sex, career, stored, now, supporter).SocialOutfitEquip) worn.SocialOutfit[type] = equip.CfgId;
         return worn;
     }
 
     private static DBSocialOutfit Build(GameData data, int sex, int career)
     {
-        var rows = data.Table("SocialOutfitConfig").Values.ToList();
-        bool SexOf(JsonElement r) => GameData.Int(r, "_iSex") is var rowSex && (rowSex == 0 || rowSex == sex);
+        var rows = data.Table("SocialOutfitConfig").Values.Select(r => new SocialOutfitConfig(r)).ToList();
+        bool SexOf(SocialOutfitConfig r) => r.Sex == 0 || r.Sex == sex;
         var info = new DBSocialOutfit();
-        foreach (var group in rows.Where(r => GameData.Int(r, "_iIsDefaultWear") == 1 && SexOf(r)).GroupBy(r => (int)GameData.Int(r, "_iType")))
+        foreach (var group in rows.Where(r => r.IsDefaultWear == 1 && SexOf(r)).GroupBy(r => (int)r.Type))
         {
             var worn = group.Key != Head ? group.First()
-                : group.FirstOrDefault(r => GameData.Int(r, "_iJobID") == career) is { ValueKind: JsonValueKind.Object } own ? own
-                : group.FirstOrDefault(r => GameData.Int(r, "_iJobID") == NoviceJob);
-            if (worn.ValueKind == JsonValueKind.Object) info.SocialOutfitEquip[group.Key] = new DBSocialOutfitEquip { CfgId = GameData.Int(worn, "_iID") };
+                : group.FirstOrDefault(r => r.JobId == career) is { Row.ValueKind: JsonValueKind.Object } own ? own
+                : group.FirstOrDefault(r => r.JobId == NoviceJob);
+            if (worn.Row.ValueKind == JsonValueKind.Object) info.SocialOutfitEquip[group.Key] = new DBSocialOutfitEquip { CfgId = worn.Id };
         }
-        var owned = rows.Where(r => GameData.Int(r, "_iIsDefaultUnLock") == 1 && SexOf(r))
-            .Select(r => ((int)GameData.Int(r, "_iType"), GameData.Int(r, "_iID")))
+        var owned = rows.Where(r => r.IsDefaultUnLock == 1 && SexOf(r))
+            .Select(r => ((int)r.Type, r.Id))
             .Concat(info.SocialOutfitEquip.Select(e => (e.Key, e.Value.CfgId))).Distinct();
         foreach (var (type, id) in owned)
         {
@@ -136,9 +150,11 @@ public sealed class SocialOutfitService
         {
             if (effect.Length < 2 || _data.Row("SocialOutfitWearConfig", effect[1]) is not { } wear
                 || _data.Row("SocialOutfitConfig", GameData.Int(wear, "_iSocialOutfit")) is not { } outfit) return ErrorCodes.ItemNoConfig;
+            var cosmetic = new SocialOutfitConfig(outfit);
+            if (cosmetic.Id == SupporterIdentityRules.Frame) return ErrorCodes.Parameter; // account entitlement, never an item
             anyRow = true;
-            if (GameData.Int(outfit, "_iSex") is var sex and not 0 && sex != s.Role.Sex) continue;
-            picks.Add(((int)GameData.Int(outfit, "_iType"), GameData.Int(outfit, "_iID"), GameData.Int(wear, "_iTimeLimit")));
+            if (cosmetic.Sex is var sex and not 0 && sex != s.Role.Sex) continue;
+            picks.Add(((int)cosmetic.Type, cosmetic.Id, GameData.Int(wear, "_iTimeLimit")));
         }
         if (!anyRow) return ErrorCodes.ItemNoConfig;
         if (picks.Count == 0) return ErrSex;
@@ -184,9 +200,10 @@ public sealed class SocialOutfitService
         if (err == 0)
         {
             await PruneAsync(s);
-            var view = View(_data, s.Role!.Sex, s.Progress?.Career ?? s.Role.Career, s.SocialOutfit, Now);
+            var view = View(_data, s.Role!.Sex, s.Progress?.Career ?? s.Role.Career, s.SocialOutfit, Now,
+                s.IdentityClientReady && _access.IsSupporter(s.Account));
             int type = (int)req.Type;
-            if (_data.Row("SocialOutfitConfig", req.CfgId) is not { } row || GameData.Int(row, "_iType") != type
+            if (_data.Row("SocialOutfitConfig", req.CfgId) is not { } row || new SocialOutfitConfig(row).Type != type
                 || !view.SocialOutfitContainer.TryGetValue(type, out var owned) || !owned.SocialOutfitInfos.ContainsKey(req.CfgId))
                 err = ErrorCodes.Parameter;
             else if (view.SocialOutfitEquip.GetValueOrDefault(type)?.CfgId != req.CfgId)

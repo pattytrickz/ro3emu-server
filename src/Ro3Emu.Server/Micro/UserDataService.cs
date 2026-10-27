@@ -14,7 +14,7 @@ namespace Ro3Emu.Server.Micro;
 /// including itself.
 /// </summary>
 public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners, GameLoop loop, SessionRegistry sessions, GuildService guilds,
-    GuildStore guildStore, GameData data, TimeProvider clock, IOptions<ServerOptions> options, ILogger<UserDataService> log) : IMicroService
+    GuildStore guildStore, GameData data, TimeProvider clock, IOptions<ServerOptions> options, AccessList access, ILogger<UserDataService> log) : IMicroService
 {
     // (inferred) Full profile replies use increasing versions, so a previous guild/online snapshot is replaceable.
     // The original per-field version allocation is not exported; this service already returns all requested roles.
@@ -23,9 +23,10 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
     public string Name => "UserDataService";
 
     public async ValueTask<object?> InvokeAsync(MicroSession session, string method, object? args) =>
-        method == "getAttributeBatchByVersion" ? await loop.InvokeAsync(() => GetAttributesAsync(args)) : null;
+        method == "getAttributeBatchByVersion" ? await loop.InvokeAsync(() => GetAttributesAsync(args,
+            sessions.All().Any(s => s.Account == session.Account && s.IdentityClientReady))) : null;
 
-    private async Task<object?> GetAttributesAsync(object? args)
+    private async Task<object?> GetAttributesAsync(object? args, bool identityClient)
     {
         var results = new List<object>();
         if (args is IDictionary<object, object?> map && map.TryGetValue("UidFieldVersions", out var v) && v is IDictionary<object, object?> uids)
@@ -48,7 +49,7 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
                     if (!long.TryParse(key.ToString(), out long uid)) continue;
                     var asked = uids[key] is IDictionary<object, object?> types
                         ? types.Keys.Select(t => t?.ToString() ?? "").ToHashSet() : [];
-                    if (profiles.TryGetValue(uid, out var profile) && profile is not null) results.Add(Entry(profile, asked));
+                    if (profiles.TryGetValue(uid, out var profile) && profile is not null) results.Add(Entry(profile, asked, identityClient));
                     else if (GuildEntry(uid) is { } guild) results.Add(guild);
                 }
                 break;
@@ -101,7 +102,7 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
     /// Membership comes from the exclusive guild index; a stale personal 5047 blob cannot restore a departed guild.
     /// GuildSnap bytes also reset after leaving (LC_DAL_RolePublic.lua:960-980).
     /// </summary>
-    private Dictionary<string, object?> Entry(Accounts.Persistence.ProfileSnapshot profile, IReadOnlySet<string> asked)
+    private Dictionary<string, object?> Entry(Accounts.Persistence.ProfileSnapshot profile, IReadOnlySet<string> asked, bool identityClient)
     {
         var role = profile.Role;
         var session = sessions.All().FirstOrDefault(s => s.Role?.Id == role.Id);
@@ -134,7 +135,7 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
         // index them unguarded (UI_Sys_Chat_BgWidgetCtrl, UI_Sys_Personal_InfoWidgetCtrl), so the defaults are sent too.
         additional.SocialOutfitData = SocialOutfitService.Worn(data, role.Sex, live?.Career ?? role.Career, session?.SocialOutfit
             ?? (profile.SocialOutfit is { Length: > 0 } outfits ? DBSocialOutfit.Parser.ParseFrom(outfits) : null),
-            clock.GetUtcNow().ToUnixTimeSeconds());
+            clock.GetUtcNow().ToUnixTimeSeconds(), identityClient && access.IsSupporter(role.Account));
         var fields = new Dictionary<string, object?>
         {
             ["Base"] = additional.ToByteArray(),

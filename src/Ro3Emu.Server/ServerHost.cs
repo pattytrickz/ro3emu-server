@@ -95,6 +95,7 @@ public static class ServerHost
         builder.Services.AddSingleton<EmojiService>();
         builder.Services.AddSingleton<PersonalService>();
         builder.Services.AddSingleton<SocialOutfitService>();
+        builder.Services.AddSingleton<PlayerIdentityService>();
         builder.Services.AddSingleton<AchievementService>();
         builder.Services.AddSingleton<TeamService>();
         builder.Services.AddSingleton<MvpService>();
@@ -593,6 +594,7 @@ internal sealed class GameLoopTickers(IServiceProvider services) : IHostedServic
         Add<PowerService>(); // throttled 31502/31503 republish of changed power
         Add<Voice.VoiceRooms>(); // VAD silence timeout every tick, team-membership sweep every second
         Add<GuildVoiceService>(); // guild voice channels: drops the offline and those no longer in the guild, every second
+        Add<PlayerIdentityService>(); // derived public badges, after the original ticker registrations
         return Task.CompletedTask;
     }
 
