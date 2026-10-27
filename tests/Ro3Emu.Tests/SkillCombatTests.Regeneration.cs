@@ -17,7 +17,8 @@ public sealed partial class SkillCombatTests
         {
             var s = Session("alice");
             s.StatusBits |= 1L << 15;
-            s.LastCombatMs = MonsterService.NowMs + 60000; // isolate the skill from natural regeneration
+            s.LastCombatMs = MonsterService.NowMs + 60000;
+            s.NoRegenUntilMs = MonsterService.NowMs + 60000; // isolate the skill from natural regeneration
             await Character.SetHpSpAsync(s, 1, null);
         });
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1120701 });
@@ -44,6 +45,32 @@ public sealed partial class SkillCombatTests
         Assert.Equal(hp, await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2000])));
     }
 
+    /// <summary>
+    /// AttributeConfig 117/118 (SP Recovery on the character panel) is "Recovers ${1} MP every 5 sec." with no combat
+    /// condition; only 120/121 say "while out of combat". A caster at 0 SP in a fight got none of it back (#general, 27 Oct).
+    /// </summary>
+    [ClientDataFact]
+    public async Task SpRecoveryRestoresSpEveryFiveSecondsInCombat()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 2100");
+        await Gm("alice", "!lvl 40");
+        var combat = _app.Services.GetRequiredService<CombatService>();
+        long sp = await Loop.InvokeAsync(() => Task.FromResult(combat.RegenAmount(Session("alice"), Character.Stats(Session("alice"))).Sp));
+        await Loop.InvokeAsync(async () =>
+        {
+            var s = Session("alice");
+            s.StatusBits |= 1L << 15; // fighting, and staying so for the whole test
+            s.LastCombatMs = MonsterService.NowMs + 60000;
+            await Character.SetHpSpAsync(s, null, 1);
+        });
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(7);
+        while (DateTime.UtcNow < deadline && await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2001])) == 1)
+            await Task.Delay(50);
+        Assert.Equal(1 + sp, await Loop.InvokeAsync(() => Task.FromResult(Character.Stats(Session("alice"))[2001])));
+        Assert.NotEqual(0, await Loop.InvokeAsync(() => Task.FromResult(Session("alice").StatusBits & (1L << 15))));
+    }
+
     [ClientDataFact]
     public async Task TensionRelaxCapsHealingAndStopsWhenItsBuffIsRemoved()
     {
@@ -56,6 +83,7 @@ public sealed partial class SkillCombatTests
             var s = Session("alice");
             s.StatusBits |= 1L << 15;
             s.LastCombatMs = MonsterService.NowMs + 60000;
+            s.NoRegenUntilMs = MonsterService.NowMs + 60000;
             await Character.SetHpSpAsync(s, Character.Stats(s)[101] - 10, null);
         });
         await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1120701 });
