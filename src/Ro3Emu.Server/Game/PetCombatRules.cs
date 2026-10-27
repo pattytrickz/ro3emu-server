@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Romsg;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -37,9 +38,7 @@ internal static class PetCombatRules
             if (data.Row("AttriMonsterConfig", battleType * 1000 + level) is not { } battle) return null;
             foreach (var (attr, value) in GameData.Pairs(battle, "_kAttri")) values[(int)attr] = value;
         }
-        var excluded = data.Table("PublicParamConfig").GetValueOrDefault("PetNotImproveBaseAttr");
-        var unscaled = excluded.ValueKind == JsonValueKind.Array
-            ? excluded.EnumerateArray().Select(v => (int)(GameData.Number(v) ?? 0)).ToHashSet() : [];
+        var unscaled = ParamIds(data, "PetNotImproveBaseAttr");
         var change = AttrChange(data, (int)GameData.Int(cfg, "_iQuality"), pet.Star, pet.StarProgress);
         foreach (int attr in values.Keys.ToArray())
             if (!unscaled.Contains(attr))
@@ -51,6 +50,31 @@ internal static class PetCombatRules
         values[113] = GameData.Int(npc, "_iSpeed");
         return values;
     }
+
+    /// <summary>
+    /// (verified) The pet panel's stats: the display helper's variation row at the pet's level times
+    /// PetStarConfig._iBaseAttr / 10000, as above, without the battle overlay or PetAttrChangeConfig. Elena Bokba
+    /// (32003) Lv.55 at star 3 (13300) shows HP 3534, SP 1463 and PDEF 34 for her row's 2657, 1100 and 25: (inferred)
+    /// each is rounded up.
+    /// </summary>
+    internal static Dictionary<int, double>? PanelAttributes(GameData data, int id, PetData pet)
+    {
+        if (PetBaseConfig.Get(data, id) is not { } cfg || NPCConfig.Get(data, cfg.Monster) is not { } npc
+            || AttriMonsterConfig.Get(data, npc.AttributeVariated * 1000 + Math.Max(1, pet.Level)) is not { } display
+            || Star(data, id, pet) is not { } star) return null;
+        var unscaled = ParamIds(data, "PetNotImproveBaseAttr");
+        long scale = new PetStarConfig(star).BaseAttr;
+        var values = new Dictionary<int, double>();
+        foreach (var pair in display.Attri)
+            if (pair is [var attr, var value, ..])
+                values[(int)attr] = unscaled.Contains((int)attr) ? value : Math.Ceiling(value * scale / 10000.0);
+        return values;
+    }
+
+    /// <summary>A PublicParamConfig list of attribute ids (empty when absent).</summary>
+    internal static HashSet<int> ParamIds(GameData data, string name) =>
+        data.Table("PublicParamConfig").GetValueOrDefault(name) is { ValueKind: JsonValueKind.Array } ids
+            ? ids.EnumerateArray().Select(v => (int)(GameData.Number(v) ?? 0)).ToHashSet() : [];
 
     /// <summary>PetAttrChangeConfig._kAttrPerc of a quality, star and stage (attribute id to per-10000), or null.</summary>
     internal static Dictionary<long, long>? AttrChange(GameData data, int quality, int star, int stage)

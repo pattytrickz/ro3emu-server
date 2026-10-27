@@ -38,12 +38,16 @@ public sealed class GuardianPetTests
 
     private const int Wrapper = 99001, Child = 99002, OtherChild = 99003, Buff = 99004, Pet = 99, Passive = 99005;
     private const int SecondWrapper = 99101, SecondChild = 99102, SecondPet = 100;
+    private const int PanelPet = 101, PanelMonster = 99901, PanelVariation = 999, PanelBattleVariation = 998;
     private const int Petrify = 902101, Blind = 902501, BornImmunity = 900901, Slow = 99007, CastSpeedBuff = 99008;
     private static readonly int[] ControlTag = [37];
     private static readonly int[] ControlImmunityCategory = [20];
     private static readonly int[] PetrifyForbids = [ForbiddenState.Walk, ForbiddenState.CastSkill, ForbiddenState.NormalAttack];
     private static readonly int[] SlowerChange = [AttributeId.Speed, -125];
     private static readonly int[] CastSpeedChange = [AttributeId.CastSpeed, 500];
+    private static readonly int[][] PanelStats = [[AttributeId.MaxSp, 1000], [AttributeId.Def, 25], [AttributeId.BaseAspd, 100]];
+    private static readonly int[][] BattleStats = [[AttributeId.MaxSp, 90000]];
+    private static readonly int[] PanelExcluded = [AttributeId.BaseAspd];
 
     [Theory]
     [InlineData("SenLinCiFu")]
@@ -143,18 +147,31 @@ public sealed class GuardianPetTests
             parameters["VariableChantPerParamA"] = 1;
             parameters["VariableChantPerParamB"] = 1000;
             parameters["VariableChantPerParamC"] = 1;
+            parameters["PetFightAttrAdditionScale"] = JsonSerializer.SerializeToNode(PanelShare(10000));
+            parameters["PetAssistAttrAdditionScale"] = JsonSerializer.SerializeToNode(PanelShare(5000));
+            parameters["PetFightAttrNotAddition"] = JsonSerializer.SerializeToNode(PanelExcluded);
+            parameters["PetAssistAttrNotAddition"] = JsonSerializer.SerializeToNode(PanelExcluded);
             File.WriteAllText(Path.Combine(_root, "config", "PublicParamConfig.json"), parameters.ToJsonString());
             Write("PetBaseConfig", new Dictionary<string, object>
             {
                 [Pet.ToString(CultureInfo.InvariantCulture)] = new { _iID = Pet }, [SecondPet.ToString(CultureInfo.InvariantCulture)] = new { _iID = SecondPet },
+                [PanelPet.ToString(CultureInfo.InvariantCulture)] = new { _iID = PanelPet, _iMonster = PanelMonster, _iQuality = 5 },
             });
-            Write("PetStarConfig", new[]
+            Write("PetStarConfig", new object[]
             {
                 new { _iPetID = Pet, _iStar = 1, _iStage = 0, _iProtectSkill = Wrapper, _iPassiveMain = Passive,
                     _kFightSkill = new[] { FightAttackChange, FightHpChange }, _kAssistSkill = new[] { AssistAttackChange } },
                 new { _iPetID = SecondPet, _iStar = 1, _iStage = 0, _iProtectSkill = SecondWrapper, _iPassiveMain = 0,
                     _kFightSkill = Array.Empty<int[]>(), _kAssistSkill = Array.Empty<int[]>() },
+                new { _iPetID = PanelPet, _iStar = 1, _iStage = 0, _iProtectSkill = 0, _iPassiveMain = 0, _iBaseAttr = 13300,
+                    _kFightSkill = Array.Empty<int[]>(), _kAssistSkill = Array.Empty<int[]>() },
             });
+            Add("NPCConfig", PanelMonster, new
+            {
+                _iID = PanelMonster, _iAttributeVariated = PanelVariation, _iBattleAttributeVariated = PanelBattleVariation, _iSpeed = 700,
+            });
+            Add("AttriMonsterConfig", PanelVariation * 1000 + 55, new { _iID = PanelVariation * 1000 + 55, _iLevel = 55, _kAttri = PanelStats });
+            Add("AttriMonsterConfig", PanelBattleVariation * 1000 + 55, new { _iID = PanelBattleVariation * 1000 + 55, _iLevel = 55, _kAttri = BattleStats });
             Write("PetSetLimitConfig", new Dictionary<string, object>
             {
                 ["1"] = new
@@ -237,6 +254,16 @@ public sealed class GuardianPetTests
         private void Write(string name, object value) =>
             File.WriteAllText(Path.Combine(_root, "config", name + ".json"), JsonSerializer.Serialize(value));
 
+        private static int[][] PanelShare(int perTenThousand) => [[5, perTenThousand]]; // PetBaseConfig._iQuality 5
+
+        private void Add(string name, int id, object row)
+        {
+            string path = Path.Combine(_root, "config", name + ".json");
+            var table = JsonNode.Parse(File.ReadAllText(path))?.AsObject() ?? throw new InvalidOperationException("Missing synthetic " + name + ".");
+            table[id.ToString(CultureInfo.InvariantCulture)] = JsonSerializer.SerializeToNode(row);
+            File.WriteAllText(path, table.ToJsonString());
+        }
+
         public Task Equip() => Loop.InvokeAsync(async () =>
         {
             Session.Progress!.Level = 40;
@@ -286,6 +313,36 @@ public sealed class GuardianPetTests
             Assert.Null(f.Session.SkillCast);
             return Task.CompletedTask;
         });
+    }
+
+    [Fact]
+    public async Task DeployedPetsGiveTheirPanelStatsToTheOwnerAtTheirSlotsShare()
+    {
+        await using var f = new Fixture();
+        await f.Start();
+        await using var bot = await f.Host.InWorldAsync("Guardian");
+        await f.Equip();
+        (long Sp, long Def, long Aspd) Read(StatSheet stats) => (stats[AttributeId.MaxSp], stats[AttributeId.Def], stats[AttributeId.BaseAspd]);
+        var before = await f.Read(() => Read(f.Character.Stats(f.Session)));
+        async Task<(long Sp, long Def, long Aspd)> Deploy(bool fight) => await f.Loop.InvokeAsync(async () =>
+        {
+            var pets = f.Session.Pets!;
+            pets.ListPet[PanelPet] = new PetData { PetId = PanelPet, Level = 55, Star = 1 };
+            pets.SetupPlans[0].SupportPets.Remove(1);
+            pets.SetupPlans[0].SetUpPets.Remove(2);
+            if (fight) pets.SetupPlans[0].SetUpPets[2] = PanelPet;
+            else pets.SetupPlans[0].SupportPets[1] = PanelPet;
+            await f.Character.RefreshStatsAsync(f.Session);
+            return Read(f.Character.Stats(f.Session));
+        });
+        // Panel row SP 1000, PDEF 25, ASPD 100 at _iBaseAttr 13300: 1330 and 33.25 -> 34; never the battle row's SP.
+        var utility = await Deploy(fight: false);
+        Assert.Equal(before.Sp + 665, utility.Sp); // quality 5 utility share 5000
+        Assert.Equal(before.Def + 17, utility.Def);
+        Assert.Equal(before.Aspd, utility.Aspd); // Pet*AttrNotAddition
+        var fighting = await Deploy(fight: true);
+        Assert.Equal(before.Sp + 1330, fighting.Sp); // quality 5 fight share 10000
+        Assert.Equal(before.Def + 34, fighting.Def);
     }
 
     [Fact]
