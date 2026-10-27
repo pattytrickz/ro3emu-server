@@ -146,8 +146,7 @@ public sealed partial class CombatService
         // _iIfAutoAtk 2 (enum_AutoNormalAttackType.AutoNormalAttack) follows the cast with the career's normal attack
         // (LC_AutoAttackAppendState: GetNormalSkill). Repeating the cast skill itself bypassed its cooldown: Blade
         // Smash and Sonic Slash fired every swing.
-        int loopSkill = GameData.Int(row!.Value, "_iIsNormalAtk") == 1 ? req.SkillId
-            : _skills.NormalAttack(s.Progress!.Career, WeaponType(s, 1), WeaponType(s, 2));
+        int loopSkill = GameData.Int(row!.Value, "_iIsNormalAtk") == 1 ? req.SkillId : _skills.NormalAttack(s);
         if (GameData.Int(row!.Value, "_iIfAutoAtk") == 2 && owned == null && target != null && CanHitMonster(s, target))
         {
             s.Attack = new AttackLoop
@@ -251,11 +250,6 @@ public sealed partial class CombatService
         if (_skills.IsNormalAttack(s.Progress!.Career, (int)GameData.Int(row, "_iID"))) return true;
         return _skills.Level(s.Progress, (int)GameData.Int(row, "_iSkillID")) >= GameData.Int(row, "_iLevel");
     }
-
-    /// <summary>ItemConfig._iSubType of the item worn in an equipment grid (1 main hand, 2 off hand), 0 when empty.</summary>
-    private int WeaponType(GameSession s, int grid) =>
-        s.Items.FirstOrDefault(i => i.Pack == 2 && i.Grid == grid) is { } item && _data.Row("ItemConfig", item.Entry) is { } row
-            ? (int)GameData.Int(row, "_iSubType") : 0;
 
     private MonsterUnit? FindMonster(long sceneId, long uid) => _world.Map(sceneId).Units.OfType<MonsterUnit>().FirstOrDefault(m => m.Uid == uid && !m.Dead);
     private GameSession? FindPlayer(GameSession s, long uid, bool dead = false) => _world.PlayersIn(s.WorldScene).FirstOrDefault(p => p.Role?.Id == uid && p.Dead == dead);
