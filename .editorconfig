@@ -131,7 +131,7 @@ dotnet_diagnostic.CA2208.severity = suggestion
 dotnet_diagnostic.IDE0028.severity = suggestion
 # 143: use a collection expression for an array
 dotnet_diagnostic.IDE0300.severity = suggestion
-# 16: use a collection expression for an empty collection
+# 15: use a collection expression for an empty collection
 dotnet_diagnostic.IDE0301.severity = suggestion
 # 607: use a collection expression for a fluent call
 dotnet_diagnostic.IDE0305.severity = suggestion
