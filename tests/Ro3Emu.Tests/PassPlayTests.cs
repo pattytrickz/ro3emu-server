@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Romsg;
 using Ro3Emu.Bot;
 using Ro3Emu.Server;
+using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
 using Ro3Emu.Server.Game;
 
@@ -353,5 +354,48 @@ public sealed class PassPlayTests : IAsyncLifetime
             && BroadCastNotify.Parser.ParseFrom(e.Body).Content.Contains("This week"), Wait)).Body).Content;
         Assert.Contains("Play on 5 days 1/5", week);
         Assert.Contains("(0/7 done, +1000 each)", week);
+    }
+
+    /// <summary>
+    /// A pass/play award stores the role's whole activity state, about 20 KB a receipt (27 Oct: 85,000 receipts, 1.8 GB
+    /// of the live realm database, which filled its disk). Past the retention window it is compacted like a kill: the
+    /// payload emptied, the acknowledgement deleted, the source still claimed, and the next award still pays.
+    /// </summary>
+    [ClientDataFact]
+    public async Task OldPassPlayReceiptsAreCompactedAndTheNextAwardStillPays()
+    {
+        await using var alice = await InWorld("Alice");
+        await Service<NewActivityService>().ReconcileAsync(Session(alice));
+        await Gm(alice, "!item 5 60");
+        await Until(() => Task.FromResult(PassPlayReceipts().Full > 0), "a pass/play receipt");
+        var compaction = Service<ReceiptCompaction>();
+        Assert.Equal(0, await compaction.PassAsync(TimeSpan.FromHours(1))); // still inside the window
+        await Task.Delay(10);
+        var before = PassPlayReceipts();
+        Assert.Equal(before.Full, await compaction.PassAsync(TimeSpan.Zero));
+        var after = PassPlayReceipts();
+        Assert.Equal((before.Total, 0, 0, before.Total), (after.Total, after.Full, after.Acknowledged, after.Claimed));
+        Assert.Equal(0, await compaction.PassAsync(TimeSpan.Zero)); // the saved position skips them
+
+        long exp = await Currency(alice, NewActivityService.PassExpCurrency);
+        await Gm(alice, "!item 5 20");
+        await Until(async () => await Currency(alice, NewActivityService.PassExpCurrency) > exp, "pass EXP after compaction");
+        Assert.True(PassPlayReceipts().Total > before.Total);
+    }
+
+    /// <summary>The pass/play receipts: all of them, those with a payload, their acknowledgements and their source claims.</summary>
+    private (int Total, int Full, int Acknowledged, int Claimed) PassPlayReceipts()
+    {
+        using var db = Service<AccountStore>().Open();
+        using var c = db.CreateCommand();
+        c.CommandText = """
+            SELECT count(*), coalesce(sum(length(r.intent_payload)+length(r.outcome)+length(r.child_receipts) > 0), 0),
+                   coalesce(sum((SELECT count(*) FROM owner_operation_receipt o WHERE o.operation_id=r.operation_id)), 0),
+                   coalesce(sum((SELECT count(*) FROM operation_source s WHERE s.operation_id=r.operation_id)), 0)
+            FROM operation_receipt r WHERE r.command_kind='event/newactivity' AND r.source_key GLOB 'newactivity/*/pass/play/*'
+            """;
+        using var row = c.ExecuteReader();
+        Assert.True(row.Read());
+        return (row.GetInt32(0), row.GetInt32(1), row.GetInt32(2), row.GetInt32(3));
     }
 }
