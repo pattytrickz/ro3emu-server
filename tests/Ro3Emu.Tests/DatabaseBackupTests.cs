@@ -90,6 +90,60 @@ public sealed class DatabaseBackupTests : IDisposable
     }
 
     [Fact]
+    public void ACopyThatRunsOutOfDiskLeavesNoPartialFileBehind()
+    {
+        using var accounts = Store();
+        new RoleStore(accounts).Create("full", 1, "Full", 1, 1000, 1);
+        var backup = Backup(accounts);
+        // The destination cannot grow past one page: SQLite reports the disk full mid-copy, as on the live host.
+        backup.BeforeCopyForTest = destination =>
+        {
+            using var cap = destination.CreateCommand();
+            cap.CommandText = "PRAGMA max_page_count=1";
+            cap.ExecuteNonQuery();
+        };
+        Assert.Throws<SqliteException>(() => backup.Backup());
+        Assert.Empty(Directory.GetFiles(backup.Directory));
+        backup.BeforeCopyForTest = null;
+        DatabaseRestore.Validate(backup.Backup());
+    }
+
+    [Fact]
+    public void ABackupRemovesTheOldestCopiesToLeaveTheLiveDatabaseItsReserve()
+    {
+        using var accounts = Store();
+        new RoleStore(accounts).Create("room", 1, "Room", 1, 1000, 1);
+        var backup = Backup(accounts);
+        long disk = long.MaxValue / 2;
+        backup.FreeBytes = dir => disk - Directory.GetFiles(dir).Sum(f => new FileInfo(f).Length);
+        var made = Enumerable.Range(0, 5).Select(_ => backup.Backup()).ToList();
+        long copy = new FileInfo(made[0]).Length;
+
+        // The next copy fits beside the reserve only once the two oldest copies are gone.
+        disk = 5 * copy + backup.RequiredFreeBytes() - 2 * copy;
+        var next = backup.Backup();
+        Assert.Equal(made.Skip(2).Append(next).OrderBy(f => f), DatabaseBackup.Completed(backup.Directory).OrderBy(f => f));
+    }
+
+    [Fact]
+    public void ABackupThatCannotFitKeepsTheNewestCopiesAndSkips()
+    {
+        using var accounts = Store();
+        new RoleStore(accounts).Create("skip", 1, "Skip", 1, 1000, 1);
+        var backup = Backup(accounts);
+        long disk = long.MaxValue / 2;
+        backup.FreeBytes = dir => disk - Directory.GetFiles(dir).Sum(f => new FileInfo(f).Length);
+        var made = Enumerable.Range(0, 4).Select(_ => backup.Backup()).ToList();
+        long copy = new FileInfo(made[0]).Length;
+
+        // Removing every copy but the newest two would still leave less than a copy and the reserve: nothing is
+        // removed and no copy is started.
+        disk = 4 * copy + backup.RequiredFreeBytes() - 3 * copy;
+        Assert.Contains("free", Assert.Throws<IOException>(() => backup.Backup()).Message);
+        Assert.Equal(made.OrderBy(f => f), Directory.GetFiles(backup.Directory).OrderBy(f => f));
+    }
+
+    [Fact]
     public void RestoreRefusesWhileTheRealmIsOpenThenReplacesItAndKeepsTheOldFile()
     {
         string copy;

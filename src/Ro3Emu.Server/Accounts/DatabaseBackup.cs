@@ -12,11 +12,18 @@ namespace Ro3Emu.Server.Accounts;
 ///   to <c>ro3emu-*.db</c>. A crash or a failed check never leaves a file that pruning counts as a good backup.
 /// - **Startup validation:** the startup backup is the realm's integrity check. A copy that fails it is kept as
 ///   <c>.corrupt</c> and logged as critical (the live file is never touched).
+/// - **Disk:** a copy never takes the space the live database needs to grow: when a copy and
+///   <see cref="FreeSpaceReserve"/> do not fit, the oldest backups go first, and a failed copy is deleted at once.
 /// </summary>
 public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore accounts, ILogger<DatabaseBackup> log, Diagnostics.ServerMetrics? metrics = null) : BackgroundService
 {
     internal const string Prefix = "ro3emu-", Extension = ".db", PartialExtension = ".partial", CorruptExtension = ".corrupt";
     private const int Keep = 20;
+    /// <summary>Copies a backup never removes to make room for a new one (inferred).</summary>
+    private const int KeepWhenShort = 2;
+    /// <summary>Disk space a backup leaves free for the live database (inferred): on 27 Oct 2026 a failed startup copy
+    /// held the last of it, and kills and logins failed with "database or disk is full" for over an hour.</summary>
+    internal const long FreeSpaceReserve = 1L << 30;
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
     private readonly object _backupGate = new();
     private string? _lastName;
@@ -26,6 +33,19 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     private DateTime? _lastAt;
 
     public string Directory => Path.Combine(options.Value.DataDir, "backups");
+
+    /// <summary>Free bytes on the disk holding <c>dir</c>.</summary>
+    internal Func<string, long> FreeBytes { get; set; } = dir => new DriveInfo(Path.GetFullPath(dir)).AvailableFreeSpace;
+    /// <summary>Test-only: runs on the empty destination before the copy starts.</summary>
+    internal Action<SqliteConnection>? BeforeCopyForTest { get; set; }
+
+    /// <summary>A copy of the live file and its WAL (the most a copy can take) plus the room the live database keeps
+    /// to grow until the next backup (<see cref="FreeSpaceReserve"/>).</summary>
+    internal long RequiredFreeBytes()
+    {
+        var wal = new FileInfo(accounts.DatabasePath + "-wal");
+        return new FileInfo(accounts.DatabasePath).Length + (wal.Exists ? wal.Length : 0) + FreeSpaceReserve;
+    }
 
     /// <summary>Unfinished copies of a crashed run are gone before the host reports itself started, under the same
     /// gate as a backup, so neither the startup backup nor a manual one can meet a half-written file.</summary>
@@ -70,24 +90,16 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     {
         var dir = Directory;
         System.IO.Directory.CreateDirectory(dir);
+        MakeRoom(dir);
         var target = Path.Combine(dir, NextName());
         var partial = target + PartialExtension;
         var started = Stopwatch.GetTimestamp();
-        using (var source = accounts.Open())
-        using (var destination = new SqliteConnection($"Data Source={partial};Pooling=False"))
+        try { Copy(partial, target); }
+        catch
         {
-            destination.Open();
-            Diagnostics.SqliteMetrics.Attach(destination, metrics);
-            Persistence.DbWriteGuard.AttachBackup(destination, accounts.AccessMetrics, accounts.DatabasePath);
-            source.BackupDatabase(destination);
-            if (QuickCheck(destination) is { } problem)
-            {
-                destination.Close();
-                var corrupt = target + CorruptExtension;
-                File.Move(partial, corrupt, overwrite: true);
-                log.LogCritical("Database backup failed its integrity check ({Problem}); the copy is kept as {Corrupt}", problem, corrupt);
-                throw new InvalidDataException($"Backup integrity check failed: {problem}");
-            }
+            // A failed copy can be as large as the database: leaving it would hold the disk the live file needs.
+            File.Delete(partial);
+            throw;
         }
         File.Move(partial, target);
         _lastMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -97,6 +109,48 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
         foreach (var old in Completed(dir).Skip(Keep)) File.Delete(old);
         log.LogInformation("Database backed up to {Target} ({Bytes} bytes, {Ms:F0} ms)", target, _lastBytes, _lastMs);
         return target;
+    }
+
+    private void Copy(string partial, string target)
+    {
+        using var source = accounts.Open();
+        using var destination = new SqliteConnection($"Data Source={partial};Pooling=False");
+        destination.Open();
+        Diagnostics.SqliteMetrics.Attach(destination, metrics);
+        Persistence.DbWriteGuard.AttachBackup(destination, accounts.AccessMetrics, accounts.DatabasePath);
+        BeforeCopyForTest?.Invoke(destination);
+        source.BackupDatabase(destination);
+        if (QuickCheck(destination) is { } problem)
+        {
+            destination.Close();
+            var corrupt = target + CorruptExtension;
+            File.Move(partial, corrupt, overwrite: true);
+            log.LogCritical("Database backup failed its integrity check ({Problem}); the copy is kept as {Corrupt}", problem, corrupt);
+            throw new InvalidDataException($"Backup integrity check failed: {problem}");
+        }
+    }
+
+    /// <summary>
+    /// Removes the oldest backups, never the newest <see cref="KeepWhenShort"/>, until a copy fits beside the live
+    /// database's reserve. When even that is not enough nothing is removed and the backup is skipped.
+    /// </summary>
+    private void MakeRoom(string dir)
+    {
+        long required = RequiredFreeBytes();
+        if (FreeBytes(dir) >= required) return;
+        var oldestFirst = Completed(dir).Skip(KeepWhenShort).Reverse().ToList();
+        if (FreeBytes(dir) + oldestFirst.Sum(f => new FileInfo(f).Length) < required)
+        {
+            log.LogCritical("Database backup skipped: {Free} bytes free, a copy and the live database's reserve need {Required}",
+                FreeBytes(dir), required);
+            throw new IOException($"Not enough free disk space for a backup: {FreeBytes(dir)} bytes free, {required} needed");
+        }
+        foreach (var old in oldestFirst)
+        {
+            if (FreeBytes(dir) >= required) break;
+            log.LogWarning("Removing the old backup {Backup} to keep disk space for the live database", old);
+            File.Delete(old);
+        }
     }
 
     /// <summary>Second-based names, made unique within a second, so concurrent requests never share a file.</summary>
