@@ -48,6 +48,7 @@ namespace Ro3Emu.ClientHooks
                 PassButton.Tick();
                 QuestAutoBattle.Tick();
                 TitleButton.Tick();
+                DeleteRoleButton.Tick();
             }
             catch (Exception e)
             {

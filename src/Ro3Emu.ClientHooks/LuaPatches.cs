@@ -253,6 +253,14 @@ namespace Ro3Emu.ClientHooks
             return result != null && result.Length > 0 ? result[0] as Obf_R.Obf_ff : null;
         }
 
+        /// <summary>The Lua global table as soon as the LuaEnv is up: the role screen runs before the game's helpers
+        /// load, so hooks there (DeleteRoleButton) cannot wait for <see cref="Tick"/>'s install.</summary>
+        internal static Obf_R.Obf_ff GlobalNow()
+        {
+            var manager = HappyEngine.Base.SingletonMonoBehaviour<LA_LuaManager>.Instance;
+            return manager != null && EnvOf(manager, out _) is Obf_R.Obf_Cf env ? env.Obf_A : null;
+        }
+
         /// <summary>LA_LuaManager's LuaEnv (field Obf_Dc), only when the manager reports it initialised (Obf_Fc).</summary>
         private static object EnvOf(LA_LuaManager manager, out string why)
         {
