@@ -33,14 +33,14 @@ public sealed partial class RoleDeletion(RoleStore roles, SessionRegistry sessio
         using var lifecycle = await owners.EnterAsync("role delete", Ownership.ReservationKey.Lifecycle(roleId));
         var current = roles.Get(roleId);
         if (current == null || current.Account != account) return (NotOwned, "no such character on this account");
-        if (InWorld(roleId)) return (InWorld, "the character is in the game; log out first");
+        if (Attached(roleId)) return (InWorld, "the character is in the game; log out first");
         bool ok = roles.Delete(account, roleId);
         if (ok) owners.RoleDeleted(roleId, roles.ReadRevisionVector(roleId).Epoch);
         LogDelete(log, account, current.Name, roleId, source, ok);
         return ok ? (Deleted, $"{current.Name} deleted") : (Failed, "not deleted");
     }
 
-    private bool InWorld(long roleId)
+    private bool Attached(long roleId)
     {
         var owner = owners.Cached(roleId);
         return owner is { State: not Ownership.RoleOwnerState.Detached } || owner?.Attachment != null || owner?.Detaching != null
