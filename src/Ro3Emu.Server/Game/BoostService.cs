@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -102,7 +103,7 @@ public sealed partial class BoostService
         await _roles.SetServerStateAsync(StateKey(role.Id), JsonSerializer.Serialize(next));
         _states[role.Id] = next;
         LogBoost(_log, role.Name, role.Id, boost.Kind, boost.Percent, boost.Minutes, item.Entry);
-        await ShowBuffAsync(session, boost, boost.Minutes * 60_000);
+        await ShowBuffAsync(session, role.Id, boost, boost.Minutes * 60_000);
         await GmCommands.ReplyAsync(session, $"{Word(boost.Kind)} +{boost.Percent}% for {boost.Minutes} minutes!");
         return 0;
     }
@@ -114,19 +115,19 @@ public sealed partial class BoostService
         foreach (var (kind, until) in new[] { (Exp, s.ExpUntil), (Drop, s.DropUntil) })
             if (until > Now && _options.BoostItems.FirstOrDefault(b => b.Kind == kind && b.Buff > 0) is { } boost
                 && session.Buffs.All(b => b.ConfigId != boost.Buff))
-                await ShowBuffAsync(session, boost, (int)Math.Min(int.MaxValue, until - Now));
+                await ShowBuffAsync(session, role.Id, boost, (int)Math.Min(int.MaxValue, until - Now));
     }
 
     /// <summary>The boost's buff row, for its icon and timer only: a row that changes attributes is never shown.</summary>
-    private async Task ShowBuffAsync(GameSession session, BoostItem boost, int durationMs)
+    private async Task ShowBuffAsync(GameSession session, long role, BoostItem boost, int durationMs)
     {
         if (boost.Buff <= 0) return;
-        if (_data.Row("BuffConfig", boost.Buff) is not { } row || GameData.Pairs(row, "_kChangeAttri").Any())
+        if (BuffConfig.Get(_data, boost.Buff) is not { } row || row.ChangeAttri.Length > 0)
         {
             LogBadBuff(_log, boost.Buff, boost.Item);
             return;
         }
-        await _buffs.AddAsync(session, boost.Buff, durationMs, session.Role!.Id);
+        await _buffs.AddAsync(session, boost.Buff, durationMs, role);
     }
 
     private static string Word(string kind) => kind == Exp ? "EXP" : "Item drop";
