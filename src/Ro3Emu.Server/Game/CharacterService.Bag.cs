@@ -73,6 +73,7 @@ public sealed partial class CharacterService
                 && !CarriesBoxParam(row.Value, req)
                 && !AcceptsItemActionParam(row.Value, req) ? ErrorCodes.FeatureUnavailable
             : item.BindExpire > 0 && item.BindExpire <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() ? ErrorCodes.ItemMissing
+            : IsExpired(item) ? ErrorCodes.ItemExpired
             : session.Dead ? ErrorCodes.UseWhileDead
             : IsItemUseForbidden?.Invoke(session) == true ? ErrorCodes.ItemUseForbidden
             : session.ItemCds.GetValueOrDefault(item.Entry) > now || group > 0 && session.ItemGroupCds.GetValueOrDefault(group) > now ? ErrItemInCd
@@ -438,6 +439,7 @@ public sealed partial class CharacterService
         {
             ItemGuid = item.Guid, ItemEntry = item.Entry, Stack = item.Stack, IsLocked = item.IsLocked,
             ItemBindInfo = new ItemBindInfo { ItemBindType = (ItemBindType)item.BindType, ExpireTimeStamp = item.BindExpire },
+            ExpireTm = item.ExpireTm,
         };
         info.ItemInfos[AttrSetUpSource] = new ItemAttrValue { LongVal = 0 };
         if (IsEquipment(item.Entry)) info.ItemInfos[AttrAppraise] = new ItemAttrValue { LongVal = IsAppraised(item) ? 1 : 0 };

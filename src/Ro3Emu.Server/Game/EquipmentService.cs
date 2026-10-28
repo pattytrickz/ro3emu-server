@@ -3,6 +3,7 @@ using Google.Protobuf;
 using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -320,7 +321,8 @@ public sealed partial class EquipmentService
     /// <summary>
     /// 31327: bag instances (guid -> count) into their returns: EquipReturnConfig by rank / quality / entries / specials
     /// for gear, otherwise ItemConfig._kDecompose (Lua_CFG_EquipReturnConfig falls back
-    /// to it too). An item without returns cannot be dismantled.
+    /// to it too). An item without returns cannot be dismantled. A lapse return (isLapseDecompose) takes only expired
+    /// timed items and pays their ItemConfig._iSeasonLapseProduct.
     /// </summary>
     public async Task DecomposeAsync(GameSession session, ItemDecomposeReq req)
     {
@@ -328,10 +330,7 @@ public sealed partial class EquipmentService
         var gains = new Dictionary<int, long>();
         var instances = new Dictionary<long, int>();
         // (inferred) Enforce the client function-2602 gate at the authoritative operation too.
-        // The client supplies isLapseDecompose, but item season/playBook are not
-        // represented in InvItem yet. A lapse return must not silently pay the ordinary _kDecompose yield.
-        Fail? error = req.IsLapseDecompose ? new(ErrorCodes.FeatureUnavailable, "season-lapse return is not qualified")
-            : !_functions.IsOpen(session, FunctionDecompose) ? new(ErrorCodes.FeatureUnavailable, "dismantle closed")
+        Fail? error = !_functions.IsOpen(session, FunctionDecompose) ? new(ErrorCodes.FeatureUnavailable, "dismantle closed")
             : req.DecomposeItem.Count == 0 ? new(ErrorCodes.NothingToDismantle, "nothing") : null;
         foreach (var (guid, count) in req.DecomposeItem)
         {
@@ -341,7 +340,11 @@ public sealed partial class EquipmentService
             if (item.Grid != 0) { error = new(ErrorCodes.CannotDismantleEquipped, $"{guid} is worn or socketed"); break; }
             if (_data.Row("ItemConfig", item.Entry) is { } seasonRow && GameData.Int(seasonRow, "_iSeasonResetType") != 0)
             { error = new(ErrorCodes.FeatureUnavailable, $"{item.Entry} requires authoritative season state"); break; }
-            var returns = Returns(item);
+            // Item season/playBook are not represented in InvItem yet, so only an expired timed item lapses; a lapse
+            // return must not silently pay the ordinary _kDecompose yield.
+            if (req.IsLapseDecompose && !CharacterService.IsExpired(item))
+            { error = new(ErrorCodes.FeatureUnavailable, $"{guid} has not lapsed"); break; }
+            var returns = req.IsLapseDecompose ? LapseReturns(item) : Returns(item);
             if (returns.Count == 0) { error = new(ErrorCodes.Parameter, $"{item.Entry} has no returns"); break; }
             if (count < 1 || count > item.Stack) { error = new(count < 1 ? ErrorCodes.Parameter : ErrorCodes.ItemsShort, $"bad count {count}"); break; }
             instances[guid] = count;
@@ -363,6 +366,10 @@ public sealed partial class EquipmentService
         _log.LogInformation("{Name} dismantles {Items}: {Result}", session.Role!.Name, string.Join(",", req.DecomposeItem.Keys), error?.Why ?? "ok");
         await session.SendGameAsync(ItemDecompose, new ItemDecomposeResp { Result = error?.Code ?? 0 });
     }
+
+    private List<(int Entry, long Count)> LapseReturns(InvItem instance) =>
+        ItemConfig.Get(_data, instance.Entry)?.SeasonLapseProduct is { } product
+            ? product.Where(p => p.Length >= 2).Select(p => ((int)p[0], p[1])).ToList() : [];
 
     private List<(int Entry, long Count)> Returns(InvItem instance)
     {

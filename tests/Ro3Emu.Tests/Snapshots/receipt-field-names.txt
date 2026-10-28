@@ -266,6 +266,7 @@ Ro3Emu.Server.Accounts.Persistence.ItemValue#BindExpire
 Ro3Emu.Server.Accounts.Persistence.ItemValue#BindType
 Ro3Emu.Server.Accounts.Persistence.ItemValue#Enchantments
 Ro3Emu.Server.Accounts.Persistence.ItemValue#Entry
+Ro3Emu.Server.Accounts.Persistence.ItemValue#ExpireTm
 Ro3Emu.Server.Accounts.Persistence.ItemValue#Grid
 Ro3Emu.Server.Accounts.Persistence.ItemValue#Guid
 Ro3Emu.Server.Accounts.Persistence.ItemValue#IsLocked
@@ -278,6 +279,7 @@ Ro3Emu.Server.Accounts.Persistence.ItemValue/<BindExpire>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<BindType>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<Enchantments>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<Entry>k__BackingField
+Ro3Emu.Server.Accounts.Persistence.ItemValue/<ExpireTm>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<Grid>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<Guid>k__BackingField
 Ro3Emu.Server.Accounts.Persistence.ItemValue/<IsLocked>k__BackingField

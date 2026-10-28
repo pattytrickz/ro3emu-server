@@ -504,7 +504,7 @@ public sealed partial class CharacterService
             var item = new InvItem
             {
                 Entry = grant.Entry, Stack = count, Pack = pack, Sort = NextSort(session, pack),
-                BindType = grant.BindType, BindExpire = grant.BindExpire,
+                BindType = grant.BindType, BindExpire = grant.BindExpire, ExpireTm = TimedExpiry(grant.Entry),
                 Attrs = grant.CardType == 0 ? null : new Dictionary<int, long>
                 { [501] = 0, [502] = 0, [530] = grant.CardType },
             };

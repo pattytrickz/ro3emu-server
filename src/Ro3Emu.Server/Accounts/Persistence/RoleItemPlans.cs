@@ -668,13 +668,13 @@ internal sealed class RoleProgressWritePlan(long role, RoleProgress value) : DbP
 
 /// <summary>Serialized on the caller; no mutable InvItem, dictionary, or protobuf reaches the writer.</summary>
 internal sealed record ItemValue(long Guid, int Entry, int Stack, int Pack, long Sort, int Grid,
-    string? Attrs, bool IsLocked, string? Enchantments, string? StringAttrs, int BindType, long BindExpire)
+    string? Attrs, bool IsLocked, string? Enchantments, string? StringAttrs, int BindType, long BindExpire, long ExpireTm)
 {
     internal static ItemValue Capture(InvItem item) => new(item.Guid, item.Entry, item.Stack, item.Pack, item.Sort,
         item.Grid, item.Attrs is { Count: > 0 } ? JsonSerializer.Serialize(item.Attrs) : null, item.IsLocked,
         item.Enchantments.Count > 0 ? JsonSerializer.Serialize(item.Enchantments) : null,
         item.StringAttrs is { Count: > 0 } ? JsonSerializer.Serialize(item.StringAttrs) : null,
-        item.BindType, item.BindExpire);
+        item.BindType, item.BindExpire, item.ExpireTm);
 
     internal void Bind(SqliteCommand cmd)
     {
@@ -684,6 +684,7 @@ internal sealed record ItemValue(long Guid, int Entry, int Stack, int Pack, long
         cmd.Parameters.AddWithValue("$l", IsLocked); cmd.Parameters.AddWithValue("$n", (object?)Enchantments ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$sa", (object?)StringAttrs ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$bt", BindType); cmd.Parameters.AddWithValue("$be", BindExpire);
+        cmd.Parameters.AddWithValue("$et", ExpireTm);
     }
 }
 
@@ -722,8 +723,8 @@ internal sealed class ItemSnapshotWritePlan : DbPlan
         {
             var item = _items[i];
             using var cmd = DbSql.Command(db, tx, item.Guid > 0
-                ? "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be WHERE guid=$id AND role_id=$r"
-                : "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be) RETURNING guid");
+                ? "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be,expire_tm=$et WHERE guid=$id AND role_id=$r"
+                : "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire,expire_tm) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be,$et) RETURNING guid");
             cmd.Parameters.AddWithValue("$r", _role);
             if (item.Guid > 0) cmd.Parameters.AddWithValue("$id", item.Guid);
             item.Bind(cmd);
@@ -781,8 +782,8 @@ internal sealed class ItemDeltaWritePlan : DbPlan
                 continue;
             }
             using var cmd = DbSql.Command(db, tx, item.Guid == 0
-                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be) RETURNING guid"
-                : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be WHERE guid=$id AND role_id=$r");
+                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire,expire_tm) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be,$et) RETURNING guid"
+                : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be,expire_tm=$et WHERE guid=$id AND role_id=$r");
             cmd.Parameters.AddWithValue("$r", _role);
             if (item.Guid != 0) cmd.Parameters.AddWithValue("$id", item.Guid);
             item.Bind(cmd);
@@ -1024,11 +1025,11 @@ internal sealed class ItemWritePlan : DbPlan
             bool insert = _kind == ItemWriteKind.Insert;
             bool remove = _kind == ItemWriteKind.ApplyChanges && item.Stack == 0;
             using var cmd = DbSql.Command(db, tx, insert
-                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be) RETURNING guid"
+                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire,expire_tm) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be,$et) RETURNING guid"
                 : remove ? "DELETE FROM item WHERE guid=$id AND role_id=$r"
                 : _kind == ItemWriteKind.ApplyChanges
-                    ? "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be WHERE guid=$id AND role_id=$r"
-                    : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be WHERE guid=$id AND role_id=$r");
+                    ? "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be,expire_tm=$et WHERE guid=$id AND role_id=$r"
+                    : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be,expire_tm=$et WHERE guid=$id AND role_id=$r");
             cmd.Parameters.AddWithValue("$r", _role != 0 ? _role : _resolvedOwners![item.Guid]);
             if (!insert) cmd.Parameters.AddWithValue("$id", item.Guid);
             if (!remove) item.Bind(cmd);

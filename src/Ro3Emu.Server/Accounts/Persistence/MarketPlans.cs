@@ -181,8 +181,8 @@ internal sealed class MarketItemsWritePlan : DbPlan
             var item = _after[i];
             if (item.Guid == 0 && guids[i] != 0) item = item with { Guid = guids[i] };
             using var cmd = DbSql.Command(db, tx, item.Guid == 0
-                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be) RETURNING guid"
-                : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be WHERE role_id=$r AND guid=$id");
+                ? "INSERT INTO item(role_id,entry,stack,pack,sort,grid,attrs,is_locked,enchantments,str_attrs,bind_type,bind_expire,expire_tm) VALUES($r,$e,$s,$p,$o,$g,$a,$l,$n,$sa,$bt,$be,$et) RETURNING guid"
+                : "UPDATE item SET entry=$e,stack=$s,pack=$p,sort=$o,grid=$g,attrs=$a,is_locked=$l,enchantments=$n,str_attrs=$sa,bind_type=$bt,bind_expire=$be,expire_tm=$et WHERE role_id=$r AND guid=$id");
             cmd.Parameters.AddWithValue("$r", _role); item.Bind(cmd);
             if (item.Guid == 0) guids[i] = (long)cmd.ExecuteScalar()!;
             else

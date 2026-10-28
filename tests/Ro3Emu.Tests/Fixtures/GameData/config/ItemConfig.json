@@ -9,6 +9,7 @@
   "1009000": { "_iID": 1009000, "_iType": 2, "_iSubType": 207, "_iBagTab": 1, "_iStackLimit": 0, "_iTrade": 0, "_kParam1": "1" },
   "1009001": { "_iID": 1009001, "_iType": 2, "_iSubType": 207, "_iBagTab": 1, "_iStackLimit": 50, "_iTrade": 0, "_kParam1": "4" },
   "1200000": { "_iID": 1200000, "_iType": 2, "_iBagTab": 1, "_iStackLimit": 50, "_iTrade": 1 },
+  "1950900": { "_iID": 1950900, "_iType": 2, "_iBagTab": 1, "_iStackLimit": 1, "_iTrade": 0, "_iIsUse": 1, "_iTimeBoundEnum": 1, "_kTimeBoundPara": [30], "_iSeasonLapseProduct": [[2, 7]], "_kDecompose": [[2, 3]] },
   "2010121": { "_iID": 2010121, "_iType": 5, "_iBagTab": 2, "_iStackLimit": 1, "_iTrade": 1 },
   "2550120": { "_iID": 2550120, "_iType": 5, "_iBagTab": 2, "_iStackLimit": 1, "_iTrade": 1 }
 }
