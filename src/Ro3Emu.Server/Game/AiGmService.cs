@@ -56,6 +56,8 @@ public sealed partial class AiGmService(IOptions<ServerOptions> options, EventSe
         public string? Text { get; set; }
         /// <summary>For cancel: rates (by name) or logingift (by id).</summary>
         public string? Kind { get; set; }
+        /// <summary>For setconfig: what the staff panel saves.</summary>
+        public Config? Config { get; set; }
     }
 
     public sealed record Reply(bool Ok, string Message, object? Data = null);
@@ -65,11 +67,16 @@ public sealed partial class AiGmService(IOptions<ServerOptions> options, EventSe
 
     private AiGmOptions Limits => options.Value.AiGm;
 
-    public async Task<Reply> RunAsync(Request r)
+    /// <summary>One request; <paramref name="key"/> is the X-AiGm-Key header, which only "setconfig" needs.</summary>
+    public async Task<Reply> RunAsync(Request r, string? key = null)
     {
         if (r.Action == "limits") return new(true, "limits", LimitsData());
         if (r.Action == "list") return new(true, "list", ListData());
+        if (r.Action == "config") return new(true, "config", Saved());
+        if (r.Action == "setconfig") return await SetConfigAsync(r, key);
         if (!Limits.Enabled) return Refused("the AI GM is off (AiGm:Enabled)");
+        if (Saved() is { Enabled: false }) return Refused("the AI GM is switched off in the staff panel");
+        if (!Allows(r.Action)) return Refused($"{r.Action} is not among the events the staff panel allows");
         try
         {
             var reply = r.Action switch
@@ -163,7 +170,7 @@ public sealed partial class AiGmService(IOptions<ServerOptions> options, EventSe
     /// <summary>Why an item and count are not allowed, or null: only pool items, at most the entry's MaxCount.</summary>
     private string? PoolRefusal(int item, int count)
     {
-        if (Limits.ItemPool.FirstOrDefault(p => p.Item == item) is not { } entry) return "the item is not in the AI GM's item pool";
+        if (Pool().FirstOrDefault(p => p.Item == item) is not { } entry) return "the item is not in the AI GM's item pool";
         if (count < 1 || count > entry.MaxCount) return $"count must be 1-{entry.MaxCount} for item {item}";
         return data.Row("ItemConfig", item) is null ? $"no item {item} in the game data" : null;
     }

@@ -304,7 +304,8 @@ public static class ServerHost
             return Results.Text($"announced to {reached}\n");
         });
         // The AI GM (loopback only, docs/guide/ai-gm.md): POST /ro3emu/aigm body = one JSON request, checked against
-        // ServerOptions.AiGm on the game loop. Answers {ok, message, data}.
+        // ServerOptions.AiGm on the game loop. Answers {ok, message, data}. "setconfig" (the staff panel's bridge) also
+        // needs the X-AiGm-Key header.
         app.MapPost("/ro3emu/aigm", async (HttpContext context, AiGmService aigm, GameLoop loop) =>
         {
             if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
@@ -312,7 +313,8 @@ public static class ServerHost
             try { request = await System.Text.Json.JsonSerializer.DeserializeAsync<AiGmService.Request>(context.Request.Body, AiGmService.Json); }
             catch (System.Text.Json.JsonException) { return Results.BadRequest("not a JSON request"); }
             if (request is not { Action.Length: > 0 }) return Results.BadRequest("no action");
-            var reply = await loop.InvokeAsync(() => aigm.RunAsync(request));
+            string key = context.Request.Headers["X-AiGm-Key"].ToString();
+            var reply = await loop.InvokeAsync(() => aigm.RunAsync(request, key));
             return Results.Json(reply, AiGmService.Json);
         });
         // In-game bug reports (loopback only, docs/guide/feedback.md): GET /ro3emu/reports?since=<id or ISO time>&limit=&format=text

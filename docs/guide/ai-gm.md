@@ -43,6 +43,21 @@ Ro3Emu__AiGm__MaxAnnouncementsPerDay=12
 The defaults are in `AiGmOptions` (`ServerOptions.cs`). The endpoint cannot change any of them: only these settings
 do, so the AI can never raise its own limits.
 
+## The staff panel
+
+The staff panel's AI GM tab saves four things on the realm (action `setconfig`, kept in `server_state` key
+`aigm_config`):
+
+- **On/off.** Within `Enabled`: the settings allow an AI GM at all, the panel turns it on and off.
+- **Rules**, in the owner's words, for the AI GM to follow when it picks and words events. The server does not read
+  them; it enforces the limits above.
+- **The item pool**, which takes the place of `ItemPool` once saved.
+- **The events** it may run: `rates`, `mvp`, `gift`, `logingift`, `announce`. Any other is refused.
+
+Saving needs the `X-AiGm-Key` header equal to `ConfigKey`. That key is only in the realm's settings and the panel
+bridge's, never where the AI GM runs, so the AI GM can read its rules (`config`, `limits`) but never change them.
+An empty `ConfigKey` turns saving off.
+
 ## The endpoint
 
 `POST /ro3emu/aigm` answers only on loopback, like the other host tools. The body is one JSON request; the answer is

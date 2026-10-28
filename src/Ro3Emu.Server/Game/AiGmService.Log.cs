@@ -79,12 +79,14 @@ public sealed partial class AiGmService
     {
         var now = clock.GetUtcNow();
         int Used(TimeSpan span, params string[] actions) => Times(actions).Count(t => t > now - span && t <= now);
+        var saved = Saved();
         return new
         {
-            Limits.Enabled, Limits.MaxDaysAhead, Limits.MaxExpPercent, Limits.MaxDropRolls, Limits.MaxCardRolls, Limits.MaxRateHours,
+            Limits.Enabled, On = Limits.Enabled && saved?.Enabled != false, Rules = saved?.Rules ?? "",
+            Events = saved?.Events ?? Actions, Limits.MaxDaysAhead, Limits.MaxExpPercent, Limits.MaxDropRolls, Limits.MaxCardRolls, Limits.MaxRateHours,
             Limits.MaxRateWindowsPerWeek, Limits.MaxGiftsPerWeek, Limits.MaxLoginGiftHours, Limits.MvpPool, Limits.MaxMvpSpawnsPerDay,
             Limits.MaxAnnouncementsPerDay,
-            ItemPool = Limits.ItemPool.Select(p => new { p.Item, p.MaxCount, Name = data.ItemName(p.Item) }),
+            ItemPool = Pool().Select(p => new { p.Item, p.MaxCount, Name = data.ItemName(p.Item) }),
             Used = new
             {
                 RatesThisWeek = Used(Week, "rates"), GiftsThisWeek = Used(Week, "gift", "logingift"),

@@ -74,26 +74,58 @@ public sealed class AiGmTests
         Assert.Equal(1, used.GetProperty("announcementsToday").GetInt32());
     }
 
+    [Fact]
+    public async Task TheStaffPanelsSwitchRulesPoolAndEventsNeedItsKeyAndThenRule()
+    {
+        await using var host = await StartAsync();
+        object Save(bool on, int item, string[] events) => new
+        {
+            action = "setconfig",
+            config = new { enabled = on, rules = "- No gifts on weekdays\n- Keep it spooky", itemPool = new[] { new { item, maxCount = 1 } }, events, by = "Owner" },
+        };
+        Assert.False(await Ok(host, Save(true, OtherItem, ["gift"]))); // no key
+        Assert.False(await Ok(host, Save(true, OtherItem, ["gift"]), "wrong")); // a wrong key
+        Assert.False(await Ok(host, Save(true, 424242, ["gift"]), Key)); // not in the game data
+        Assert.False(await Ok(host, Save(true, OtherItem, ["giveaway"]), Key)); // not an event
+        Assert.True(await Ok(host, Save(false, OtherItem, ["gift"]), Key));
+        Assert.False(await Ok(host, new { action = "gift", item = OtherItem, count = 1 })); // switched off
+        Assert.True(await Ok(host, Save(true, OtherItem, ["gift"]), Key));
+        Assert.False(await Ok(host, new { action = "gift", item = PoolItem, count = 1 })); // the panel's pool replaced the settings'
+        Assert.True(await Ok(host, new { action = "gift", item = OtherItem, count = 1 }));
+        Assert.False(await Ok(host, new { action = "announce", text = "Hello" })); // not an allowed event
+        var limits = (await Post(host, new { action = "limits" })).GetProperty("data");
+        Assert.True(limits.GetProperty("on").GetBoolean());
+        Assert.Contains("Keep it spooky", limits.GetProperty("rules").GetString());
+        Assert.Equal(["gift"], limits.GetProperty("events").EnumerateArray().Select(e => e.GetString()!).ToArray());
+    }
+
+    private const string Key = "panel-key-for-tests";
+
     private static Task<SyntheticHost> StartAsync() => SyntheticHost.StartAsync(o =>
     {
         o.GameDataDir = SyntheticData.Dir;
         o.EventRates = [new EventRateWindow { Name = "Bonus Sunday", Start = Now.AddDays(1), End = Now.AddDays(1).AddHours(8), ExpPercent = 200 }];
         o.AiGm = new AiGmOptions
         {
-            Enabled = true, ItemPool = [new AiGmItem { Item = PoolItem, MaxCount = 3 }], MaxGiftsPerWeek = 1, MvpPool = [1],
+            Enabled = true, ItemPool = [new AiGmItem { Item = PoolItem, MaxCount = 3 }], MaxGiftsPerWeek = 1, MvpPool = [1], ConfigKey = Key,
         };
     }, new ManualClock(Now));
 
     private static object Rates(DateTimeOffset start, double hours, int exp, string name = "Bonus") =>
         new { action = "rates", start, hours, expPercent = exp, name };
 
-    private static async Task<bool> Ok(SyntheticHost host, object request) => (await Post(host, request)).GetProperty("ok").GetBoolean();
+    private static async Task<bool> Ok(SyntheticHost host, object request, string? key = null) =>
+        (await Post(host, request, key)).GetProperty("ok").GetBoolean();
 
-    private static async Task<JsonElement> Post(SyntheticHost host, object request)
+    private static async Task<JsonElement> Post(SyntheticHost host, object request, string? key = null)
     {
         using var client = new HttpClient();
-        var body = new StringContent(JsonSerializer.Serialize(request, AiGmService.Json), Encoding.UTF8, "application/json");
-        var response = await client.PostAsync(host.Http + "/ro3emu/aigm", body);
+        using var message = new HttpRequestMessage(HttpMethod.Post, host.Http + "/ro3emu/aigm")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(request, AiGmService.Json), Encoding.UTF8, "application/json"),
+        };
+        if (key != null) message.Headers.Add("X-AiGm-Key", key);
+        var response = await client.SendAsync(message);
         response.EnsureSuccessStatusCode();
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }

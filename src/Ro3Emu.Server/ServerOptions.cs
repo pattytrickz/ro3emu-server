@@ -541,7 +541,14 @@ public sealed class AiGmOptions
     /// <summary>The <c>By</c> of everything the AI GM makes, and its name in gm-audit.log.</summary>
     public const string Maker = "ai-gm";
 
+    /// <summary>The realm allows an AI GM at all. The staff panel's switch turns it on and off within this.</summary>
     public bool Enabled { get; set; }
+    /// <summary>
+    /// The key the staff panel's bridge sends to save the AI GM's switch, rules, item pool and events (action
+    /// "setconfig"). Kept only in the realm's settings and the bridge's, never where the AI GM runs. Empty: those are
+    /// not saved from the panel, and these settings alone apply.
+    /// </summary>
+    public string ConfigKey { get; set; } = "";
     /// <summary>Furthest ahead an event may be planned.</summary>
     public int MaxDaysAhead { get; set; } = 7;
     public int MaxExpPercent { get; set; } = 150;
@@ -549,7 +556,8 @@ public sealed class AiGmOptions
     public int MaxCardRolls { get; set; } = 2;
     public double MaxRateHours { get; set; } = 4;
     public int MaxRateWindowsPerWeek { get; set; } = 2;
-    /// <summary>The only items it may give, each with the most it may give one role at a time. Empty: no gifts.</summary>
+    /// <summary>The only items it may give, each with the most it may give one role at a time. Empty: no gifts. The
+    /// staff panel's item pool, once saved, takes its place.</summary>
     public AiGmItem[] ItemPool { get; set; } = [];
     /// <summary>Mass gifts and login gifts together.</summary>
     public int MaxGiftsPerWeek { get; set; } = 2;
