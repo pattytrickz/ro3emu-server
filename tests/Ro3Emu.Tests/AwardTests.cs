@@ -77,6 +77,24 @@ public sealed class AwardTests : IAsyncLifetime
         Assert.Contains("\"ExpPercent\":50", _app.Services.GetRequiredService<RoleStore>().ServerState(BoostService.StateKey(session.Role.Id)));
     }
 
+    /// <summary>Boost items come only from events and GMs: an award that lists one (the battle pass's level 7 premium
+    /// reward, AwardConfig 100120001, gives three Armor Plates) leaves it out and keeps the rest.</summary>
+    [ClientDataFact]
+    public async Task AwardsLeaveBoostItemsOut()
+    {
+        await using var bot = await InWorld("PlateAlice");
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "PlateAlice");
+        int[] plates = [1296702, 1296703, 1296704];
+        var plain = new AwardService(_app.Services.GetRequiredService<GameData>());
+        var boosted = new AwardService(_app.Services.GetRequiredService<GameData>(), Microsoft.Extensions.Options.Options.Create(
+            new ServerOptions { BoostItems = [.. plates.Select(p => new BoostItem { Item = p, Kind = BoostService.Drop })] }));
+        var before = plain.ResolveDirect(session, 100120001).Grants;
+        var after = boosted.ResolveDirect(session, 100120001).Grants;
+        Assert.Equal(3, before.Count(g => plates.Contains(g.Entry)));
+        Assert.DoesNotContain(after, g => plates.Contains(g.Entry));
+        Assert.Equal(before.Count - 3, after.Count);
+    }
+
     [Fact]
     public void BoostsTakeTheHigherOfThemAndTheEventsRates()
     {
