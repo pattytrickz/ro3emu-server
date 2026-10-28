@@ -276,6 +276,12 @@ public sealed class ServerOptions
     public LoginGift[] LoginGifts { get; set; } = [];
 
     /// <summary>
+    /// House rule (Sol RO3, not original behaviour): items that start a personal EXP or item-drop boost when used
+    /// (Game/BoostService.cs, docs/guide/boosts.md). Given only through events and GM gifts. Empty: none.
+    /// </summary>
+    public BoostItem[] BoostItems { get; set; } = [];
+
+    /// <summary>
     /// House rule (Sol RO3, not original behaviour): the limits of the AI GM, which runs events through the loopback
     /// POST /ro3emu/aigm (Game/AiGmService.cs, docs/guide/ai-gm.md). Only these settings set them; the endpoint can
     /// never raise them. Off unless Enabled.
@@ -566,6 +572,20 @@ public sealed class AiGmOptions
     public int[] MvpPool { get; set; } = [];
     public int MaxMvpSpawnsPerDay { get; set; } = 3;
     public int MaxAnnouncementsPerDay { get; set; } = 12;
+}
+
+/// <summary>One <see cref="ServerOptions.BoostItems"/> item: using it starts this boost for the role.</summary>
+public sealed class BoostItem
+{
+    public int Item { get; set; }
+    /// <summary>"exp" (Base and Job EXP from kills) or "drop" (an extra loot roll at Percent chance).</summary>
+    public string Kind { get; set; } = "exp";
+    /// <summary>1-100: EXP +Percent %, or the chance in percent of one extra loot roll.</summary>
+    public int Percent { get; set; } = 25;
+    public int Minutes { get; set; } = 30;
+    /// <summary>The BuffConfig row shown while it runs (its icon and timer), 0 for none. Only a row that changes no
+    /// attributes is shown (BoostService), so the icon never adds stats.</summary>
+    public int Buff { get; set; }
 }
 
 /// <summary>One <see cref="AiGmOptions.ItemPool"/> entry.</summary>

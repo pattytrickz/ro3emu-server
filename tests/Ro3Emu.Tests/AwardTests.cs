@@ -31,9 +31,62 @@ public sealed class AwardTests : IAsyncLifetime
             options.HttpPort = httpPort;
             options.MicroGatePort = microPort;
             options.GameGatePort = gamePort;
+            options.BoostItems =
+            [
+                new BoostItem { Item = ExpBoostItem, Kind = BoostService.Exp, Percent = 50, Minutes = 30 },
+                new BoostItem { Item = DropBoostItem, Kind = BoostService.Drop, Percent = 100, Minutes = 15 },
+            ];
         });
         await _app.StartAsync();
         _http = $"http://127.0.0.1:{httpPort}";
+    }
+
+    // Glyph and Spirit Glyph: usable (203 GivePlayerBuff) and given by nothing else, so they can stand in for boost items.
+    private const int ExpBoostItem = 1294701, DropBoostItem = 1294702;
+
+    /// <summary>
+    /// A boost item (ServerOptions.BoostItems, a Sol RO3 house rule) is spent for its boost instead of its own buff; a
+    /// second boost of the same kind is refused and kept while the first runs; the boost survives the role's cache.
+    /// </summary>
+    [ClientDataFact]
+    public async Task ABoostItemStartsItsBoostAndASecondWaitsForTheFirst()
+    {
+        await using var bot = await InWorld("BoostAlice");
+        await Next(bot, CharacterService.ItemsSync, DBItemsInfoIncrement.Parser);
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        var character = _app.Services.GetRequiredService<CharacterService>();
+        var boosts = _app.Services.GetRequiredService<BoostService>();
+        var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(s => s.Role?.Name == "BoostAlice");
+        var store = _app.Services.GetRequiredService<ItemStore>();
+        Assert.True(await loop.InvokeAsync(() => character.ApplyAwardAsync(session,
+            new AwardPlan(0, 0, [new AwardGrant(ExpBoostItem, 2), new AwardGrant(DropBoostItem, 1)]), suppressRewardNotice: true)));
+        long Guid(int entry) => store.Load(session.Role!.Id).Single(i => i.Entry == entry).Guid;
+
+        await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = Guid(ExpBoostItem), ItemCount = 1 });
+        Assert.Equal(0, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = Guid(ExpBoostItem), ItemCount = 1 });
+        Assert.Equal(ErrorCodes.FeatureUnavailable, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        await bot.SendGameAsync(CharacterService.ItemUse, new ItemUseReq { ItemGuid = Guid(DropBoostItem), ItemCount = 1 });
+        Assert.Equal(0, (await Next(bot, CharacterService.ItemUse, ItemUseResp.Parser)).Result);
+        await loop.InvokeAsync(() => Task.CompletedTask);
+
+        Assert.Equal(1, store.Load(session.Role!.Id).Single(i => i.Entry == ExpBoostItem).Stack); // the refused one is kept
+        Assert.DoesNotContain(store.Load(session.Role.Id), i => i.Entry == DropBoostItem);
+        Assert.Equal((50, 100), await loop.InvokeAsync(() => Task.FromResult((boosts.ExpPercent(session), boosts.DropPercent(session)))));
+        // Kept in server_state, not only in the service's cache.
+        Assert.Contains("\"ExpPercent\":50", _app.Services.GetRequiredService<RoleStore>().ServerState(BoostService.StateKey(session.Role.Id)));
+    }
+
+    [Fact]
+    public void BoostsTakeTheHigherOfThemAndTheEventsRates()
+    {
+        Assert.Equal(150, BoostService.ExpRate(100, 50));
+        Assert.Equal(200, BoostService.ExpRate(200, 50)); // an x2 EXP event beats a +50% boost; they don't stack
+        Assert.Equal(100, BoostService.ExpRate(100, 0));
+        Assert.Equal(2, BoostService.LootRolls(1, 100, 99)); // +100%: always one more roll
+        Assert.Equal(2, BoostService.LootRolls(1, 25, 24));
+        Assert.Equal(1, BoostService.LootRolls(1, 25, 25));
+        Assert.Equal(3, BoostService.LootRolls(3, 100, 0)); // an event with more rolls wins
     }
 
     public async Task DisposeAsync()
