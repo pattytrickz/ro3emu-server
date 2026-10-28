@@ -17,7 +17,7 @@ namespace Ro3Emu.Tests;
 public sealed partial class GuildTests : IAsyncLifetime
 {
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-guild-" + Guid.NewGuid().ToString("N"));
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5), RaceLimit = TimeSpan.FromMinutes(2);
     private WebApplication _app = null!;
     private string _http = "";
 
@@ -572,11 +572,13 @@ public sealed partial class GuildTests : IAsyncLifetime
                     service.EditAsync(session, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)2, Name = "Third" }));
                 return Task.CompletedTask;
             });
-            await loop.InvokeAsync(() => service.LeaveAsync(session));
+            // Bounded: once (28 Oct, stage of f505f2c) this race left the whole run waiting 3 h 23 min; alone it takes 10 s.
+            // A stall now fails here, and the StateLock is still released below.
+            await loop.InvokeAsync(() => service.LeaveAsync(session)).WaitAsync(RaceLimit);
             Assert.Equal(0, (await Next(alice, GuildService.Leave, GuildMemberLeaveResp.Parser)).Result);
         }
         finally { session.StateLock.Release(); }
-        await pendingRename!;
+        await pendingRename!.WaitAsync(RaceLimit);
         Assert.NotEqual(0, (await Next(alice, GuildService.Edit, GuildEditResp.Parser, x => x.Name == "Third" || x.Result != 0)).Result);
         Assert.Null(_app.Services.GetRequiredService<GuildStore>().Get(id));
         Assert.Equal(10, session.Progress.Currency.GetValueOrDefault(3));
