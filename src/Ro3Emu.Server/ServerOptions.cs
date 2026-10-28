@@ -264,7 +264,7 @@ public sealed class ServerOptions
 
     /// <summary>
     /// House rule (Sol RO3, not original behaviour): timed rate windows (Bonus Sunday, a holiday event), on top of
-    /// KillExpPercent and CardDropRolls. GMs add more while the server runs ("!rates", POST /ro3emu/event); those are kept
+    /// KillExpPercent and CardDropRolls. GMs and the AI GM add more while the server runs ("!rates", AiGm); those are kept
     /// in the database. Empty: no event rates (Game/EventService.cs, docs/guide/events.md).
     /// </summary>
     public EventRateWindow[] EventRates { get; set; } = [];
@@ -274,6 +274,13 @@ public sealed class ServerOptions
     /// (an advent gift, a holiday present). GMs add more while the server runs ("!logingift"). Empty: none.
     /// </summary>
     public LoginGift[] LoginGifts { get; set; } = [];
+
+    /// <summary>
+    /// House rule (Sol RO3, not original behaviour): the limits of the AI GM, which runs events through the loopback
+    /// POST /ro3emu/aigm (Game/AiGmService.cs, docs/guide/ai-gm.md). Only these settings set them; the endpoint can
+    /// never raise them. Off unless Enabled.
+    /// </summary>
+    public AiGmOptions AiGm { get; set; } = new();
 
     /// <summary>
     /// Accounts (exact, or "prefix*") whose roles the public player count (/ro3emu/status, read by the website and the
@@ -505,11 +512,15 @@ public sealed class EventRateWindow
     public int DropRolls { get; set; } = 1;
     /// <summary>Card chance times this (1-5), on top of CardDropRolls.</summary>
     public int CardRolls { get; set; } = 1;
+    /// <summary>Who made it: <see cref="AiGmOptions.Maker"/> for the AI GM, empty for the settings and the GMs.</summary>
+    public string By { get; set; } = "";
 }
 
 /// <summary>One <see cref="ServerOptions.LoginGifts"/> mail (UTC window).</summary>
 public sealed class LoginGift
 {
+    /// <summary>Who made it: <see cref="AiGmOptions.Maker"/> for the AI GM, empty for the settings and the GMs.</summary>
+    public string By { get; set; } = "";
     /// <summary>Unique and never reused: a role that claimed this id never gets it again.</summary>
     public string Id { get; set; } = "";
     public DateTimeOffset Start { get; set; }
@@ -519,6 +530,41 @@ public sealed class LoginGift
     public string Title { get; set; } = "A gift from the Sol RO3 team";
     /// <summary>Roles below this Base level wait for it until they reach it inside the window.</summary>
     public int MinLevel { get; set; }
+}
+
+/// <summary>
+/// <see cref="ServerOptions.AiGm"/>: what the AI GM may do. Every limit is a rolling window counted back from the action's
+/// own time (a planned rate window counts at its start). Its rate windows never overlap another window.
+/// </summary>
+public sealed class AiGmOptions
+{
+    /// <summary>The <c>By</c> of everything the AI GM makes, and its name in gm-audit.log.</summary>
+    public const string Maker = "ai-gm";
+
+    public bool Enabled { get; set; }
+    /// <summary>Furthest ahead an event may be planned.</summary>
+    public int MaxDaysAhead { get; set; } = 7;
+    public int MaxExpPercent { get; set; } = 150;
+    public int MaxDropRolls { get; set; } = 1;
+    public int MaxCardRolls { get; set; } = 2;
+    public double MaxRateHours { get; set; } = 4;
+    public int MaxRateWindowsPerWeek { get; set; } = 2;
+    /// <summary>The only items it may give, each with the most it may give one role at a time. Empty: no gifts.</summary>
+    public AiGmItem[] ItemPool { get; set; } = [];
+    /// <summary>Mass gifts and login gifts together.</summary>
+    public int MaxGiftsPerWeek { get; set; } = 2;
+    public double MaxLoginGiftHours { get; set; } = 48;
+    /// <summary>The field MVP configs (MvpService) it may respawn. Empty: any.</summary>
+    public int[] MvpPool { get; set; } = [];
+    public int MaxMvpSpawnsPerDay { get; set; } = 3;
+    public int MaxAnnouncementsPerDay { get; set; } = 12;
+}
+
+/// <summary>One <see cref="AiGmOptions.ItemPool"/> entry.</summary>
+public sealed class AiGmItem
+{
+    public int Item { get; set; }
+    public int MaxCount { get; set; } = 1;
 }
 
 /// <summary>One <see cref="ServerOptions.LevelCaps"/> phase: from this UTC time on, Base level stops at Cap.</summary>

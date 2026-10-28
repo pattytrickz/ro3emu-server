@@ -208,9 +208,7 @@ public sealed partial class EventService : IGameTicker
             CardRolls = Math.Clamp(a.Length > 3 ? int.Parse(a[3], CultureInfo.InvariantCulture) : 1, 1, MaxRolls),
             Name = a.Length > 4 ? string.Join(' ', a[4..]) : "Bonus event",
         };
-        _gmWindows.RemoveAll(w => w.End <= now);
-        _gmWindows.Add(window);
-        await SaveAsync(WindowsKey, _gmWindows);
+        await AddWindowAsync(window);
         LogRates(_log, s.Role?.Name, Notice(window));
         await GmCommands.ReplyAsync(s, "Started: " + Notice(window)); // the ticker announces it to everyone
     }
@@ -236,7 +234,6 @@ public sealed partial class EventService : IGameTicker
         }
         if (a.Length < 4) throw new ArgumentException("usage");
         string id = a[0];
-        if (Gifts().Any(g => g.Id == id)) { await GmCommands.ReplyAsync(s, $"Login gift id {id} was used before; pick a new one."); return; }
         int item = int.Parse(a[1], CultureInfo.InvariantCulture), count = int.Parse(a[2], CultureInfo.InvariantCulture);
         double hours = double.Parse(a[3], CultureInfo.InvariantCulture);
         if (count <= 0 || hours is <= 0 or > 24 * 62) throw new ArgumentException("count/hours");
@@ -246,16 +243,65 @@ public sealed partial class EventService : IGameTicker
             Id = id, Item = item, Count = count, Start = now, End = now.AddHours(hours),
             Title = a.Length > 4 ? string.Join(' ', a[4..]) : "A gift from the Sol RO3 team",
         };
-        _gmGifts.Add(gift);
-        await SaveAsync(GiftsKey, _gmGifts);
+        if (!await AddLoginGiftAsync(gift)) { await GmCommands.ReplyAsync(s, $"Login gift id {id} was used before; pick a new one."); return; }
         LogLoginGiftMade(_log, s.Role?.Name, id, count, item, gift.End);
-        // Roles already online get it now; the rest at their next login.
-        foreach (var o in _sessions.All().Where(o => o.Role != null && !ServerOptions.AccountListed(_options.StatusExcludedAccounts, o.Account)))
-            await ClaimAsync(o.Role!.Id, o.Role.Name, [gift]);
         await GmCommands.ReplyAsync(s, $"Login gift {id}: {count} x {itemName} until {Until(gift.End)}; online players have theirs.");
     }
 
     private Task SaveAsync<T>(string key, T value) => _roles.SetServerStateAsync(key, JsonSerializer.Serialize(value));
+
+    /// <summary>Every rate window, from the settings and the GMs, still open or planned at <paramref name="now"/>
+    /// (a cancelled planned one, which ends where it starts, is not).</summary>
+    internal IReadOnlyList<EventRateWindow> WindowsAfter(DateTimeOffset now) => [.. Windows().Where(w => w.End > now && w.End > w.Start)];
+
+    /// <summary>Every login gift, from the settings and the GMs, still open or planned at <paramref name="now"/>.</summary>
+    internal IReadOnlyList<LoginGift> GiftsAfter(DateTimeOffset now) => [.. Gifts().Where(g => g.End > now && g.End > g.Start)];
+
+    /// <summary>Keeps a GM window, open now or planned; the ticker announces it when it opens.</summary>
+    internal async Task AddWindowAsync(EventRateWindow window)
+    {
+        Load();
+        _gmWindows.RemoveAll(w => w.End <= _clock.GetUtcNow());
+        _gmWindows.Add(window);
+        await SaveAsync(WindowsKey, _gmWindows);
+    }
+
+    /// <summary>Ends <paramref name="by"/>'s windows named <paramref name="name"/>; a planned one never opens. How many.</summary>
+    internal async Task<int> EndWindowsAsync(string by, string name)
+    {
+        Load();
+        var now = _clock.GetUtcNow();
+        var ended = _gmWindows.Where(w => w.By == by && w.Name == name && w.End > now).ToList();
+        foreach (var w in ended) w.End = w.Start > now ? w.Start : now;
+        if (ended.Count > 0) await SaveAsync(WindowsKey, _gmWindows);
+        return ended.Count;
+    }
+
+    /// <summary>
+    /// Keeps a GM login gift, open now or planned. The roles online when it opens get it at their next scene load or
+    /// kill, and at once when it is open already. False when its id was used before (ids are never reused).
+    /// </summary>
+    internal async Task<bool> AddLoginGiftAsync(LoginGift gift)
+    {
+        if (Gifts().Any(g => g.Id == gift.Id)) return false;
+        _gmGifts.Add(gift);
+        await SaveAsync(GiftsKey, _gmGifts);
+        if (Open(gift, _clock.GetUtcNow()))
+            foreach (var o in _sessions.All().Where(o => o.Role != null && !ServerOptions.AccountListed(_options.StatusExcludedAccounts, o.Account)))
+                await ClaimAsync(o.Role!.Id, o.Role.Name, [gift]);
+        return true;
+    }
+
+    /// <summary>Ends <paramref name="by"/>'s login gift <paramref name="id"/>; a planned one never opens. Whether one ran.</summary>
+    internal async Task<bool> EndLoginGiftAsync(string by, string id)
+    {
+        Load();
+        var now = _clock.GetUtcNow();
+        var ended = _gmGifts.Where(g => g.By == by && g.Id == id && g.End > now).ToList();
+        foreach (var g in ended) g.End = g.Start > now ? g.Start : now;
+        if (ended.Count > 0) await SaveAsync(GiftsKey, _gmGifts);
+        return ended.Count > 0;
+    }
 
     /// <summary>"!gift 1250709 3 level 40-99 Halloween candy": one mail per matching role, the AI players left out.</summary>
     private async Task GiftGmAsync(GameSession s, string[] a)
@@ -266,6 +312,15 @@ public sealed partial class EventService : IGameTicker
         if (_data.ItemName(item) is not { Length: > 0 } itemName) { await GmCommands.ReplyAsync(s, $"No item {item}."); return; }
         var (filter, used) = GiftFilter(a[2..], _clock.GetUtcNow());
         string title = a.Length > 2 + used ? string.Join(' ', a[(2 + used)..]) : "A gift from the Sol RO3 team";
+        var (sent, matched) = await GiftAsync(item, count, filter, title);
+        LogGift(_log, s.Role?.Name, count, item, itemName, sent, matched, string.Join(' ', a[2..(2 + used)]), title);
+        await GmCommands.ReplyAsync(s, $"Mailed {count} x {itemName} to {sent} of {matched} role(s).");
+    }
+
+    /// <summary>One mail of <paramref name="count"/> x <paramref name="item"/> to every matching role, the AI players
+    /// left out: how many were mailed, and how many matched.</summary>
+    internal async Task<(int Sent, int Matched)> GiftAsync(int item, int count, Func<Role, bool, bool> filter, string title)
+    {
         var online = _sessions.All().Where(o => o.Role != null).Select(o => o.Role!.Id).ToHashSet();
         var roles = (await _roles.AllAsync())
             .Where(r => !ServerOptions.AccountListed(_options.StatusExcludedAccounts, r.Account) && filter(r, online.Contains(r.Id)))
@@ -283,8 +338,7 @@ public sealed partial class EventService : IGameTicker
                 LogGiftFailed(_log, e, r.Name, r.Id);
             }
         }
-        LogGift(_log, s.Role?.Name, count, item, itemName, sent, roles.Count, string.Join(' ', a[2..(2 + used)]), title);
-        await GmCommands.ReplyAsync(s, $"Mailed {count} x {itemName} to {sent} of {roles.Count} role(s).");
+        return (sent, roles.Count);
     }
 
     /// <summary>The recipient filter at the start of <paramref name="a"/>, and how many words it used.</summary>
