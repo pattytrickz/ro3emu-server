@@ -540,26 +540,44 @@ public sealed partial class GuildTests : IAsyncLifetime
     [ClientDataFact]
     public async Task RenamePaymentIsAtomicAndAQueuedRenameCannotResurrectDissolvedGuild()
     {
+        var diag = System.Diagnostics.Stopwatch.StartNew();
+        void T(string what) => Console.Error.WriteLine($"GUILDDIAG {diag.Elapsed.TotalSeconds,8:F1}s {what}");
+        T("start");
         await using var alice = await InWorld("Alice");
+        T("after step 1: await using var alice = await InWorld('Alice');");
         await Level("alice");
+        T("after step 2: await Level('alice');");
         long id = await CreateGuild(alice, "First");
+        T("after step 3: long id = await CreateGuild(alice, 'First');");
         await alice.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)2, Name = "Second" });
+        T("after step 4: await alice.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (");
         Assert.Equal(ErrorCodes.ItemsShort, (await Next(alice, GuildService.Edit, GuildEditResp.Parser)).Result);
+        T("after step 5: Assert.Equal(ErrorCodes.ItemsShort, (await Next(alice, GuildService.Ed");
         Assert.Equal("First", _app.Services.GetRequiredService<GuildStore>().Get(id)!.Name);
+        T("after step 6: Assert.Equal('First', _app.Services.GetRequiredService<GuildStore>().G");
         using (var client = new HttpClient())
             (await client.PostAsync($"{_http}/ro3emu/gm?account=alice", new StringContent("!item 3 20"))).EnsureSuccessStatusCode();
+            T("after step 8: (await client.PostAsync($'{_http}/ro3emu/gm?account=alice', new String");
         var session = _app.Services.GetRequiredService<SessionRegistry>().All().Single(x => x.Role?.Id == (long)alice.Self!.Uuid);
+        T("after step 9: var session = _app.Services.GetRequiredService<SessionRegistry>().All(");
         long funded = session.Progress!.Currency.GetValueOrDefault(3);
         Assert.Equal(20, funded);
+        T("after step 10: Assert.Equal(20, funded);");
         await alice.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)2, Name = "Second" });
+        T("after step 11: await alice.SendGameAsync(GuildService.Edit, new GuildEditReq { Tp = (");
         Assert.Equal(0, (await Next(alice, GuildService.Edit, GuildEditResp.Parser, x => x.Name == "Second")).Result);
+        T("after step 12: Assert.Equal(0, (await Next(alice, GuildService.Edit, GuildEditResp.Pa");
         Assert.Equal("Second", _app.Services.GetRequiredService<GuildStore>().Get(id)!.Name);
+        T("after step 13: Assert.Equal('Second', _app.Services.GetRequiredService<GuildStore>().");
         Assert.Equal(10, session.Progress.Currency.GetValueOrDefault(3));
+        T("after step 14: Assert.Equal(10, session.Progress.Currency.GetValueOrDefault(3));");
 
         var guild = _app.Services.GetRequiredService<GuildStore>().Get(id)!;
         guild.LastChangeNameTime = 0; // permit the queued second rename in this race fixture
         Assert.True(_app.Services.GetRequiredService<GuildStore>().Save(guild));
-        await session.StateLock.WaitAsync();
+        T("after step 15: Assert.True(_app.Services.GetRequiredService<GuildStore>().Save(guild)");
+        await (session.StateLock.WaitAsync()).WaitAsync(TimeSpan.FromMinutes(2));
+        T("after step 16: await (session.StateLock.WaitAsync()).WaitAsync(TimeSpan.FromMinutes(2));");
         Task? pendingRename = null;
         try
         {
@@ -572,14 +590,20 @@ public sealed partial class GuildTests : IAsyncLifetime
                     service.EditAsync(session, new GuildEditReq { Tp = (GuildEditReq.Types.EditType)2, Name = "Third" }));
                 return Task.CompletedTask;
             });
-            await loop.InvokeAsync(() => service.LeaveAsync(session));
+            await (loop.InvokeAsync(() => service.LeaveAsync(session))).WaitAsync(TimeSpan.FromMinutes(2));
+            T("after step 19: await (loop.InvokeAsync(() => service.LeaveAsync(session))).WaitAsync(TimeSpan.FromMinutes(2));");
             Assert.Equal(0, (await Next(alice, GuildService.Leave, GuildMemberLeaveResp.Parser)).Result);
+            T("after step 20: Assert.Equal(0, (await Next(alice, GuildService.Leave, GuildMemberLeav");
         }
         finally { session.StateLock.Release(); }
-        await pendingRename!;
+        await (pendingRename!).WaitAsync(TimeSpan.FromMinutes(2));
+        T("after step 22: await (pendingRename!).WaitAsync(TimeSpan.FromMinutes(2));");
         Assert.NotEqual(0, (await Next(alice, GuildService.Edit, GuildEditResp.Parser, x => x.Name == "Third" || x.Result != 0)).Result);
+        T("after step 23: Assert.NotEqual(0, (await Next(alice, GuildService.Edit, GuildEditResp");
         Assert.Null(_app.Services.GetRequiredService<GuildStore>().Get(id));
+        T("after step 24: Assert.Null(_app.Services.GetRequiredService<GuildStore>().Get(id));");
         Assert.Equal(10, session.Progress.Currency.GetValueOrDefault(3));
+        T("after step 25: Assert.Equal(10, session.Progress.Currency.GetValueOrDefault(3));");
     }
 
     private static string RepoRoot()
