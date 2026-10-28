@@ -184,6 +184,7 @@ public static class ServerHost
         builder.Services.AddSingleton<Game.Persistence.SettingsPersistence>();
         builder.Services.AddSingleton<RoleSystems>();
         builder.Services.AddSingleton<RoleSessionService>();
+        builder.Services.AddSingleton<RoleDeletion>();
         // Message modules in this order: it is the order of their interceptors (World before Economy before Character).
         builder.Services.AddSingleton<Game.Messaging.IMessageModule, CoreMessages>();
         builder.Services.AddSingleton<Game.Messaging.IMessageModule, WorldMessages>();
@@ -338,9 +339,9 @@ public static class ServerHost
                 ? Results.Text(FeedbackStore.Format(reports), "text/plain; charset=utf-8")
                 : Results.Json(reports, FeedbackStore.Json);
         });
-        // Character deletion for the launcher / website (the client itself has none): POST form identity, credential,
-        // role (id or name). A role that is in the world cannot be deleted.
-        app.MapPost("/ro3emu/account/delete-role", async (HttpRequest request, CredentialLimiter limiter, AccountStore accounts, RoleStore roles, SessionRegistry sessions, GameLoop loop, Game.Ownership.OwnerRegistry owners, ILogger<RoleStore> log) =>
+        // Character deletion by HTTP (tools; players use the role screen's Delete button, RoleDeletion): POST form
+        // identity, credential, role (id or name). A role that is in the world cannot be deleted.
+        app.MapPost("/ro3emu/account/delete-role", async (HttpRequest request, CredentialLimiter limiter, AccountStore accounts, RoleStore roles, GameLoop loop, RoleDeletion deletion) =>
         {
             if (!limiter.TryAcquire(request.HttpContext.Connection.RemoteIpAddress)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
             var form = await request.ReadFormAsync();
@@ -349,24 +350,9 @@ public static class ServerHost
             if (await accounts.VerifiedAccountAsync(typed, credential) is not { } identity)
                 return Results.Json(new { code = 401, message = "bad account or password" });
             var role = roles.ForAccount(identity).FirstOrDefault(r => r.Id.ToString() == which || string.Equals(r.Name, which, StringComparison.OrdinalIgnoreCase));
-            if (role == null) return Results.Json(new { code = 404, message = "no such character on this account" });
-            return await loop.InvokeAsync(async () =>
-            {
-                using var lifecycle = await owners.EnterAsync("HTTP delete", Game.Ownership.ReservationKey.Lifecycle(role.Id));
-                var current = roles.Get(role.Id);
-                if (current == null || current.Account != identity)
-                    return Results.Json(new { code = 404, message = "no such character on this account" });
-                var owner = owners.Cached(role.Id);
-                bool attached = owner is { State: not Game.Ownership.RoleOwnerState.Detached } ||
-                    owner?.Attachment != null || owner?.Detaching != null ||
-                    sessions.All().Any(s => s.Role?.Id == role.Id || s.Owner?.RoleId == role.Id || s.Attachment?.RoleId == role.Id);
-                if (attached)
-                    return Results.Json(new { code = 409, message = "the character is in the game; log out first" });
-                bool ok = roles.Delete(identity, role.Id);
-                if (ok) owners.RoleDeleted(role.Id, roles.ReadRevisionVector(role.Id).Epoch);
-                log.LogInformation("Account {Account} deletes role {Name} ({Id}): {Result}", identity, current.Name, role.Id, ok);
-                return Results.Json(new { code = ok ? 0 : 500, message = ok ? $"{current.Name} deleted" : "not deleted" });
-            });
+            if (role == null) return Results.Json(new { code = RoleDeletion.NotOwned, message = "no such character on this account" });
+            var (code, message) = await loop.InvokeAsync(() => deletion.DeleteAsync(identity, role.Id, "HTTP tool"));
+            return Results.Json(new { code, message });
         });
         // Public status for the launcher's online pill: only a count, never account or character names. Read from the
         // loop's census, so anyone polling it adds no work to the loop.

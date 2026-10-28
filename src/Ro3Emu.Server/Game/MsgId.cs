@@ -6,6 +6,9 @@ public static class MsgId
     public const uint Heartbeat = 1;
     public const uint LoginRoleCreate = 1006;
     public const uint LoginRoleSelect = 1007;
+    /// <summary>LOGIN_ROLE_DELETE (PBEnumDefine T_LOGIN_ROLE_DELETE): AccountDeleteRoleReq/Resp, sent by Sol RO3's role
+    /// screen hook (the client's own Delete button is hidden and unbound).</summary>
+    public const uint LoginRoleDelete = 1008;
     /// <summary>LOGIN_RECONNECT: a server push only, after a silent gate reconnect.</summary>
     public const uint LoginReconnect = 1011;
     public const uint UploadClientSdkInfo = 1019;

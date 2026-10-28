@@ -382,6 +382,37 @@ public sealed class CharacterTests : IAsyncLifetime
         Assert.Equal(1100UL, look.EntityTemplateID);
     }
 
+    /// <summary>LOGIN_ROLE_DELETE 1008 from the role screen (Sol RO3's hook on the client's hidden Delete button):
+    /// only the account's own role, no pending-deletion countdown to cancel, and the role is gone at the next login.</summary>
+    [Fact]
+    public async Task TheRoleScreenDeletesOnlyTheAccountsOwnRoles()
+    {
+        var pem = File.ReadAllText(Path.Combine(_dataDir, "gate_rsa_public.pem"));
+        await using var dave = new BotClient(_http, pem);
+        await dave.LoginAsync("dave", "pw");
+        await dave.EnterGateAsync();
+        await dave.CreateRoleAsync("Dave");
+        long gone = (await dave.CreateRoleAsync("Dave2")).RoleBaseInfo.Id;
+        await using var erin = new BotClient(_http, pem);
+        await erin.LoginAsync("erin", "pw");
+        await erin.EnterGateAsync();
+        long erins = (await erin.CreateRoleAsync("Erin")).RoleBaseInfo.Id;
+
+        async Task<int> Delete(long id, bool cancel = false)
+        {
+            await dave.SendGameAsync(MsgId.LoginRoleDelete, new AccountDeleteRoleReq { Id = id, IsCancel = cancel });
+            return (await Next(dave, MsgId.LoginRoleDelete, AccountDeleteRoleResp.Parser)).Result;
+        }
+        Assert.Equal(RoleDeletion.NotOwned, await Delete(erins));
+        Assert.Equal(RoleDeletion.NoCountdown, await Delete(gone, cancel: true));
+        Assert.Equal(RoleDeletion.Deleted, await Delete(gone));
+
+        await using var again = new BotClient(_http, pem);
+        await again.LoginAsync("dave", "pw");
+        await again.EnterGateAsync();
+        Assert.Equal("Dave", Assert.Single(again.Roles).Name);
+    }
+
     [Fact]
     public async Task ARoleCanBeDeletedWithTheAccountPasswordAndItsNameReused()
     {

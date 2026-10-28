@@ -118,7 +118,8 @@ public sealed class RoleStore(AccountStore accounts)
     public Task SetServerStateAsync(string key, string value) => _accounts.WriteLegacyAsync<int>(new SeasonStateWritePlan(key, value));
 
     /// <summary>
-    /// Deletes a role of the account (the client has no delete: its role screen button is hidden and unbound). The row
+    /// Deletes a role of the account (Game.RoleDeletion: the role screen's Delete button, which the client hides and
+    /// Sol RO3's hook wires, and the HTTP tool). The row
     /// stays for support; the name is released by suffixing the id. Returns false when the role is not the account's.
     /// </summary>
     public bool Delete(string account, long id)
