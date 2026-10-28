@@ -76,9 +76,8 @@ public sealed partial class BuffService : IGameTicker
         _ => guardianOwned ? GuardianStateFor(buffGroup) : 0,
     };
 
-    /// <summary>Further named groups and their SpecialStatusConfig rows. (inferred scope) Only guardian-applied buffs
-    /// carry these states so far: the same groups from ordinary skills keep their previous, display-only behaviour
-    /// until each state is established and tested for every source.</summary>
+    /// <summary>Further named groups and their SpecialStatusConfig rows. (inferred scope) On a player only guardian-applied
+    /// buffs carry these states so far; on a unit every source does (<see cref="UnitStateFor"/>).</summary>
     private static int GuardianStateFor(int buffGroup) => buffGroup switch
     {
         KnockUpGroup => 3, // Knock-Up -> FlyHit
@@ -258,7 +257,7 @@ public sealed partial class BuffService : IGameTicker
             MonsterService.NowMs + durationMs, durationMs,
             GameData.Pairs(row, "_kChangeAttri").Select(c => (c.Id, c.Value * pile * attributeMultiplier)).ToArray(), sourceId, pile,
             ShieldRemaining: Math.Max(0, shieldAmount), IsGuardianOwned: guardianOwned,
-            StateOrdinal: guardianOwned ? StateFor(group, true) : 0);
+            StateOrdinal: UnitStateFor(row));
         if (existing != null) list.Remove(existing);
         list.Add(buff);
         TrackPeriodic(null, unit, buff);
