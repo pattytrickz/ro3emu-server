@@ -39,10 +39,12 @@ public sealed class GuardianPetTests
     private const int Wrapper = 99001, Child = 99002, OtherChild = 99003, Buff = 99004, Pet = 99, Passive = 99005;
     private const int SecondWrapper = 99101, SecondChild = 99102, SecondPet = 100;
     private const int PanelPet = 101, PanelMonster = 99901, PanelVariation = 999, PanelBattleVariation = 998;
-    private const int Petrify = 902101, Blind = 902501, BornImmunity = 900901, Slow = 99007, CastSpeedBuff = 99008;
+    private const int Petrify = 902101, Blind = 902501, BornImmunity = 900901, Slow = 99007, CastSpeedBuff = 99008, SkillStun = 99009;
     private static readonly int[] ControlTag = [37];
+    private static readonly int[] StunTags = [13, 37];
     private static readonly int[] ControlImmunityCategory = [20];
     private static readonly int[] PetrifyForbids = [ForbiddenState.Walk, ForbiddenState.CastSkill, ForbiddenState.NormalAttack];
+    private static readonly int[] StunForbids = [ForbiddenState.Walk, ForbiddenState.NormalAttack];
     private static readonly int[] SlowerChange = [AttributeId.Speed, -125];
     private static readonly int[] CastSpeedChange = [AttributeId.CastSpeed, 500];
     private static readonly int[][] PanelStats = [[AttributeId.MaxSp, 1000], [AttributeId.Def, 25], [AttributeId.BaseAspd, 100]];
@@ -137,10 +139,16 @@ public sealed class GuardianPetTests
                 {
                     _iID = CastSpeedBuff, _iBuffID = 994, _iType = 1, _iTime = 5000, _kChangeAttri = new[] { CastSpeedChange },
                 },
+                // A skill's own stun row: not the generic Stun group, only BuffTagConfig's Stun tag 13.
+                [SkillStun.ToString(CultureInfo.InvariantCulture)] = new
+                {
+                    _iID = SkillStun, _iBuffID = 995, _iType = 2, _iTime = 5000, _kBuffCategory = StunTags,
+                },
             });
             Write("SpecialStatusConfig", new Dictionary<string, object>
             {
                 ["12"] = new { _iID = 12, _kForbidden = PetrifyForbids }, // Petrify
+                ["18"] = new { _iID = 18, _kForbidden = StunForbids }, // Stun
             });
             var parameters = JsonNode.Parse(File.ReadAllText(Path.Combine(_root, "config", "PublicParamConfig.json")))?.AsObject()
                 ?? throw new InvalidOperationException("Missing synthetic parameters.");
@@ -591,7 +599,7 @@ public sealed class GuardianPetTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task OnlyAGuardiansControlBuffStopsAMonster(bool guardian)
+    public async Task AnyControlBuffStopsAMonster(bool guardian)
     {
         await using var f = new Fixture();
         await f.Start();
@@ -603,8 +611,27 @@ public sealed class GuardianPetTests
             if (guardian) await buffs.AddGuardianAsync(monster, Petrify, 5000, f.Session.Role!.Id);
             else await buffs.AddSupportAsync(monster, Petrify, 5000, f.Session.Role!.Id);
             Assert.True(buffs.UnitHasGroup(monster, BuffService.PetrifyGroup));
-            Assert.Equal(guardian, buffs.UnitForbidden(monster, ForbiddenState.Walk));
-            Assert.Equal(guardian ? 1UL << 11 : 0, buffs.UnitStatus(monster)); // SpecialStatusConfig 12, Petrify
+            Assert.True(buffs.UnitForbidden(monster, ForbiddenState.Walk));
+            Assert.True(buffs.UnitForbidden(monster, ForbiddenState.NormalAttack));
+            Assert.Equal(1UL << 11, buffs.UnitStatus(monster)); // SpecialStatusConfig 12, Petrify
+        });
+    }
+
+    [Fact]
+    public async Task ASkillsOwnStunRowStopsAMonsterByItsTag()
+    {
+        await using var f = new Fixture();
+        await f.Start();
+        await using var bot = await f.Host.InWorldAsync("Guardian");
+        var buffs = f.Host.Service<BuffService>();
+        await f.Loop.InvokeAsync(async () =>
+        {
+            var monster = await f.SpawnMonsterAsync();
+            await buffs.AddSupportAsync(monster, SkillStun, 5000, f.Session.Role!.Id);
+            Assert.True(buffs.UnitForbidden(monster, ForbiddenState.Walk));
+            Assert.True(buffs.UnitForbidden(monster, ForbiddenState.NormalAttack));
+            Assert.False(buffs.UnitForbidden(monster, ForbiddenState.CastSkill)); // SpecialStatusConfig 18 leaves it
+            Assert.Equal(1UL << 17, buffs.UnitStatus(monster)); // SpecialStatusConfig 18, Stun
         });
     }
 
@@ -626,9 +653,9 @@ public sealed class GuardianPetTests
     }
 
     [Theory]
-    [InlineData(false, 250)]
+    [InlineData(false, 125)]
     [InlineData(true, 125)]
-    public async Task OnlyAGuardiansDebuffChangesAMonstersSpeed(bool guardian, int expectedCm)
+    public async Task AnySlowChangesAMonstersSpeed(bool guardian, int expectedCm)
     {
         await using var f = new Fixture();
         await f.Start();

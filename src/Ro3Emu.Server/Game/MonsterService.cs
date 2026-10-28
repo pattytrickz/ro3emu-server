@@ -365,7 +365,7 @@ public sealed partial class MonsterService : MonsterBrain, IGameTicker
 
     internal Func<WorldUnit, int, bool>? Forbidden { get; set; }
 
-    /// <summary>A guardian control that forbids walking stops a moving monster where it is.</summary>
+    /// <summary>A control that forbids walking (Stun, Frozen, Petrify, Immobilize ...) stops a moving monster where it is.</summary>
     private void StopWhenRooted(MonsterUnit m, long now)
     {
         if (Forbidden?.Invoke(m, ForbiddenState.Walk) != true || !m.Moving) return;

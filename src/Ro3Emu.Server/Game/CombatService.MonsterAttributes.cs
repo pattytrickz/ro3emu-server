@@ -25,7 +25,8 @@ public sealed partial class CombatService
             [AttributeId.Hit] = t.Hit, [AttributeId.Flee] = t.Flee, [AttributeId.Cri] = t.Cri, [AttributeId.Speed] = t.SpeedCm,
             [AttributeId.CastSpeed] = t.CastSpeed,
         };
-        foreach (var (id, value) in _buffs.GuardianUnitAttributes(unit)) raw[(int)id] = raw.GetValueOrDefault((int)id) + value;
+        foreach (var (id, value) in _buffs.GuardianUnitAttributes(unit).Concat(_buffs.OrdinaryUnitSpeedChanges(unit)))
+            raw[(int)id] = raw.GetValueOrDefault((int)id) + value;
         return StatCalculator.Compute(raw, _data);
     }
 
@@ -53,20 +54,22 @@ public sealed partial class CombatService
     private async Task PublishMonsterAttributesAsync(WorldUnit unit)
     {
         if (unit is not MonsterUnit monster) return;
-        bool guardian = _buffs.HasGuardianUnitBuffs(monster);
-        // Ordinary unit buffs leave the template's stats and speed as they were; publish only a guardian's changes
-        // and, once the last guardian buff is gone, the return to the template.
-        if (!guardian && monster.BuffSpeedCm == null) return;
+        bool guardian = _buffs.HasGuardianUnitBuffs(monster), overlaid = monster.BuffSpeedCm != null;
+        bool speed = guardian || _buffs.OrdinaryUnitSpeedChanges(monster).Any();
         var stats = MonsterStats(monster);
-        await _monsters.SetBuffSpeedAsync(monster, guardian ? (int)Math.Clamp(stats[AttributeId.Speed], 0, int.MaxValue) : null);
+        await _monsters.SetBuffSpeedAsync(monster, speed ? (int)Math.Clamp(stats[AttributeId.Speed], 0, int.MaxValue) : null);
+        // Every source's controls show (#221); a stopped walk is sent by the monster's next tick.
         var changed = new AOIAttrChange
         {
             EntityUuid = (ulong)unit.Uid,
             StateInfo = new AoiObjStateInfo { Data = new CommonBigMask { Values = { (ulong)monster.StatusBits | _buffs.UnitStatus(unit) } } },
             ForbidInfo = new AoiObjForbidInfo { Data = new CommonBigMask { Values = { _buffs.UnitForbiddenMask(unit) } } },
         };
-        foreach (int id in PublishedMonsterAttributes)
-            changed.Property.Add(new AoIProperty { Idx = id, Data = stats[id], BaseData = stats.Base.GetValueOrDefault(id) });
+        // Ordinary unit buffs leave the template's other stats as they were; publish only a guardian's changes and,
+        // once the last overlay is gone, the return to the template.
+        if (guardian || overlaid)
+            foreach (int id in PublishedMonsterAttributes)
+                changed.Property.Add(new AoIProperty { Idx = id, Data = stats[id], BaseData = stats.Base.GetValueOrDefault(id) });
         await _world.ToUnitViewersAsync(unit, AoiAttrChange, changed);
     }
 }

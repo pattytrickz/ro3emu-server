@@ -49,6 +49,17 @@ public sealed partial class BuffService
     internal bool HasGuardianUnitBuffs(WorldUnit unit) => _unitBuffs.TryGetValue(unit.Uid, out var buffs)
         && buffs.Any(b => b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs);
 
+    /// <summary>The speed changes (speed, per_speed, buff_per_speed) of the unit's other live buffs: a Slow from any source
+    /// slows a monster (BuffConfig 902601 Slow: per_speed -5000, #221). (inferred scope) Their other attributes stay
+    /// display-only, as <see cref="GuardianUnitAttributes"/> says.</summary>
+    internal IEnumerable<(long Id, double Value)> OrdinaryUnitSpeedChanges(WorldUnit unit) =>
+        _unitBuffs.TryGetValue(unit.Uid, out var buffs)
+            ? buffs.Where(b => !b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs)
+                .SelectMany(b => b.Changes.Where(change => IsSpeed(change.Attr)).Select(change => (change.Attr, change.Value))).ToArray()
+            : [];
+
+    private static bool IsSpeed(long attr) => attr is AttributeId.Speed or AttributeId.PerSpeed or AttributeId.BuffPerSpeed;
+
     public IEnumerable<(long Id, double Value)> UnitAttributes(WorldUnit unit) =>
         _unitBuffs.TryGetValue(unit.Uid, out var buffs)
             ? buffs.Where(b => b.ExpireMs > MonsterService.NowMs)
