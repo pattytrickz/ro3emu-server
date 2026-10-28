@@ -110,6 +110,17 @@ public sealed class BossSkillSetsTests(ITestOutputHelper output)
         Assert.Contains(4340101, Ids(4340000));
     }
 
+    // A show's ground warnings (EffectData m_kWarningRange) that its m_kShows do not play go with the cast: Drake's 43201
+    // lists none of its four, Baphomet's 43916 plays its own two (type 8) and the Golden Thief Bug's Pyroblast has none.
+    [ClientDataFact]
+    public void BossWarningsAreTheShowsWarningsItDoesNotPlayItself()
+    {
+        Assert.Equal([4320104, 4320105, 4320106, 4320117], Book(43200006)!.Skills.Single(k => k.Id == 4320101).Warnings);
+        Assert.Equal([4331311, 4331312], Book(4330001)!.Skills.Single(k => k.Id == 4331301).Warnings);
+        Assert.Empty(Book(4390001)!.Skills.Single(k => k.Id == 4391601).Warnings);
+        Assert.Empty(Book(4300001)!.Skills.Single(k => k.Id == 4301301).Warnings);
+    }
+
     [ClientDataFact]
     public void ValhallaPairsAreThePhasesOfOneSkill()
     {

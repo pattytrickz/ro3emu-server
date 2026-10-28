@@ -57,6 +57,9 @@ public sealed class BossSkill
     public int PushEffect { get; init; }
     public int PushMs { get; init; }
     public float PushDistance { get; init; }
+    /// <summary>The show's ground warnings (EffectData m_kWarningRange) that its own timeline does not play: the cast
+    /// draws them (31119) when it starts.</summary>
+    public int[] Warnings { get; init; } = [];
     public int BusyMs => ChantMs + ActionMs;
 }
 
@@ -400,7 +403,32 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
                 && data.Row("SkillConfig", groundBlast) != null ? (int)groundBlast : 0,
             ChargeEffect = Charge(row, out int chargeMs), ChargeMs = chargeMs,
             PushEffect = Push(row, out int pushMs, out float pushDistance), PushMs = pushMs, PushDistance = pushDistance,
+            Warnings = Warnings(GameData.Int(row, "_iScriptShow"), template),
         };
+    }
+
+    /// <summary>
+    /// The show's EffectData in [show*100, show*100+99] (as CombatService.FindMovementEffect) that draws a ground warning
+    /// (m_kPoint.m_kWarningRange) and that its m_kShows do not list. Most Phantom Realm shows list none of theirs (Drake's
+    /// 43201 plays 4320101-4320112 but not 4320104-4320106 or 4320117); a few play them as type 8 entries (Baphomet's
+    /// 43916). The original AI scripts are server-only, so drawing the rest when the cast starts is (inferred).
+    /// </summary>
+    private int[] Warnings(long show, JsonElement? template)
+    {
+        if (show <= 0) return [];
+        var listed = new HashSet<long>();
+        if (template is { } t && t.TryGetProperty("m_kShows", out var shows) && shows.ValueKind == JsonValueKind.Object)
+            foreach (var stage in shows.EnumerateObject().Where(s => s.Value.ValueKind == JsonValueKind.Array))
+                foreach (var entry in stage.Value.EnumerateArray())
+                    if (entry.ValueKind == JsonValueKind.Array && entry.GetArrayLength() > 0 && GameData.Number(entry[0]) is double id)
+                        listed.Add((long)id);
+        var effects = data.SkillTemplateTable("Lua_Config_EffectData");
+        var warnings = new List<int>();
+        for (long id = show * 100; id < show * 100 + 100; id++)
+            if (!listed.Contains(id) && effects.TryGetValue(id.ToString(System.Globalization.CultureInfo.InvariantCulture), out var e)
+                && e.TryGetProperty("m_kPoint", out var point) && point.TryGetProperty("m_kWarningRange", out _))
+                warnings.Add((int)id);
+        return [.. warnings];
     }
 
     /// <summary>

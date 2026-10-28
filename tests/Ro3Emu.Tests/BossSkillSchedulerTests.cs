@@ -126,6 +126,24 @@ public sealed class BossSkillSchedulerTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task ACastDrawsTheGroundWarningsItsShowLeavesOut()
+    {
+        await using var alice = await InWorld("Alice");
+        Options.FirstCastDelayMs = 60_000;
+        // Easy Phantom Realm Drake's 4320101: its show plays no warning, so the cast sends its four (31119).
+        var drake = await Boss("alice", 43200006);
+        await Gm("alice", "!boss cast 4320101");
+        var cast = await Next(alice, CombatService.UseInSkill, UseInSkillInfo.Parser, u => u.SrcID == drake.Uid && u.SkillID == 4320101);
+        var warnings = new List<SkillEffectDisplayNotify>();
+        for (int i = 0; i < 4; i++)
+            warnings.Add(await Next(alice, CombatService.SkillEffect, SkillEffectDisplayNotify.Parser, n => n.SkillId == 4320101
+                && warnings.All(w => w.EffectId != n.EffectId)));
+        Assert.Equal([4320104, 4320105, 4320106, 4320117], warnings.Select(w => w.EffectId).Order().ToArray());
+        // On the boss and its cast, so the client clears them with it.
+        Assert.All(warnings, w => Assert.Equal((drake.Uid, drake.Uid, cast.Face), (w.SourceId, w.MasterId, w.Angle)));
+    }
+
+    [ClientDataFact]
     public async Task AMiniBossWaitsOutItsCooldownThenCastsAgain()
     {
         await using var alice = await InWorld("Alice");
