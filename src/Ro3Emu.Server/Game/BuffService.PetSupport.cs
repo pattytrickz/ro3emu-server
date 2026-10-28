@@ -62,8 +62,8 @@ public sealed partial class BuffService
     /// </summary>
     internal IEnumerable<(long Id, double Value)> NextHitAttributes(WorldUnit unit) =>
         _unitBuffs.TryGetValue(unit.Uid, out var buffs)
-            ? buffs.Where(b => !b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs && LastsOneHit(b))
-                .SelectMany(b => b.Changes.Select(change => (change.Attr, change.Value))).ToArray()
+            ? [.. buffs.Where(b => !b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs && LastsOneHit(b))
+                .SelectMany(b => b.Changes.Select(change => (change.Attr, change.Value)))]
             : [];
 
     internal async Task ConsumeNextHitAsync(WorldUnit unit)
