@@ -79,8 +79,9 @@ public sealed partial class BuffService
     /// <summary>The SpecialStatusConfig row a buff puts on a unit, whoever applied it: a player's Frost Diver freezes a
     /// monster as a guardian's Freeze does (#221). The generic control groups name their row (<see cref="StateFor"/>);
     /// a skill's own control row (12004 and 12101 Stun, 12106 Immobilize, 43403 Petrify ...) carries only its tag.</summary>
-    private static int UnitStateFor(BuffConfig row)
+    private static int UnitStateFor(JsonElement buffRow)
     {
+        var row = new BuffConfig(buffRow);
         int state = StateFor((int)row.BuffId, guardianOwned: true);
         if (state != 0 || row.Type != NegativeBuffType) return state;
         foreach (long tag in row.BuffCategory)

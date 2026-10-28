@@ -257,7 +257,7 @@ public sealed partial class BuffService : IGameTicker
             MonsterService.NowMs + durationMs, durationMs,
             GameData.Pairs(row, "_kChangeAttri").Select(c => (c.Id, c.Value * pile * attributeMultiplier)).ToArray(), sourceId, pile,
             ShieldRemaining: Math.Max(0, shieldAmount), IsGuardianOwned: guardianOwned,
-            StateOrdinal: UnitStateFor(new BuffConfig(row)));
+            StateOrdinal: UnitStateFor(row));
         if (existing != null) list.Remove(existing);
         list.Add(buff);
         TrackPeriodic(null, unit, buff);
