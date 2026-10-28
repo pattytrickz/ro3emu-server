@@ -101,22 +101,21 @@ public sealed class WildAfkService : IGameTicker
         return scope;
     }
     private bool Unlocked(GameSession s) => s.Progress != null && _functions.IsOpen(s, 18);
-    private bool Field(GameSession s) => s.InstanceId == 0 && _data.Row("MapConfig", s.SceneEntry) is { } map
-        && GameData.Int(map, "_iSceneType") == 1; // enum scene type: field; private/dungeon maps never qualify.
     /// <summary>
-    /// Where 43409 may turn Bonus Time back on: the fields and the towns (enum scene type 0). Localization_en
+    /// The shared hunting maps Bonus Time runs on: the fields (enum scene type 1) and the caves (6: Undersea Tunnel,
+    /// Culvert, Geffen Tower, ...; MapConfig _iCaveBelongsTo names their field). The OnHook panel recommends monsters
+    /// on both (OnHookMonsterRecommendConfig._iMapID), and the cave names carry no 副本, so a cave is not one of the
+    /// "Dungeons and similar Locations" of Localization_en 10960000077 (inferred). Private/dungeon maps never qualify.
+    /// </summary>
+    private bool Field(GameSession s) => s.InstanceId == 0 && _data.Row("MapConfig", s.SceneEntry) is { } map
+        && GameData.Int(map, "_iSceneType") is 1 or 6;
+    /// <summary>
+    /// Where 43409 may turn Bonus Time back on: the hunting maps and the towns (enum scene type 0). Localization_en
     /// 10960000077 only refuses "Dungeons and similar Locations", and the switch already stays on, suspended, when a
     /// player walks from a field into town, so refusing a town (AfkDungeon) left a stopped switch off (inferred).
-    /// Caves, the Realm sandbox and instances stay refused; consumption still needs <see cref="Field"/>.
+    /// The Realm sandbox and instances stay refused; consumption still needs <see cref="Field"/>.
     /// </summary>
     private bool Startable(GameSession s) => Field(s) || s.InstanceId == 0 && MapConfig.Get(_data, s.SceneEntry)?.SceneType == 0;
-    /// <summary>
-    /// enum_SceneType Cave (6): the shared hunting dungeons beside the fields (Undersea Tunnel, Abandoned Mine, Hidden
-    /// Forest; MapConfig _iCaveBelongsTo names their field), home of the level 34-45 monsters. Bonus Time cannot be
-    /// enabled there (AfkDungeon), so without ServerOptions.BonusExpAlways their kills pay the reduced table (a tenth).
-    /// </summary>
-    private bool Cave(GameSession s) => s.InstanceId == 0 && _data.Row("MapConfig", s.SceneEntry) is { } map
-        && GameData.Int(map, "_iSceneType") == 6;
     private bool Ordinary(MonsterUnit monster) => _data.Row("NPCConfig", monster.Template.NpcId) is { } npc
         && GameData.Int(npc, "_iWildMonsters") == 1 && GameData.Int(npc, "_iNPCSubType") is 1 or 2;
     private bool MvpAggro(GameSession s) => _world.AllUnits().OfType<MonsterUnit>().Any(m => !m.Dead && !m.Returning
@@ -549,10 +548,9 @@ public sealed class WildAfkService : IGameTicker
     private async Task<bool> BeforeKillAsync(GameSession s, MonsterUnit monster)
     {
         if (!Ordinary(monster)) return false;
-        // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field kill, locked panel or not. The
-        // house rule also covers the caves, where the panel itself stays refused ("Cannot Enable Bonus in a Dungeon").
+        // ServerOptions.BonusExpAlways: the Bonus Time table for every ordinary field or cave kill, locked panel or not.
         bool always = AlwaysBonus(_options.Value, s.Progress?.Level ?? 0, s.AutoBattle);
-        if (!Field(s)) return always && Cave(s);
+        if (!Field(s)) return false;
         if (!Unlocked(s) || s.WildAfk is not { } state) return always;
         if (BeforeKillGateForTest is { } beforeGate) await beforeGate();
         // A kill waiting behind an old state's gate must not reserve that role and block

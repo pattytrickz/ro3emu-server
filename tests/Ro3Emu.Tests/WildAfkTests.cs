@@ -136,7 +136,7 @@ public sealed class WildAfkTests : IAsyncLifetime
         Assert.False(oldSession.AutoBattle);
     }
 
-    private async Task<int> Kill(BotClient bot)
+    private async Task<int> Kill(BotClient bot, int monster = 5000001)
     {
         long uid = 0;
         int npc = 0;
@@ -145,7 +145,7 @@ public sealed class WildAfkTests : IAsyncLifetime
         {
             var s = Session(bot);
             var m = Service<World>().Map(s.WorldScene).Units.OfType<MonsterUnit>()
-                .First(m => !m.Dead && m.Template.NpcId == 5000001);
+                .First(m => !m.Dead && m.Template.NpcId == monster);
             m.Hp = 1; m.Moving = false; m.NextRoamMs = long.MaxValue;
             uid = m.Uid; npc = m.Template.NpcId; position = m.Pos;
             return Task.CompletedTask;
@@ -176,7 +176,7 @@ public sealed class WildAfkTests : IAsyncLifetime
         await bot.SendGameAsync(WildAfkService.Collection, new SetMonsterCollectionReq { MonsterId = 5000001, IsAdd = true });
         Assert.Equal(ErrorCodes.FeatureUnavailable, (await Next(bot, WildAfkService.Collection, SetMonsterCollectionRsp.Parser)).Result);
         await Eligible(bot);
-        await Warp(bot, 10141); // MapConfig._iSceneType=6, sc_iz_dun01_001_sceneeditor
+        await Warp(bot, 30301); // MapConfig._iSceneType=8, Realm Sandbox-1
         await bot.SendGameAsync(WildAfkService.Start, new StartHighMultiplierTimeReq());
         Assert.Equal(ErrorCodes.AfkDungeon, (await Next(bot, WildAfkService.Start, StartHighMultiplierTimeRsp.Parser)).Result);
         await bot.SendGameAsync(WildAfkService.OfflineReward, new ReceiveOfflineRewardReq());
@@ -207,6 +207,31 @@ public sealed class WildAfkTests : IAsyncLifetime
         Assert.True(await State(bot, s => s.WildAfk!.Info.IsHighMagnification && s.WildAfk.Info.IsSuspended));
         await Task.Delay(1200);
         Assert.Equal(3600, await Query(bot));
+    }
+
+    /// <summary>
+    /// #general 22 Oct, "it keeps saying I'm in a dungeon when I am not": the caves (enum_SceneType Cave 6) are shared
+    /// hunting maps, and the OnHook panel recommends monsters on them (OnHookMonsterRecommendConfig._iMapID lists
+    /// Undersea Tunnel, Culvert, Geffen Tower, ...). Bonus Time can be turned on there, and a cave kill runs it.
+    /// </summary>
+    [ClientDataFact]
+    public async Task BonusTimeRunsInTheCaves()
+    {
+        await using var bot = await InWorld();
+        await Eligible(bot);
+        await Warp(bot, 10141); // MapConfig._iSceneType=6, Undersea Tunnel Floor 1
+        await bot.SendGameAsync(WildAfkService.Pause, new PauseHighMultiplierTimeReq());
+        Assert.Equal(0, (await Next(bot, WildAfkService.Pause, PauseHighMultiplierTimeRsp.Parser)).Result);
+        await OnOwnedLoop(bot, "AFK toggle cooldown fixture", s =>
+        {
+            s.WildAfk!.LastToggleMs = 0;
+            return Task.CompletedTask;
+        });
+        await bot.SendGameAsync(WildAfkService.Start, new StartHighMultiplierTimeReq());
+        Assert.Equal(0, (await Next(bot, WildAfkService.Start, StartHighMultiplierTimeRsp.Parser)).Result);
+        await Auto(bot, true);
+        await Kill(bot, 5000089); // a level-40 Undersea Tunnel monster; the kill lifts the suspension
+        Assert.True(await State(bot, s => s.WildAfk!.Info.IsHighMagnification && !s.WildAfk.Info.IsSuspended));
     }
 
     [ClientDataFact]
