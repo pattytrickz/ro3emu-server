@@ -86,10 +86,13 @@ public sealed partial class CombatService
     {
         var row = action.Row;
         int max = (int)Math.Max(1, GameData.Int(row, "_iTargetMax"));
-        if (!SelectsArea(row) && radiusOverride == null)
+        MonsterUnit? Locked() => FindMonster(s.WorldScene, action.Request.TargetId) is { Hp: > 0 } m && CanHitMonster(s, m)
+            && Relation(row, false, race: m.Template.Race) ? m : null;
+        if (!SelectsArea(row) && radiusOverride == null) return Locked() is { } target ? [target] : [];
+        if (radiusOverride == null && ChainRadius(row) is { } chain)
         {
-            var target = FindMonster(s.WorldScene, action.Request.TargetId);
-            return target != null && target.Hp > 0 && CanHitMonster(s, target) && Relation(row, false, race: target.Template.Race) ? [target] : [];
+            if (Locked() is not { } chainTarget) return [];
+            center = chainTarget.Pos; radiusOverride = chain;
         }
         if (radiusOverride == null && GameData.Int(row, "_iRelease") is not (SkillRelease.Lock or SkillRelease.DragRect
             or SkillRelease.DragCircle)) center = action.Origin;
@@ -112,6 +115,15 @@ public sealed partial class CombatService
     private static (float Width, float Length)? DashStrip(JsonElement row) =>
         Script(row) == "yingliu" && Numbers(row, "_kDescData") is [_, > 0 and var width, > 0 and var length, ..]
             ? ((float)width, (float)length) : null;
+
+    /// <summary>
+    /// Chain Lightning (1231301): "dealing ... to the designated ST enemy within ${1} meters and up to ${3} Other enemies
+    /// within ${2} meters of the target" (_kDescData [12, 5, 4, ..], _iTargetMax 5 = the target and ${3} others). Its
+    /// row's own area, a 0 m circle (_kRange [0]) on the point the target stood at when the chant began, holds no one
+    /// once the target steps; the ${2}-meter circle centres on the target where it stands when the bolt lands (inferred).
+    /// </summary>
+    private static float? ChainRadius(JsonElement row) =>
+        Script(row) == "ChainLightning" && Numbers(row, "_kDescData") is [_, > 0 and var radius, ..] ? (float)radius : null;
 
     private static bool InStrip(Vec3 origin, float face, float width, float length, Vec3 point)
     {
