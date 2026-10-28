@@ -38,6 +38,8 @@ public sealed class MountService : IGameTicker
         public HashSet<long> Claimed { get; set; } = new();
         public Dictionary<string, int> Previews { get; set; } = new();
         public int QuestMount { get; set; }
+        /// <summary>The battle mount the ridden system mount replaced: off the system mount, the rider is back on it.</summary>
+        public long ResumeBattle { get; set; }
     }
 
     public MountService(GameData data, CharacterService character, RoleStore roles, FunctionService functions,
@@ -120,7 +122,7 @@ public sealed class MountService : IGameTicker
         return JsonSerializer.SerializeToUtf8Bytes(new SavedState
         {
             Info = (info ?? s.Mounts!).ToByteArray(),
-            Claimed = state.Claimed, Previews = state.Previews, QuestMount = state.QuestMount
+            Claimed = state.Claimed, Previews = state.Previews, QuestMount = state.QuestMount, ResumeBattle = state.ResumeBattle
         });
     }
 
@@ -220,6 +222,7 @@ public sealed class MountService : IGameTicker
             var next = s.Mounts.Clone();
             next.MountIds[slot] = new MountInfo { MountId = req.MountId, IsRiding = riding && req.MountId != 0 };
             var state = CopyState(s); state.QuestMount = 0;
+            Resume(s, next, state);
             await CommitAsync(s, next, state);
         }
         await s.SendGameAsync(SetConfig, new PlayerMountsSetCfgResp { Result = error, ChangeTp = slot, MountId = req.MountId });
@@ -237,10 +240,28 @@ public sealed class MountService : IGameTicker
         if (error == 0)
         {
             var next = s.Mounts.Clone(); var state = CopyState(s); state.QuestMount = 0;
+            if (tp == 1 && next.MountIds.GetValueOrDefault(2) is { IsRiding: true } battle) state.ResumeBattle = battle.MountId;
+            else if (slot == 2) state.ResumeBattle = 0;
             foreach (var (key, value) in next.MountIds) if (key == slot || on) value.IsRiding = key == slot && on;
+            if (tp == 0) Resume(s, next, state);
             await CommitAsync(s, next, state);
         }
         await s.SendGameAsync(Ride, new PlayerRiderMountResp { Result = error, Tp = tp });
+    }
+
+    /// <summary>
+    /// Off the system mount, back on the battle mount it replaced if that is still selected and may be ridden here.
+    /// Auto Mode rides the system mount to walk to its next target and gets off it to fight, and a Rune Knight left off
+    /// the Dragon fought without Dragon Breath (inferred: the client is not seen asking for the battle mount again).
+    /// </summary>
+    private bool Resume(GameSession s, DBMountsInfo next, SavedState state)
+    {
+        long id = state.ResumeBattle;
+        if (id == 0 || next.MountIds.GetValueOrDefault(1) is { IsRiding: true }) return false;
+        state.ResumeBattle = 0;
+        if (next.MountIds.GetValueOrDefault(2) is { IsRiding: false } battle && battle.MountId == id
+            && OwnedError(s, id) == 0 && RidingError(s, id, 2) == 0) battle.IsRiding = true;
+        return true;
     }
 
     private SavedState CopyState(GameSession s) => JsonSerializer.Deserialize<SavedState>(Encode(s))!;
@@ -292,7 +313,7 @@ public sealed class MountService : IGameTicker
         }
     }
 
-    private bool Normalize(GameSession s, DBMountsInfo? target = null)
+    private bool Normalize(GameSession s, DBMountsInfo? target = null, SavedState? state = null)
     {
         var info = target ?? s.Mounts!;
         bool changed = false;
@@ -306,7 +327,8 @@ public sealed class MountService : IGameTicker
             else if (choice.IsRiding && !s.SceneLoading && RidingError(s, choice.MountId, slot) != 0)
             { choice.IsRiding = false; changed = true; }
         }
-        return changed;
+        // Combat or the map can put a rider off the system mount: back on the battle mount it replaced.
+        return Resume(s, info, state ?? s.MountState) | changed;
     }
 
     public Task ReconcileAsync(GameSession s) => _loop.IsOnLoop
@@ -318,9 +340,9 @@ public sealed class MountService : IGameTicker
         if (s.Mounts == null) return;
         using var gate = await CharacterService.Lock(s);
         if (!_deadlines.IsCurrent(s, lease) || s.Mounts == null) return;
-        var next = s.Mounts.Clone();
+        var next = s.Mounts.Clone(); var state = CopyState(s);
         // A timed mount and its appearance share one deadline; drop both in the expiry commit.
-        if (Normalize(s, next)) await CommitAsync(s, next, look: _wardrobe.WithoutExpired(s));
+        if (Normalize(s, next, state)) await CommitAsync(s, next, state, _wardrobe.WithoutExpired(s));
     }
 
     public void Tick(GameTime time)
