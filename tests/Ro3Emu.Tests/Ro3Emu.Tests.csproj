@@ -28,6 +28,7 @@
          builds only against a client's managed DLLs). -->
     <Compile Include="..\..\src\Ro3Emu.ClientHooks\VoiceLinkState.cs" Link="ClientHooks\VoiceLinkState.cs" />
     <Compile Include="..\..\src\Ro3Emu.ClientHooks\VoiceOffHint.cs" Link="ClientHooks\VoiceOffHint.cs" />
+    <Compile Include="..\..\src\Ro3Emu.ClientHooks\ClassArmourMask.cs" Link="ClientHooks\ClassArmourMask.cs" />
   </ItemGroup>
 
   <ItemGroup>

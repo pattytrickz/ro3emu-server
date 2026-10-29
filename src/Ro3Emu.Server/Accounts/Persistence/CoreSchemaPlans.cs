@@ -137,6 +137,7 @@ internal sealed class RoleSchemaPlan : DbPlan
         SchemaSql.AddColumn(db, tx, "role", "pets", "BLOB");
         SchemaSql.AddColumn(db, tx, "role", "mounts", "BLOB");
         SchemaSql.AddColumn(db, tx, "role", "wardrobe", "BLOB");
+        SchemaSql.AddColumn(db, tx, "role", "character_appearance", "BLOB");
         SchemaSql.AddColumn(db, tx, "role", "totems", "BLOB");
         SchemaSql.AddColumn(db, tx, "role", "totem_refine_epoch", "BLOB");
         SchemaSql.AddColumn(db, tx, "role", "genre", "BLOB");

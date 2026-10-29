@@ -76,6 +76,7 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
         Items = new(); Pets = null;
         WorldState = new();
         Power = null; PowerPublishedMs = 0;
+        CharacterAppearance = null; CharacterAppearanceClientReady = false; CharacterAppearanceEnabled = false;
     }
     private CancellationTokenSource _pendingCharacterIntents = new();
     internal CancellationToken PendingCharacterIntent => _pendingCharacterIntents.Token;
@@ -456,6 +457,9 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public bool SupporterIdentity { get; set; }
     /// <summary>The connected client registered the new cosmetic row before asking to receive its id.</summary>
     public bool IdentityClientReady { get; set; }
+    public CharacterAppearanceService.State? CharacterAppearance { get; set; }
+    public bool CharacterAppearanceEnabled { get; set; }
+    public bool CharacterAppearanceClientReady { get; set; }
 
     /// <summary>Property ids already sent in 31008; retained across local Refresh until a zero is sent.</summary>
     public HashSet<int> SentPropertyIds { get; } = new();

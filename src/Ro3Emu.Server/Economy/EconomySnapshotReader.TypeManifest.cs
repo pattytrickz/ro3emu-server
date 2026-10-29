@@ -75,7 +75,9 @@ public static partial class EconomySnapshotReader
     // Sol RO3 (live line, kept by the upstream sync): TaskRuntimeState.GrowthRanksClaimed is the legacy list of claimed
     // Growth Classroom ranks. No balance: GrowthClassService.MigrateLiveClaims copies it once into role.growth_class
     // (the claimed markers above) and nothing writes it any more.
-    public const string ExpectedFormatManifestHash = "B599214D49EE26220DDAFCC3F2474DDEF7DC662181FC9D83002D26C9C7781CE2";
+    // Appearance: character_appearance stores palette selections and an aura preference, not a balance.
+    // The cd13b/wardrobe-dye receipt records the bottle consumed atomically with each palette change.
+    public const string ExpectedFormatManifestHash = "1E46A96C89D7BF88CD3C5D4D49A9BA69A4C1AC149DFD1E2720464418FDE88358";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State

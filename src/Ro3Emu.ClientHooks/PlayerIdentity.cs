@@ -20,6 +20,7 @@ internal static class PlayerIdentity
     internal static void Install(LA_LuaManager manager, Obf_R.Obf_ff global)
     {
         _global = global;
+        CharacterAppearance.Install(global);
         _refresh = _setCustom = null;
         _reported = false;
         try
@@ -43,6 +44,7 @@ internal static class PlayerIdentity
 
     internal static void ApplyCosmetics(Obf_R.Obf_ff dbm, Obf_R.Obf_ff texts)
     {
+        CharacterAppearance.ApplyItems(dbm, texts);
         var rows = PassChallenges.Values(dbm, "m_kCFG_SocialOutfitConfig");
         if (rows == null || texts == null) return;
         PassChallenges.Text(texts, SupporterIdentityRules.FrameNameText, SupporterIdentityRules.FrameName);
@@ -85,6 +87,7 @@ internal static class PlayerIdentity
     private static void SetCustomData(Obf_R.Obf_ff self, object id, object value)
     {
         _setCustom?.Obf_HuA(self, id, value);
+        CharacterAppearance.Attach(self);
         try
         {
             // LC_UnitBase.SetCustomData stores values without dirtying the HUD for an unknown custom id.
@@ -102,6 +105,7 @@ internal static class PlayerIdentity
         {
             var unit = First(self.Obf_RuA<Obf_R.Obf_Ef>("GetUnit")?.Obf_HuA(self)) as Obf_R.Obf_ff;
             if (unit == null || Convert.ToInt32(unit.Obf_RuA<object>("m_iUnitTypeEnum")) != 3) return;
+            CharacterAppearance.Attach(unit);
             var mask = First(unit.Obf_RuA<Obf_R.Obf_Ef>("GetHeadInfoDataRaw")?.Obf_HuA(unit, _maskProperty));
             if (mask != null && !false.Equals(mask)) return; // Lua truthiness: masked identities keep the original presentation
             var raw = First(unit.Obf_RuA<Obf_R.Obf_Ef>("GetCustomDataValue")?.Obf_HuA(unit, SupporterIdentityRules.BadgeCustomData));

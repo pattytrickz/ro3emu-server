@@ -96,6 +96,7 @@ public static class ServerHost
         builder.Services.AddSingleton<PersonalService>();
         builder.Services.AddSingleton<SocialOutfitService>();
         builder.Services.AddSingleton<PlayerIdentityService>();
+        builder.Services.AddSingleton<CharacterAppearanceService>();
         builder.Services.AddSingleton<AchievementService>();
         builder.Services.AddSingleton<TeamService>();
         builder.Services.AddSingleton<MvpService>();

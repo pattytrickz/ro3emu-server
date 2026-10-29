@@ -41,6 +41,9 @@
     <Reference Include="Happyengine.Base.Runtime"><HintPath>$(ClientManaged)\Happyengine.Base.Runtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Phonest.ClientForUnity"><HintPath>$(ClientManaged)\Phonest.ClientForUnity.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(ClientManaged)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Render"><HintPath>$(ClientManaged)\Render.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule"><HintPath>$(ClientManaged)\UnityEngine.ParticleSystemModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ScreenCaptureModule"><HintPath>$(ClientManaged)\UnityEngine.ScreenCaptureModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Unity.TextMeshPro"><HintPath>$(ClientManaged)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.UI"><HintPath>$(ClientManaged)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.UIModule"><HintPath>$(ClientManaged)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
@@ -49,6 +52,7 @@
     <!-- The F2P realm's shop rules: the server charges what the hooked shop shows (ShopPrices). -->
     <Compile Include="..\Ro3Emu.Server\Game\F2PRules.cs" Link="F2PRules.cs" />
     <Compile Include="..\Ro3Emu.Server\Data\Config\SupporterIdentityRules.cs" Link="SupporterIdentityRules.cs" />
+    <Compile Include="..\Ro3Emu.Server\Data\Config\CharacterAppearanceRules.cs" Link="CharacterAppearanceRules.cs" />
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(ClientManaged)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ClientManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>

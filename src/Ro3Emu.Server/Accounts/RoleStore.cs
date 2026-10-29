@@ -415,6 +415,7 @@ public sealed class RoleStore(AccountStore accounts)
     public byte[]? LoadMounts(long id) => LoadBlob(id, "mounts");
     public void SaveMounts(long id, byte[] state, RoleItemPlanBuilder? transaction = null) => SaveBlob(id, "mounts", state, transaction);
     public byte[]? LoadWardrobe(long id) => LoadBlob(id, "wardrobe");
+    public byte[]? LoadCharacterAppearance(long id) => LoadBlob(id, "character_appearance");
     public Task<byte[]?> LoadWardrobeAsync(long id) => _accounts.ReadAsync<byte[]?>(new RoleProjectionRead(RoleProjectionKind.Wardrobe, id: id));
     public void SaveWardrobe(long id, byte[] state, RoleItemPlanBuilder? transaction = null) => SaveBlob(id, "wardrobe", state, transaction);
     public byte[]? LoadTotems(long id) => LoadBlob(id, "totems");
