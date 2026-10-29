@@ -144,7 +144,7 @@ public sealed class ConfigViewTests
     // count only goes down: lower it when a change removes such reads, never raise it.
     // Includes Sol RO3's house rules and live fixes. Typed SocialOutfitConfig reads remove 13 raw reads from the
     // current fixes-branch baseline; moving other fields into declared views lowers it further.
-    private const int FieldNamesOutsideViews = 2732;
+    private const int FieldNamesOutsideViews = 2730;
     private static readonly string Obj = Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar;
 
     [Fact]

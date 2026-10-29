@@ -1,10 +1,15 @@
 using Romsg;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 
 namespace Ro3Emu.Server.Game;
 
 public sealed partial class BuffService
 {
+    // Kyrie Eleison's buff: "This shield absorbs Physical damage equal to Magic ATK *${1}%."
+    private const int KyrieEleison = 1411701;
+    private const string LexAeternaScript = "Buff_Lex_Aeterna";
+
     private static long LiveShield(IEnumerable<ActiveBuff> buffs) => buffs
         .Where(b => b.ExpireMs > MonsterService.NowMs && b.ShieldRemaining > 0)
         .Aggregate(0L, (total, buff) => buff.ShieldRemaining > long.MaxValue - total
@@ -44,11 +49,41 @@ public sealed partial class BuffService
     internal bool HasGuardianUnitBuffs(WorldUnit unit) => _unitBuffs.TryGetValue(unit.Uid, out var buffs)
         && buffs.Any(b => b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs);
 
+    /// <summary>The speed changes (speed, per_speed, buff_per_speed) of the unit's other live buffs: a Slow from any source
+    /// slows a monster (BuffConfig 902601 Slow: per_speed -5000, #221). (inferred scope) Their other attributes stay
+    /// display-only, as <see cref="GuardianUnitAttributes"/> says.</summary>
+    internal IEnumerable<(long Id, double Value)> OrdinaryUnitSpeedChanges(WorldUnit unit) =>
+        _unitBuffs.TryGetValue(unit.Uid, out var buffs)
+            ? buffs.Where(b => !b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs)
+                .SelectMany(b => b.Changes.Where(change => IsSpeed(change.Attr)).Select(change => (change.Attr, change.Value))).ToArray()
+            : [];
+
+    private static bool IsSpeed(long attr) => attr is AttributeId.Speed or AttributeId.PerSpeed or AttributeId.BuffPerSpeed;
+
     public IEnumerable<(long Id, double Value)> UnitAttributes(WorldUnit unit) =>
         _unitBuffs.TryGetValue(unit.Uid, out var buffs)
             ? buffs.Where(b => b.ExpireMs > MonsterService.NowMs)
                 .SelectMany(b => b.Changes.Select(change => (change.Attr, change.Value))).ToArray()
             : [];
+
+    /// <summary>
+    /// Lex Aeterna (BuffConfig _kBuffScript "Buff_Lex_Aeterna", _kChangeAttri [[1216 per_res_dmg1, -2000]]): "applying
+    /// ${2}% [Damage Taken Increase] ... disappears after the target takes damage". The changes such a live debuff lends
+    /// a player's next hit on the unit; <see cref="ConsumeNextHitAsync"/> removes it once that hit lands.
+    /// </summary>
+    internal IEnumerable<(long Id, double Value)> NextHitAttributes(WorldUnit unit) =>
+        _unitBuffs.TryGetValue(unit.Uid, out var buffs)
+            ? buffs.Where(b => !b.IsGuardianOwned && b.ExpireMs > MonsterService.NowMs && LastsOneHit(b))
+                .SelectMany(b => b.Changes.Select(change => (change.Attr, change.Value))).ToArray()
+            : [];
+
+    internal async Task ConsumeNextHitAsync(WorldUnit unit)
+    {
+        if (!_unitBuffs.TryGetValue(unit.Uid, out var buffs)) return;
+        foreach (var buff in buffs.Where(LastsOneHit).ToArray()) await RemoveUnitBuffAsync(unit, buff);
+    }
+
+    private bool LastsOneHit(ActiveBuff buff) => BuffConfig.Get(_data, buff.ConfigId)?.BuffScript == LexAeternaScript;
 
     /// <summary>Actual remaining time after hostile-buff decay; movement effects must not outlive their buff.</summary>
     internal int UnitBuffRemainingMs(WorldUnit unit, int configId, long sourceId) =>
@@ -85,16 +120,17 @@ public sealed partial class BuffService
         else if (shield > 0) entity.Property.Add(new AoIProperty { Idx = 2003, Data = shield });
     }
 
-    /// <summary>Consume only live support shields before HP damage; nonpositive damage consumes nothing.</summary>
-    public async Task<long> AbsorbAsync(GameSession target, long damage)
+    /// <summary>Consume only live support shields before HP damage; nonpositive damage consumes nothing. A
+    /// <paramref name="magic"/> hit passes the physical-only shields.</summary>
+    public async Task<long> AbsorbAsync(GameSession target, long damage, bool magic = false)
     {
         if (damage <= 0) return 0;
         if (target.Role == null) return damage;
         foreach (var expired in target.Buffs.Where(b => b.ShieldRemaining > 0 && b.ExpireMs <= MonsterService.NowMs).ToArray())
             await RemoveAsync(target, expired);
         // (inferred) Older buffs absorb first. BuffConfig does not identify an order for independent shields.
-        foreach (var buff in target.Buffs.Where(b => b.ShieldRemaining > 0 && b.ExpireMs > MonsterService.NowMs)
-                     .OrderBy(b => b.Guid).ToArray())
+        foreach (var buff in target.Buffs.Where(b => b.ShieldRemaining > 0 && b.ExpireMs > MonsterService.NowMs
+                     && !(magic && b.ConfigId == KyrieEleison)).OrderBy(b => b.Guid).ToArray())
         {
             long absorbed = Math.Min(damage, buff.ShieldRemaining);
             damage -= absorbed;

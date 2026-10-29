@@ -43,6 +43,7 @@ public sealed partial class SkillCombatTests
         Assert.Equal(0, accepted.Result);
         var hit = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, h => h.SessionId == accepted.SessionId);
         var struck = hit.Dsts.Where(d => d.Damage > 0).Select(d => d.DstID).ToHashSet();
-        Assert.Equal(monsters.Take(3).Select(m => m.Uid).ToHashSet(), struck);
+        HashSet<long> nearest = [.. monsters.Take(3).Select(m => m.Uid)];
+        Assert.Equal(nearest, struck);
     }
 }

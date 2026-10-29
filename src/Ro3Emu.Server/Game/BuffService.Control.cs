@@ -76,6 +76,32 @@ public sealed partial class BuffService
             await RemoveAsync(player, buff);
     }
 
+    /// <summary>The SpecialStatusConfig row a buff puts on a unit, whoever applied it: a player's Frost Diver freezes a
+    /// monster as a guardian's Freeze does (#221). The generic control groups name their row (<see cref="StateFor"/>);
+    /// a skill's own control row (12004 and 12101 Stun, 12106 Immobilize, 43403 Petrify ...) carries only its tag.</summary>
+    private static int UnitStateFor(JsonElement buffRow)
+    {
+        var row = new BuffConfig(buffRow);
+        int state = StateFor((int)row.BuffId, guardianOwned: true);
+        if (state != 0 || row.Type != NegativeBuffType) return state;
+        foreach (long tag in row.BuffCategory)
+            if (TagStateFor(tag) is var tagged and > 0) return tagged;
+        return 0;
+    }
+
+    /// <summary>A BuffTagConfig control tag and the SpecialStatusConfig row of the same name. (inferred: matched by the
+    /// two tables' _iName texts) 13 Stun, 9 Frozen, 10 Petrify, 8 Immobilize, 12 Sleep, 6 Silence.</summary>
+    private static int TagStateFor(long tag) => tag switch
+    {
+        13 => 18, // Stun
+        9 => 11, // Frozen
+        10 => 12, // Petrify
+        8 => 21, // Immobilize
+        12 => 19, // Sleep
+        6 => 20, // Silence
+        _ => 0,
+    };
+
     internal bool UnitForbidden(WorldUnit unit, int ordinal) => _unitBuffs.TryGetValue(unit.Uid, out var buffs)
         && buffs.Any(b => b.ExpireMs > MonsterService.NowMs && b.StateOrdinal > 0
             && _data.Row("SpecialStatusConfig", b.StateOrdinal) is { } state

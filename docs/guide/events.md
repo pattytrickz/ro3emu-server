@@ -67,6 +67,11 @@ right away. `!logingift` lists the gifts, and `!logingift stop <id>` ends a GM g
 
 For example, `!gift 1000001 5 active 14 Thanks for playing`. Use it for compensation and prizes.
 
+## The AI GM
+
+The AI GM runs rate windows, gifts, MVP respawns and announcements through this same code, inside limits only the
+settings set: [the AI GM](ai-gm.md).
+
 ## AI players
 
 The accounts in `StatusExcludedAccounts` (the AI players, `aibot*`) get no login gifts and no tool gifts.

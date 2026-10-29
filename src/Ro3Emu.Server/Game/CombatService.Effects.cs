@@ -221,6 +221,7 @@ public sealed partial class CombatService
                     long effective = beforeHp - target.Hp;
                     RecordGuardianDamage(action, target.Uid, amount);
                     if (target.Hp == 0) killed.Add(target); // reserve before awaited damage callbacks
+                    if (amount > 0) await _buffs.ConsumeNextHitAsync(target);
                     if (effective > 0 && target.Hp > 0) await _buffs.BreakHitControlsAsync(target);
                     await SettleMonsterHitAsync(s, target, beforeHp, amount);
                     if (CanApplyMoreEffects())
@@ -268,7 +269,7 @@ public sealed partial class CombatService
                     foreach (var tuple in Tuples(row, "_kBuff1"))
                         if (CanApplyMoreEffects() && RollBuff(tuple, out int id, out int duration)
                             && SkillBuffAllowed?.Invoke(s, recipient, id) != false)
-                            await _buffs.AddAsync(recipient, id, duration, castingRole.Id);
+                            await _buffs.AddSupportAsync(recipient, id, duration, castingRole.Id, SkillShield(script, id, stats));
                 if (friendly && damage)
                 {
                     double multiplier = Numbers(row, "_kDamageParam1").FirstOrDefault(), flat = Numbers(row, "_kDamageParam2").FirstOrDefault();
@@ -361,6 +362,7 @@ public sealed partial class CombatService
             }
         }
         if (field == null && !action.Request.IsExtraSkill && CanApplyMoreEffects()) await RicochetAsync(s, action, processed);
+        if (field == null && !action.Request.IsExtraSkill && CanApplyMoreEffects()) await FearBreezeAsync(s, action, processed, hit);
         // A player's own cast: not a field, not an extra cast such as a talent proc, so procs never chain.
         if (field == null && !action.Request.IsExtraSkill)
             foreach (var handler in CastResolved)
@@ -678,6 +680,11 @@ public sealed partial class CombatService
             // description's "For the next ${4} sec. ... every ${5} sec.", 4 and 0.5).
             case "Magnus_Exorcismus" or "Magnus_ExorcismusBD" when logic is [_, > 0, > 0, ..]:
                 npc = (int)logic[0]; duration = (int)(logic[1] * 1000); interval = (int)(duration / logic[2]); break;
+            // _kLogicData [4]: the description's "For the next ${4} seconds, every ${5} seconds" (4, 0.6); the pulse is
+            // that ${5} (inferred). NPCConfig 22000003 carries Sanctuary's localized name, as the Hunter traps do.
+            case "Sanctuary" when logic is [> 0, ..] && double.TryParse(new SkillConfig(row).DescData.ElementAtOrDefault(4),
+                System.Globalization.CultureInfo.InvariantCulture, out double pulse):
+                npc = 22000003; duration = (int)(logic[0] * 1000); interval = (int)(pulse * 1000); break;
             case "Safety_Wall" or "Pneuma" when logic.Length >= 8:
                 npc = (int)logic[5]; duration = (int)logic[2]; radius = (float)(logic[7] / 100);
                 protection = script == "Safety_Wall" ? 1 : 2; charges = script == "Safety_Wall" ? (int)logic[1] : int.MaxValue; break;
@@ -795,8 +802,16 @@ public sealed partial class CombatService
             foreach (var modifier in DamageAdjusters) amount = Math.Max(0, modifier(s, target, row, result, amount));
             foreach (var extra in ExtraHitDamage) amount += Math.Max(0, extra(s, target, row, amount));
         }
-        return (ApplyPetSupportResistance(amount, _buffs.GuardianUnitAttributes(target), row, attacker.Element), result);
+        return (ApplyPetSupportResistance(amount, _buffs.GuardianUnitAttributes(target).Concat(_buffs.NextHitAttributes(target)),
+            row, attacker.Element), result);
     }
+
+    /// <summary>
+    /// Kyrie Eleison: "a Physical damage absorption shield equal to your Magic ATK*${2}%" (40): its buff's _kData1 [4000]
+    /// is that ratio in basis points of the caster's MATK. Rounded down (inferred).
+    /// </summary>
+    private long SkillShield(string script, int buffId, StatSheet casterStats) =>
+        script == "Kyrie_Eleison" && BuffConfig.Get(_data, buffId)?.Data1 is [var ratio, ..] ? casterStats[104] * ratio / 10000 : 0;
 
     /// <summary>Targets already slowed before this cast. Only Kuang Feng Xi Juan's second slow depends on that, so no
     /// other cast pays for the scan.</summary>

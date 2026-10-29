@@ -6,6 +6,7 @@ using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Accounts.Persistence;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -482,8 +483,9 @@ public sealed partial class PetService
         : (0, 0, [], []);
 
     /// <summary>
-    /// Static lineup/collection bonuses from PetStarConfig. Scaling each slot by PetSetLimitConfig's addition and
-    /// summing active collection attributes is inferred. Reactive effects are separate from these attributes.
+    /// Static lineup/collection bonuses from PetStarConfig, plus each deployed pet's panel stats. Scaling each slot by
+    /// PetSetLimitConfig's addition and summing active collection attributes is inferred. Reactive effects are separate
+    /// from these attributes.
     /// </summary>
     private IEnumerable<(long Id, double Value)> Attributes(GameSession s)
     {
@@ -496,8 +498,30 @@ public sealed partial class PetService
             foreach (var (slot, id) in Slots(plan, source))
                 if (SlotOpen(s, source, slot) && s.Pets.ListPet.TryGetValue(id, out var pet)
                     && StarRow(pet) is { } row && _data.Row("PetSetLimitConfig", slot) is { } limit)
+                {
                     foreach (var (attr, value) in GameData.Pairs(row, source == 1 ? "_kFightSkill" : "_kAssistSkill"))
                         yield return (attr, value * GameData.Int(limit, source == 1 ? "_iFightAttrAddition" : "_iAssistAttrAddition") / 10000.0);
+                    foreach (var attr in FormationAttributes(id, pet, source == 1)) yield return attr;
+                }
+    }
+
+    /// <summary>
+    /// The pet panel's "(${1}% bonus granted to the main character)": a deployed pet's panel stats
+    /// (PetCombatRules.PanelAttributes) at PublicParamConfig PetFightAttrAdditionScale / PetAssistAttrAdditionScale,
+    /// except PetFightAttrNotAddition / PetAssistAttrNotAddition (attack speed). (inferred) The scale's keys 3-6 are
+    /// PetBaseConfig._iQuality, and PetSetLimitConfig's slot addition does not apply here: the panel shows 100% for a
+    /// quality-5 pet in utility slot 2, whose row adds 3000.
+    /// </summary>
+    private IEnumerable<(long Id, double Value)> FormationAttributes(int id, PetData pet, bool fight)
+    {
+        if (PetCombatRules.PanelAttributes(_data, id, pet) is not { } panel) return [];
+        var excluded = PetCombatRules.ParamIds(_data, fight ? "PetFightAttrNotAddition" : "PetAssistAttrNotAddition");
+        long quality = PetBaseConfig.Get(_data, id)?.Quality ?? 0;
+        var scale = _data.Table("PublicParamConfig").GetValueOrDefault(fight ? "PetFightAttrAdditionScale" : "PetAssistAttrAdditionScale");
+        double share = scale.ValueKind != JsonValueKind.Array ? 0 : scale.EnumerateArray()
+            .Where(p => p.ValueKind == JsonValueKind.Array && p.GetArrayLength() >= 2 && GameData.Number(p[0]) == quality)
+            .Select(p => GameData.Number(p[1]) ?? 0).FirstOrDefault();
+        return panel.Where(p => !excluded.Contains(p.Key)).Select(p => ((long)p.Key, p.Value * share / 10000.0));
     }
 
     /// <summary>Client displayed strength: star strength + floor(level strength * multiplier / 10000), §2.</summary>

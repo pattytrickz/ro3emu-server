@@ -631,7 +631,7 @@ public sealed partial class CombatService : IGameTicker
                 && (b.SourceId is >= TowerPetUnit.UidBase and < TowerPetUnit.UidLimit || b.IsGuardianOwned))
             .SelectMany(b => b.Changes).Select(c => (c.Attr, c.Value)), row, sourceElement);
         long beforeShield = damage;
-        damage = await _buffs.AbsorbAsync(target, damage);
+        damage = await _buffs.AbsorbAsync(target, damage, row is { } hitRow && new SkillConfig(hitRow).DmgType == 2);
         long shieldDamage = beforeShield - damage;
         if (!ReferenceEquals(target.Role, targetRole) || target.SceneLoading || valid?.Invoke() == false) return null;
         long before = _character.Stats(target)[2000];
@@ -1049,12 +1049,18 @@ public sealed partial class CombatService : IGameTicker
         }
     }
 
-    /// <summary>HP/SP regeneration every 5 s out of combat: FinalReHp = ReHP + MaxHP × per_rehp (117/118, inferred).</summary>
+    /// <summary>
+    /// HP/SP regeneration every 5 s, in combat too: FinalReHp = ReHP + MaxHP × per_rehp (117/118, inferred formula).
+    /// AttributeConfig 117/118's tip is "Recovers ${1} MP every @{1} sec." (10010500022, AutoRecoverInterval 5000); the
+    /// out-of-combat recovery is its own pair, 120/121 rest_rehp/rest_resp, "... every @{1} sec. while out of combat"
+    /// (10010500033), not implemented here. Regenerating only out of combat left casters at 0 SP for a whole fight with
+    /// thousands of SP Recovery on their panel (#general, 27 Oct).
+    /// </summary>
     private async Task RegenAsync(GameSession s)
     {
         if (s.Role == null || s.Progress == null) return;
         using var held = await CharacterService.Lock(s);
-        if (s.Role == null || s.Progress == null || s.Dead || (s.StatusBits & FightBit) != 0) return;
+        if (s.Role == null || s.Progress == null || s.Dead || Now < s.NoRegenUntilMs) return;
         if (s.CurrentHp == null && s.CurrentSp == null) return; // unset = full (CharacterService.Stats): nothing to restore
         var st = _character.Stats(s);
         if (st[2000] >= st[101] && st[2001] >= st[102]) return;

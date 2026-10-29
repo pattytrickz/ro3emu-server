@@ -19,7 +19,9 @@ Open TCP `5380`, `20000` and `33100`, and the voice port if you turn voice on wi
 - **GM commands** (`!help` in chat) are on for every account when you play on your own PC. A hosted server gives them
   only to the accounts you name with `--gm` ([GM access](gm-access.md)).
 - **Bug reports from players:** the Feedback button in the game menu or `/bug <text>` in chat ([feedback](feedback.md)).
-- **Backups:** the database is backed up to `data/backups/` at start and every 6 hours (newest 20 kept).
+- **Backups:** the database is backed up to `data/backups/` at start and every 6 hours (newest 20 kept). A backup
+  keeps 1 GB free for the live database: when the disk is short it removes the oldest copies (never the newest two),
+  or skips the backup and logs it as critical.
 - **One session per account:** a second login takes over from the first. The client runs one instance per PC;
   `Ro3Emu.BotCli` can stand in for extra players when you test alone.
 
