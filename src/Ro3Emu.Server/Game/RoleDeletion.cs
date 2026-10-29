@@ -21,22 +21,25 @@ public sealed partial class RoleDeletion(RoleStore roles, SessionRegistry sessio
     internal async Task DeleteAsync(GameSession session, AccountDeleteRoleReq req)
     {
         int result = req.IsCancel ? NoCountdown
-            : session.Account is { } account ? (await DeleteAsync(account, req.Id, "role screen")).Code : NotOwned;
+            : session.Account is { } account ? (await DeleteAsync(account, req.Id, RoleScreenOrigin)).Code : NotOwned;
         await session.SendGameAsync(MsgId.LoginRoleDelete, new AccountDeleteRoleResp { Result = result });
     }
 
+    /// <summary>The owner operation names (<paramref name="origin"/>): the HTTP tool's is the one it always had.</summary>
+    internal const string HttpOrigin = "HTTP delete", RoleScreenOrigin = "role screen delete";
+
     /// <summary>On the game loop: deletes <paramref name="roleId"/> if it is <paramref name="account"/>'s and no session
     /// has it in the world. A code above, and the deleted role's name.</summary>
-    internal async Task<(int Code, string Message)> DeleteAsync(string account, long roleId, string source)
+    internal async Task<(int Code, string Message)> DeleteAsync(string account, long roleId, string origin)
     {
         if (roles.Get(roleId) is not { } role || role.Account != account) return (NotOwned, "no such character on this account");
-        using var lifecycle = await owners.EnterAsync("role delete", Ownership.ReservationKey.Lifecycle(roleId));
+        using var lifecycle = await owners.EnterAsync(origin, Ownership.ReservationKey.Lifecycle(roleId));
         var current = roles.Get(roleId);
         if (current == null || current.Account != account) return (NotOwned, "no such character on this account");
         if (Attached(roleId)) return (InWorld, "the character is in the game; log out first");
         bool ok = roles.Delete(account, roleId);
         if (ok) owners.RoleDeleted(roleId, roles.ReadRevisionVector(roleId).Epoch);
-        LogDelete(log, account, current.Name, roleId, source, ok);
+        LogDelete(log, account, current.Name, roleId, origin, ok);
         return ok ? (Deleted, $"{current.Name} deleted") : (Failed, "not deleted");
     }
 
@@ -47,6 +50,6 @@ public sealed partial class RoleDeletion(RoleStore roles, SessionRegistry sessio
             || sessions.All().Any(s => s.Role?.Id == roleId || s.Owner?.RoleId == roleId || s.Attachment?.RoleId == roleId);
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Account {Account} deletes role {Name} ({Id}) from the {Source}: {Result}")]
-    private static partial void LogDelete(ILogger logger, string account, string name, long id, string source, bool result);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Account {Account} deletes role {Name} ({Id}) ({Origin}): {Result}")]
+    private static partial void LogDelete(ILogger logger, string account, string name, long id, string origin, bool result);
 }

@@ -2,6 +2,7 @@
 2	session Realm:legacy: dispatcher/unrouted	refused
 1006	session account dispatcher/1006	session account dispatcher/1006
 1007	runtime dispatcher/owned continuation	runtime dispatcher/owned continuation
+1008	runtime role deletion/own lifecycle	runtime role deletion/own lifecycle
 1009	session Realm:legacy: dispatcher/unrouted	refused
 1011	session Realm:legacy: dispatcher/unrouted	refused
 1014	session Realm:legacy: dispatcher/unrouted	refused

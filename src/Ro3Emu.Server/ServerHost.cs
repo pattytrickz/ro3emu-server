@@ -351,7 +351,7 @@ public static class ServerHost
                 return Results.Json(new { code = 401, message = "bad account or password" });
             var role = roles.ForAccount(identity).FirstOrDefault(r => r.Id.ToString() == which || string.Equals(r.Name, which, StringComparison.OrdinalIgnoreCase));
             if (role == null) return Results.Json(new { code = RoleDeletion.NotOwned, message = "no such character on this account" });
-            var (code, message) = await loop.InvokeAsync(() => deletion.DeleteAsync(identity, role.Id, "HTTP tool"));
+            var (code, message) = await loop.InvokeAsync(() => deletion.DeleteAsync(identity, role.Id, RoleDeletion.HttpOrigin));
             return Results.Json(new { code, message });
         });
         // Public status for the launcher's online pill: only a count, never account or character names. Read from the
