@@ -28,6 +28,7 @@ internal static class CharacterAppearance
         if (_itemsReady && First(_global.Obf_LuA<Obf_R.Obf_Ef>("rawget")?.Obf_HuA(rows, (long)CharacterAppearanceRules.HairItemBase)) != null) return;
         _itemsReady = false;
         _shopPrice = -1;
+        if (!ApplyMerchant(dbm, texts)) return;
         var template = rows?.Obf_ruA<long, Obf_R.Obf_ff>(CharacterAppearanceRules.ItemTemplate);
         if (template == null) return;
         for (int i = 0; i < CharacterAppearanceRules.PaletteCount * 2; i++)
@@ -42,6 +43,26 @@ internal static class CharacterAppearance
         dbm.Obf_RuA<Obf_R.Obf_ff>("m_kCFG_ItemConfig")?.Obf_luA<string, object>("m_kAllIDList", null);
         _itemsReady = true;
         Debug.Log("[Ro3Emu.Appearance] dye items registered: " + Call(dbm.Obf_RuA<Obf_R.Obf_ff>("m_kCFG_ItemConfig"), "GetName", CharacterAppearanceRules.HairItemBase));
+    }
+
+    private static bool ApplyMerchant(Obf_R.Obf_ff dbm, Obf_R.Obf_ff texts)
+    {
+        foreach (string table in new[] { "NPCConfig", "NPCInteractConfig", "ShopConfig" })
+        {
+            string config = "m_kCFG_" + table;
+            var rows = PassChallenges.Values(dbm, config);
+            var template = rows?.Obf_ruA<long, Obf_R.Obf_ff>(CharacterAppearanceRules.MerchantTemplate(table));
+            if (template == null) return false;
+            var row = PassChallenges.Copy(template);
+            foreach (var field in CharacterAppearanceRules.MerchantFields(table)) Set(row, field.Key, field.Value);
+            PassChallenges.RawSet(rows, (long)CharacterAppearanceRules.MerchantId, row);
+            var wrapper = dbm.Obf_RuA<Obf_R.Obf_ff>(config);
+            wrapper.Obf_luA<string, object>("m_kAllIDList", null);
+            wrapper.Obf_RuA<Obf_R.Obf_Ef>("OnInitDatas")?.Obf_HuA(wrapper);
+        }
+        PassChallenges.Text(texts, CharacterAppearanceRules.MerchantNameText, CharacterAppearanceRules.MerchantName);
+        PassChallenges.Text(texts, CharacterAppearanceRules.MerchantButtonText, "Buy dyes");
+        return true;
     }
 
     internal static void Tick()
@@ -113,7 +134,10 @@ internal static class CharacterAppearance
     internal static object Custom(Obf_R.Obf_ff self, long id) => Call(self, "GetCustomDataValue", id);
     internal static void ProbeUseBagItem(long guid)
     {
-        var item = First(_global.Obf_LuA<Obf_R.Obf_Ef>("LC_ItemHelper.GetItemBaseInfo")?.Obf_HuA(guid));
+        var lookup = _global.Obf_LuA<Obf_R.Obf_Ef>("LC_ItemHelper.GetItemBaseInfo");
+        var item = First(lookup?.Obf_HuA(guid))
+            ?? First(lookup?.Obf_HuA(guid.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+            ?? First(lookup?.Obf_HuA((double)guid));
         if (item == null) throw new ArgumentException("The test item is not in this character's bag.");
         _global.Obf_LuA<Obf_R.Obf_Ef>("LC_ItemHelper.ClickUseItem").Obf_HuA(item);
     }
@@ -122,6 +146,7 @@ internal static class CharacterAppearance
     private static void Set(Obf_R.Obf_ff row, string key, object value)
     {
         if (value is long[] list) value = PassChallenges.List(Array.ConvertAll(list, n => (object)n));
+        else if (value is string[][] actions) value = PassChallenges.List(Array.ConvertAll(actions, row => (object)PassChallenges.List(row)));
         PassChallenges.RawSet(row, key, value);
     }
     internal static void Report(Exception e)

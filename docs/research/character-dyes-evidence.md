@@ -7,13 +7,20 @@ panels, and broader class, sex, LOD and gameplay visual validation remains a rel
 
 ## Purchases and persistence
 
-Eight colours plus Original are offered as bound, single-use hair and class-armour dyes in the existing Kafra NPC
-shop (ShopCommodityConfig template 113, class 301). Its normal level-10 function gate remains in force. The cloned
+Eight colours plus Original are offered as bound, single-use hair and class-armour dyes by the Dye Merchant beside
+Prontera's central fountain (map 10100, x 164 / z 190, grounded on the nav mesh). This is an additional NPC with its
+own catalogue; existing Kafra staff and shop stock are unchanged. Its normal level-10 shop gate remains in force. The cloned
 item shape comes from ItemConfig 1920003; its original actions, rewards, trade/storage and shortcut flags are cleared.
 Its subtype is changed to cosmetic consumable 210, which PublicParamConfig.PCClickUseItemType admits for the PC bag
 Use action; the template subtype 218 would silently refuse that path.
 No publisher rows or textures are distributed. Shared rules inject matching identifiers, prices and descriptions on
 both sides. LC_ItemHelper's generic item-use route sends 31323; `_iNeedConfirm` requests the existing confirmation.
+
+Merchant id 993001 is used in NPCConfig, NPCInteractConfig and ShopConfig, with commodity class 993001. The model is
+cloned from resident NPCConfig 100002 and the shop from ShopConfig 10; commodity shapes come from row 113. The "Buy
+dyes" interaction follows DialogueConfig 40001402's action 25 (OpenFunctionUI) into UI_Sys_ShopNpcPanel with the new
+shop and class ids. This adds no publisher assets. Old clients do not receive the unknown NPC template: it is published
+after the appearance capability handshake, and subsequent map loads and reconnects keep that visibility boundary.
 
 Client capability 77018/version 1 is sent only after the item rows exist. The hook rechecks the current config table because the client replaces it during login. Before that handshake, the server refuses
 dye purchases and omits saved dye items from 5009. After it, a full inventory sync reveals them. The self-only price
@@ -94,7 +101,8 @@ verified through the normal protocol, with the resulting hair and default cloth 
 client. Equipping cosmetic clothing preserved its original colours; removing it restored the saved cloth dye. The
 server-authorized blue flame aura was visible after reconnect. One rendering client plus a protocol observer is
 available; this does not establish compatibility with an unmodified publisher build or two independent rendering
-clients. The final PC bag confirmation path still needs a rendering-client check. Broader QA must cover hairstyle and class changes,
+clients. The PC bag Use helper displayed "Use Violet Hair Dye?"; confirming consumed the bottle once, saved palette 4
+and recoloured the character's hair. Broader QA must cover hairstyle and class changes,
 mounts, death/revival, stealth/masking, graphics-quality/LOD changes and multiple visible GMs before release.
 
 Additional default class armour requires individually verified masks for each body/LOD. Do not expand the allowlist

@@ -266,7 +266,7 @@ public sealed partial class SceneService(IOptions<ServerOptions> options, World 
                 if (worldData.Map(s.SceneEntry) is { Npcs.Count: > 0 } map)
                 {
                     var view = new AoIViewChangeData();
-                    foreach (var npc in map.Npcs) view.Bases.Add(NpcEntity(npc));
+                    foreach (var npc in map.Npcs.Where(n => CharacterAppearanceService.NpcVisible(s, n))) view.Bases.Add(NpcEntity(npc));
                     await s.SendGameAsync(GameAoiSink.SyncAoiView, view);
                     if (!CurrentScene() || s.SceneLoading) return;
                 }
@@ -322,7 +322,7 @@ public sealed partial class SceneService(IOptions<ServerOptions> options, World 
         if (!current()) return;
         var view = new AoIViewChangeData();
         if (worldData.Map(s.SceneEntry) is { Npcs.Count: > 0 } map)
-            foreach (var npc in map.Npcs) view.Bases.Add(NpcEntity(npc));
+            foreach (var npc in map.Npcs.Where(n => CharacterAppearanceService.NpcVisible(s, n))) view.Bases.Add(NpcEntity(npc));
         await s.SendGameAsync(GameAoiSink.SyncAoiView, view);
         if (!current()) return;
         await world.ReplayViewAsync(s, current);

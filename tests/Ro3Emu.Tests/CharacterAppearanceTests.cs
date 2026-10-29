@@ -8,6 +8,7 @@ using Ro3Emu.Bot;
 using Ro3Emu.Server;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Game;
+using Ro3Emu.Server.Maps;
 using Ro3Emu.Shared;
 
 namespace Ro3Emu.Tests;
@@ -34,11 +35,26 @@ public sealed class CharacterAppearanceTests : IDisposable
             """);
         File.WriteAllText(path, items.ToJsonString());
         File.WriteAllText(Path.Combine(_data, "config", "ShopConfig.json"), """
-            {"1":{"_iID":1,"_iClassID":301,"_iShopType":3,"_iFunctionId":0}}
+            {"10":{"_iID":10,"_iClassID":301,"_iShopType":3,"_iFunctionId":0}}
             """);
         File.WriteAllText(Path.Combine(_data, "config", "ShopCommodityConfig.json"), """
             {"113":{"_iID":113,"_iClassID":301,"_iItemId":1000000,"_iItemPerMount":1,"_kItemPerPrice":[1,13]}}
             """);
+        WriteMerchantFixture();
+    }
+
+    private void WriteMerchantFixture()
+    {
+        File.WriteAllText(Path.Combine(_data, "config", "NPCConfig.json"), """
+            {"100002":{"_iID":100002,"_iUnitID":1,"_iCamp":0,"_iInteractID":[2900002]}}
+            """);
+        File.WriteAllText(Path.Combine(_data, "config", "NPCInteractConfig.json"), """
+            {"2900002":{"_iInterID":2900002,"_iEXECAction":[["53","1"]]}}
+            """);
+        var mapsPath = Path.Combine(_data, "config", "MapConfig.json");
+        var maps = JsonNode.Parse(File.ReadAllText(mapsPath))!.AsObject();
+        maps["10100"] = JsonNode.Parse("""{"_iID":10100,"_kResSceneEditorName":"synthetic_town"}""");
+        File.WriteAllText(mapsPath, maps.ToJsonString());
     }
 
     public void Dispose() => Directory.Delete(_data, true);
@@ -48,6 +64,41 @@ public sealed class CharacterAppearanceTests : IDisposable
         o.GameDataDir = _data; o.CharacterAppearanceEnabled = enabled; o.CharacterDyePrice = 7;
         o.GmAccounts = ["alice"]; o.GmToolAccounts = ["bob"];
     });
+
+    [Fact]
+    public async Task PronteraMerchantIsPublishedOnlyAfterTheClientRegistersItsCatalogue()
+    {
+        await using var host = await Start();
+        var world = host.Service<WorldData>();
+        var merchant = Assert.Single(world.Map(CharacterAppearanceRules.MerchantMap)!.Npcs,
+            n => n.NpcId == CharacterAppearanceRules.MerchantId);
+        Assert.Equal(CharacterAppearanceRules.MerchantName, merchant.Name);
+        Assert.DoesNotContain(world.Map(SyntheticData.Town)!.Npcs, n => n.NpcId == merchant.NpcId);
+        await using var alice = await host.InWorldAsync("Alice");
+        await Gm(host, "alice", "!warp " + CharacterAppearanceRules.MerchantMap);
+        await Next(alice, MsgId.SwitchSceneLine, SwitchSceneLineResp.Parser);
+        await alice.SendGameAsync(MsgId.SceneLoaded, new SceneLoadedReq { SceneId = CharacterAppearanceRules.MerchantMap });
+        var legacy = await Next(alice, GameAoiSink.SyncAoiView, AoIViewChangeData.Parser);
+        Assert.DoesNotContain(legacy.Bases, n => n.EntityTemplateID == (ulong)merchant.NpcId);
+        await Enable(alice);
+        var ready = await Next(alice, GameAoiSink.SyncAoiView, AoIViewChangeData.Parser,
+            p => p.Bases.Any(n => n.EntityTemplateID == (ulong)merchant.NpcId));
+        Assert.Equal((ulong)merchant.Uid, Assert.Single(ready.Bases).Uuid);
+        var data = host.Service<Ro3Emu.Server.Data.GameData>();
+        Assert.Equal(CharacterAppearanceRules.MerchantId,
+            Ro3Emu.Server.Data.GameData.Int(data.Row("ShopConfig", CharacterAppearanceRules.MerchantId)!.Value, "_iNpcId"));
+        Assert.Equal(301, Ro3Emu.Server.Data.GameData.Int(data.Row("ShopCommodityConfig", 113)!.Value, "_iClassID"));
+        Assert.Equal(CharacterAppearanceRules.MerchantId,
+            Ro3Emu.Server.Data.GameData.Int(data.Row("ShopCommodityConfig", CharacterAppearanceRules.CommodityBase)!.Value, "_iClassID"));
+    }
+
+    [Fact]
+    public async Task DisabledRealmDoesNotPlaceTheDyeMerchant()
+    {
+        await using var host = await Start(enabled: false);
+        Assert.DoesNotContain(host.Service<WorldData>().Map(CharacterAppearanceRules.MerchantMap)!.Npcs,
+            n => n.NpcId == CharacterAppearanceRules.MerchantId);
+    }
 
     [Fact]
     public async Task PurchaseUseAndRelogKeepSelectionAndNotifyAnotherPlayer()

@@ -15,12 +15,13 @@ public sealed class CharacterAppearanceService
     private readonly RoleStore _roles;
     private readonly CharacterService _character;
     private readonly World _world;
+    private readonly WorldData _worldData;
     private readonly ServerOptions _options;
 
-    public CharacterAppearanceService(RoleStore roles, CharacterService character, World world,
+    public CharacterAppearanceService(RoleStore roles, CharacterService character, World world, WorldData worldData,
         IOptions<ServerOptions> options, GmCommands gm)
     {
-        _roles = roles; _character = character; _world = world; _options = options.Value;
+        _roles = roles; _character = character; _world = world; _worldData = worldData; _options = options.Value;
         if (_options.CharacterDyePrice is <= 0 or > 999_999_999) throw new ArgumentOutOfRangeException(nameof(options), "Dye price must be 1..999999999.");
         character.SpecialItemUse.Insert(0, TryUseAsync);
         gm.Register("aura", "on|off (explicit GM cosmetic aura)", AuraAsync);
@@ -50,7 +51,12 @@ public sealed class CharacterAppearanceService
                 s.CharacterAppearanceEnabled ? _options.CharacterDyePrice : 0) }
         });
         await _character.ResendAppearanceItemsAsync(s);
+        if (_worldData.Map(s.SceneEntry)?.Npcs.FirstOrDefault(n => n.NpcId == CharacterAppearanceRules.MerchantId) is { } merchant)
+            await s.SendGameAsync(GameAoiSink.SyncAoiView, new AoIViewChangeData { Bases = { SceneService.NpcEntity(merchant) } });
     }
+
+    internal static bool NpcVisible(GameSession s, WorldNpc npc) =>
+        npc.NpcId != CharacterAppearanceRules.MerchantId || s.CharacterAppearanceClientReady;
 
     internal static CustomData Marker(GameSession s)
     {

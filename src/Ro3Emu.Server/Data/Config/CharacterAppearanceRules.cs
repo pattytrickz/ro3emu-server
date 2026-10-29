@@ -9,6 +9,9 @@ public static class CharacterAppearanceRules
     public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002;
     public const int HairItemBase = 1_999_100, ArmourItemBase = 1_999_200, CommodityBase = 9_930_100;
     public const int PaletteCount = 9, ClothingSlot = 4, ItemTemplate = 1_920_003, ShopTemplate = 113;
+    public const int MerchantId = 993001, MerchantMap = 10100;
+    public const long MerchantNameText = 99_300_003_001, MerchantButtonText = 99_300_003_002;
+    public const string MerchantName = "Dye Merchant";
     public const long NameTextBase = 99_300_001_000, DescriptionTextBase = 99_300_002_000;
 
     public static bool ValidPalette(int palette) => palette >= 0 && palette < PaletteCount;
@@ -58,7 +61,37 @@ public static class CharacterAppearanceRules
     public static string ItemName(int item) => ColourName(Palette(item)) + (IsArmour(item) ? " Class Armour Dye" : " Hair Dye");
     public static string Description(int item) => (Palette(item) == 0 ? "Restores the original colour. " : "Changes this character's colour. ")
         + (IsArmour(item) ? "PTR: female Novice cloth panels only. Cosmetic outfits are never dyed. " : "Keeps your hairstyle. ")
-        + "Consumed on use. Replaces your previous dye. Buy from the Kafra NPC shop.";
+        + "Consumed on use. Replaces your previous dye. Buy from the Dye Merchant at Prontera's central fountain.";
+
+    public static int MerchantTemplate(string table) => table switch
+    {
+        "NPCConfig" => 100002,
+        "NPCInteractConfig" => 2900002,
+        "ShopConfig" => 10,
+        _ => 0
+    };
+
+    // Clone the resident merchant model and shop shape; the placement and dedicated catalogue are house policy.
+    public static Dictionary<string, object> MerchantFields(string table) => table switch
+    {
+        "NPCConfig" => new Dictionary<string, object>
+        {
+            { "_iID", (long)MerchantId }, { "_kName", new[] { MerchantNameText } }, { "_kTitle", new long[] { 0 } },
+            { "_iInteractID", new long[] { MerchantId } }, { "_iInteractDistance", 3L }, { "_kShowIcon", "" }
+        },
+        "NPCInteractConfig" => new Dictionary<string, object>
+        {
+            { "_iInterID", (long)MerchantId }, { "_iButtonName", new[] { MerchantButtonText } },
+            // DialogueConfig 40001402 opens the resident NPC shop panel with action 25, shop id, class id, page 1.
+            { "_iEXECAction", new[] { new[] { "25", "70110", "TOPBAR", "UI_Sys_ShopNpcPanel", "993001", "993001", "1" } } }
+        },
+        "ShopConfig" => new Dictionary<string, object>
+        {
+            { "_iID", (long)MerchantId }, { "_iClassID", (long)MerchantId }, { "_iShopId", (long)MerchantId },
+            { "_iNpcId", (long)MerchantId }, { "_iShopName", new[] { MerchantNameText } }, { "_kCurrencyDisplay", new long[] { 1 } }
+        },
+        _ => new Dictionary<string, object>()
+    };
 
     public static Dictionary<string, object> ItemFields(int item) => new Dictionary<string, object>
     {
@@ -76,7 +109,7 @@ public static class CharacterAppearanceRules
 
     public static Dictionary<string, object> ShopFields(int item, int price) => new Dictionary<string, object>
     {
-        { "_iID", (long)CommodityForItem(item) }, { "_iItemId", (long)item }, { "_iItemPerMount", 1L },
+        { "_iID", (long)CommodityForItem(item) }, { "_iClassID", (long)MerchantId }, { "_iItemId", (long)item }, { "_iItemPerMount", 1L },
         { "_kItemPerPrice", new long[] { 1, price } }, { "_iDiscount", 0L }, { "_iPurchaseTimesLimit", 0L },
         { "_iPurchaseNum", 0L }, { "_iSortId", (long)(990 + item - HairItemBase) }
     };
