@@ -501,6 +501,12 @@ Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<captureId>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<eventKey>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<kind>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<nowUtcMs>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<account>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<deliveryKey>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<nowUtcMs>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<orderId>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<roleId>P
+Ro3Emu.Server.Accounts.Persistence.SupporterTokenMailRecordPlan/<tokens>P
 Ro3Emu.Server.Accounts.Persistence.TerritorySchemaPlan/<kind>P
 Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_fallback
 Ro3Emu.Server.Accounts.Persistence.TerritoryWarsSeasonTransitionPlan/_nextEpoch

@@ -40,6 +40,9 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
     // tell visitors apart (the bridge limits by visitor address). This caps guesses per account instead.
     private readonly ConcurrentDictionary<string, (long Window, int Failures)> _failures = new(StringComparer.Ordinal);
 
+    /// <summary>A capture added Supporter time: Game.SupporterTokenMail mails the order's tokens now.</summary>
+    internal event Action? Paid;
+
     private static object Error(string code, string message) => new { ok = false, code, error = message };
 
     /// <summary>One bridge call: login, status, order, bind, capture, reverse, funding.</summary>
@@ -142,7 +145,10 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
         var result = PaymentResult.Decode((await tx.CommitAsync(accounts, "supporter/capture"))[index]);
         var order = await accounts.ReadAsync<SupporterOrderRow?>(new SupporterOrderReadPlan(orderId));
         if (order != null && result.Outcome is PaymentOutcome.Applied or PaymentOutcome.Replayed)
+        {
             entitlements.Committed(order.Account, result.PaidThroughUtcMs);
+            Paid?.Invoke();
+        }
         log.LogInformation("Supporter capture {Capture} of order {Order}: {Outcome}, paid through {End}", captureId, orderId,
             result.Outcome, SupporterEntitlements.Date(result.PaidThroughUtcMs));
         return result.Outcome switch

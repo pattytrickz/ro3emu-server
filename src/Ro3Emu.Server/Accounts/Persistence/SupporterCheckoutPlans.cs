@@ -237,3 +237,46 @@ internal sealed class SupporterFundingReadPlan(string provider, long fromUtcMs, 
         return new long[] { reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2) };
     }
 }
+
+/// <summary>Paid orders whose Supporter Tokens have not been mailed: captured (or disputed, partly refunded) with no
+/// supporter_token_mail row. A refunded order's tokens are never sent; a needs-refund order never had any.</summary>
+internal sealed class SupporterTokenMailPendingReadPlan : DbReadPlan
+{
+    internal override int Bytes => 256;
+    internal override string Label => "supporter/read-token-mail";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        var rows = new List<SupporterOrderRow>();
+        using var cmd = DbSql.Command(db, tx, $"""
+            SELECT {SupporterOrderRow.Columns} FROM supporter_order
+                WHERE tokens > 0 AND capture_id IS NOT NULL AND state IN ('captured','disputed','partially-refunded')
+                  AND id NOT IN (SELECT order_id FROM supporter_token_mail) ORDER BY id
+            """);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) rows.Add(SupporterOrderRow.Read(reader));
+        return rows;
+    }
+}
+
+/// <summary>Written in the token letter's own transaction: one letter per order, whichever character it went to
+/// (the mail's delivery key alone is per character, and a buyer may change characters between attempts).</summary>
+internal sealed class SupporterTokenMailRecordPlan(long orderId, string account, long roleId, int tokens, string deliveryKey,
+    long nowUtcMs) : DbPlan
+{
+    internal override int Bytes => 256 + (account.Length + deliveryKey.Length) * 2;
+    internal override string Label => "supporter/token-mail";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        using var cmd = DbSql.Command(db, tx, """
+            INSERT INTO supporter_token_mail(order_id,account,role_id,tokens,delivery_key,sent_utc_ms)
+                VALUES($order,$account,$role,$tokens,$key,$now)
+            """);
+        cmd.Parameters.AddWithValue("$order", orderId);
+        cmd.Parameters.AddWithValue("$account", account);
+        cmd.Parameters.AddWithValue("$role", roleId);
+        cmd.Parameters.AddWithValue("$tokens", tokens);
+        cmd.Parameters.AddWithValue("$key", deliveryKey);
+        cmd.Parameters.AddWithValue("$now", nowUtcMs);
+        return cmd.ExecuteNonQuery();
+    }
+}

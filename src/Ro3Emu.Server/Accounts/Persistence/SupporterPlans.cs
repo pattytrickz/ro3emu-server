@@ -45,6 +45,9 @@ internal sealed class SupporterSchemaPlan : DbPlan
             CREATE TABLE IF NOT EXISTS supporter_payment_event (
                 event_key TEXT PRIMARY KEY, order_id INTEGER NOT NULL, kind TEXT NOT NULL, amount_cents INTEGER NOT NULL,
                 outcome TEXT NOT NULL, recorded_utc_ms INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS supporter_token_mail (
+                order_id INTEGER PRIMARY KEY, account TEXT NOT NULL, role_id INTEGER NOT NULL, tokens INTEGER NOT NULL,
+                delivery_key TEXT NOT NULL UNIQUE, sent_utc_ms INTEGER NOT NULL);
             """);
         return 1;
     }

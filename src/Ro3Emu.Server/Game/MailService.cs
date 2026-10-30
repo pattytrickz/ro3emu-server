@@ -410,6 +410,22 @@ public sealed partial class MailService(AccountStore accounts, RoleStore roles, 
             parentEconomy);
     }
 
+    /// <summary>
+    /// Source-owned once-only raw letter that never expires (paid Supporter Tokens, owner's plan v1.1 §4.4: a 30-day
+    /// expiry must never destroy what someone paid for). The source's own record is saved in the same transaction.
+    /// </summary>
+    internal Task<string> SendRawOnceAsync(long role, string title, string content, IReadOnlyList<Attachment> attachments,
+        string sourceKey, Action<RoleItemPlanBuilder> persist, string sender = "Sol RO3")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceKey);
+        ArgumentNullException.ThrowIfNull(persist);
+        return DeliverAsync(role, new Letter
+        {
+            Title = title, Content = content, Sender = sender, Category = 1, DeliveryKey = sourceKey,
+            Attachments = attachments.ToList()
+        }, DateTimeOffset.MaxValue, 0, persist);
+    }
+
     /// <summary>A template's fixed _iAward grants (as <see cref="SendTemplateAsync(long, int, DateTimeOffset?, int, int)"/>
     /// resolves them), for a source that delivers the letter once with <see cref="SendTemplateOnceAsync"/>.</summary>
     internal IReadOnlyList<Attachment> TemplateAward(int templateId) => ResolveTemplateAward(templateId);
