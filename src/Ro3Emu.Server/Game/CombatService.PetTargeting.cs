@@ -26,6 +26,11 @@ public sealed partial class CombatService
         var (forward, side) = FacingOffset(point.X - center.X, point.Z - center.Z, face);
         if (row.TryGetProperty("_ro3GuardianForwardRectangle", out _))
             return Math.Abs(side) <= radius / 2 && forward >= 0 && forward <= range.ElementAtOrDefault(1) / 100;
+        // Rect360 is _kRange [length, width] ahead of the caster, as BossSkillSets reads it: Myriad Stars Chase the Moon
+        // (1332001, [1800, 600]) "across a ${1}-meter by ${2}-meter area" and its show's arrow indicator [4, 18] (inferred
+        // for the other jobs' Rect360 rows, whose indicators match their _kRange the same way).
+        if (release == SkillRelease.Rect360 && range.Length > 1 && range[1] >= 100)
+            return Math.Abs(side) <= range[1] / 200 + .1 && forward >= 0 && forward <= radius + .1;
         if (release is SkillRelease.FixRect or SkillRelease.Arrow or SkillRelease.Rect360 or SkillRelease.DragRect)
             return Math.Abs(side) <= radius / 2 && Math.Abs(forward) <= (range.Length > 1 ? range[1] / 200 : radius);
         return Distance(center, point) <= radius + .1 && (release != SkillRelease.Fan
