@@ -356,6 +356,19 @@ public static partial class EconomySnapshotReader
                             // Starshatter ritual (FlyingDragonService): progress and helpers; the ritual's mail carries the goods.
                             ValidateProto(Convert.FromBase64String(value), DBFlyingDragonProduceInfo.Descriptor);
                             break;
+                        case "event_rates":
+                        case "login_gifts":
+                            // EventService: GM-set rate windows and login gifts (!rates, !gift): settings, no balance.
+                            using (Json(value)) { }
+                            break;
+                        case var claim when claim.StartsWith("login_gift/", StringComparison.Ordinal):
+                            // EventService.ClaimKey: login_gift/<gift id>/<role id>, the time the gift was mailed. The gift's item
+                            // is in the role's mail (a ledger entry of its own), so this is a marker, no balance.
+                            string[] parts = claim.Split('/');
+                            if (parts.Length != 3 || parts[1].Length == 0 || !long.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out long role) || role <= 0
+                                || !DateTimeOffset.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _))
+                                throw new FormatException("Invalid login gift claim.");
+                            break;
                         default:
                             Issue(EconomyIssueKind.UnknownSchema, key, "Unclassified server_state key.");
                             break;
