@@ -5,6 +5,8 @@ public sealed class ServerOptions
     /// <summary>PTR rollout gate for character dyes and the GM aura. Requires matching client hooks.</summary>
     public bool CharacterAppearanceEnabled { get; set; }
     public int CharacterDyePrice { get; set; } = 1000;
+    /// <summary>Existing inventory voucher used for Violet, Gold and Silver. Zero hides these offers until configured.</summary>
+    public int CharacterDyeVoucherItem { get; set; }
 
     /// <summary>Address the client is told to connect to (server list gate addresses). Must be an IP literal.</summary>
     public string PublicHost { get; set; } = "127.0.0.1";

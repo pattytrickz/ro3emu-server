@@ -2,12 +2,18 @@
 
 This opt-in Sol feature is inferred house policy, not a recreation of a publisher dye system. Enable it with
 `Ro3Emu:CharacterAppearanceEnabled=true`; the default is false. `Ro3Emu:CharacterDyePrice` defaults to 1,000 Zeny.
+Violet, Gold and Silver require one Colour Voucher per bottle (hair or supported class armour). Set
+`Ro3Emu:CharacterDyeVoucherItem` to the existing voucher's inventory item ID once that item has been created.
+That item must also exist in the matching client configuration; this feature adds no voucher rows.
+The default is zero: these six offers are absent and server purchases are refused until a voucher is configured.
+This feature does not create or distribute a voucher. Zeny cannot substitute for it; the normal shop transaction
+atomically consumes the configured item and grants the dye. Other colours and Original keep the Zeny price.
 It requires matching client hooks. This is a PTR implementation: armour coverage is limited to female Novice cloth
 panels, and broader class, sex, LOD and gameplay visual validation remains a release gate.
 
 ## Purchases and persistence
 
-Eight colours plus Original are offered as bound, single-use hair and class-armour dyes by the Dye Merchant beside
+Eight colours plus Original are offered as nontradeable, single-use hair and class-armour dyes by the Dye Merchant beside
 Prontera's central fountain (map 10100, x 164 / z 190, grounded on the nav mesh). This is an additional NPC with its
 own catalogue; existing Kafra staff and shop stock are unchanged. Its normal level-10 shop gate remains in force. The cloned
 item shape comes from ItemConfig 1920003; its original actions, rewards, trade/storage and shortcut flags are cleared.
@@ -22,15 +28,20 @@ dyes" interaction follows DialogueConfig 40001402's action 25 (OpenFunctionUI) i
 shop and class ids. This adds no publisher assets. Old clients do not receive the unknown NPC template: it is published
 after the appearance capability handshake, and subsequent map loads and reconnects keep that visibility boundary.
 
-Client capability 77018/version 1 is sent only after the item rows exist. The hook rechecks the current config table because the client replaces it during login. Before that handshake, the server refuses
+Client capability 77018/version 2 is sent only after the item rows exist. Version 1 clients are not admitted to the new catalogue.
+The hook rechecks the current config table because the client replaces it during login. Before that handshake, the server refuses
 dye purchases and omits saved dye items from 5009. After it, a full inventory sync reveals them. The self-only price
-marker 9930002 advertises the server's enabled price or zero; it controls client shop injection.
+marker 9930002 advertises the server's enabled Zeny price or zero; marker 9930003 carries the voucher item ID or zero.
+Together they control client shop injection and payment icons. Both are server-owned and cannot be forged with generic custom data.
+`PassChallenges.Reload` invalidates the appearance catalogue immediately after `Lua_DBManager.ReLoadAllCfg`, so the
+merchant's NPC, interaction and shop rows are restored before scene creation resumes. The periodic check also verifies
+all three merchant rows, since an item row alone does not prove that the lazy NPC table is still current.
 
 `role.character_appearance` holds Hair, Armour and Aura. Item consumption and selection commit atomically using the
 wardrobe economy family before any selection is published. Failed persistence, invalid parameters, unsupported bodies,
 replayed spent GUIDs and selecting the same colour cannot consume another bottle. Reset dyes restore original colours.
 Selections travel in custom marker 9930001 on entity creation and nearby-player updates. Generic custom-data requests
-cannot write either reserved marker. The economy reader classifies this JSON as cosmetic selections, not a balance;
+cannot write these reserved markers. The economy reader classifies this JSON as cosmetic selections, not a balance;
 the dye receipt records the consumed item.
 
 ## Client lifecycle and outfit boundary
@@ -83,6 +94,8 @@ writes `probe.log`. Commands use literal TAB separators:
 | `capture<TAB>basename` | Capture the actual game framebuffer |
 | `find<TAB>name` | Find active hierarchy paths for UI inspection |
 | `use-bag-item<TAB>ownedGuid` | Exercise the existing bag Use action, including its confirmation |
+| `appearance-config` | Check merchant row lookup after client config reloads |
+| `select-dye-merchant` | Select the loaded merchant through LC_Unit_NPC.OnSelected and the normal interaction manager |
 | `ui` | List active input fields, buttons and labels; input-field text is excluded |
 | `fill<TAB>exactHierarchyPath<TAB>value` | Fill a test UI field; the value is not logged |
 | `click<TAB>exactHierarchyPath` | Dispatch a click to a uniquely matching active UI element |
@@ -102,7 +115,16 @@ client. Equipping cosmetic clothing preserved its original colours; removing it 
 server-authorized blue flame aura was visible after reconnect. One rendering client plus a protocol observer is
 available; this does not establish compatibility with an unmodified publisher build or two independent rendering
 clients. The PC bag Use helper displayed "Use Violet Hair Dye?"; confirming consumed the bottle once, saved palette 4
-and recoloured the character's hair. Broader QA must cover hairstyle and class changes,
+and recoloured the character's hair. The fountain merchant was then selected through the client's normal
+`LC_Unit_NPC.OnSelected` interaction route; the real shop showed the regular dyes at 1,000 Zeny and omitted the
+voucher-only offers while the voucher ID was zero. Buying a Crimson Hair Dye reduced the displayed balance by
+1,000 and increased its owned count to one. Confirming the PC bag Use dialog consumed that purchased bottle and
+persisted hair palette 1. The merchant remains present after login configuration reloads and same-map travel;
+its cloned client rows preserve their inherited default fields. Restarting the final packaged PTR server retained
+Crimson hair on one character and Azure hair/default cloth on the other. The capability handshake reported the
+configured Zeny price and disabled voucher ID, and the merchant remained at 164 / 190. Removing the temporary
+test-account GM grants cleared the published aura after restart despite the saved aura preference remaining on.
+Broader QA must cover hairstyle and class changes,
 mounts, death/revival, stealth/masking, graphics-quality/LOD changes and multiple visible GMs before release.
 
 Additional default class armour requires individually verified masks for each body/LOD. Do not expand the allowlist

@@ -56,6 +56,8 @@ internal static class ClientProbe
             case "click": Click(args[1], args.Length > 2 ? int.Parse(args[2], CultureInfo.InvariantCulture) : -1); break;
             case "tap": Tap(Number(args[1]), Number(args[2])); break;
             case "use-bag-item": CharacterAppearance.ProbeUseBagItem(long.Parse(args[1], CultureInfo.InvariantCulture)); Log("Bag Use action invoked"); break;
+            case "appearance-config": CharacterAppearance.ProbeMerchant(); break;
+            case "select-dye-merchant": CharacterAppearance.ProbeSelectMerchant(); break;
             case "textures": DumpTextures(Renderer(args[1])); break;
             case "dye":
                 DyePreview.Apply(Renderer(args[1]), new Color(Number(args[2]), Number(args[3]), Number(args[4]), 1));

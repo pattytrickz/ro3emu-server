@@ -17,7 +17,7 @@ public sealed class CharacterAppearanceTests : IDisposable
 {
     private readonly string _data = Path.Combine(Path.GetTempPath(), "appearance-fixture-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(12);
-    private const int Hair = CharacterAppearanceRules.HairItemBase + 4;
+    private const int Hair = CharacterAppearanceRules.HairItemBase + 2;
 
     public CharacterAppearanceTests()
     {
@@ -59,9 +59,10 @@ public sealed class CharacterAppearanceTests : IDisposable
 
     public void Dispose() => Directory.Delete(_data, true);
 
-    private Task<SyntheticHost> Start(bool enabled = true) => SyntheticHost.StartAsync(o =>
+    private Task<SyntheticHost> Start(bool enabled = true, int voucher = 0) => SyntheticHost.StartAsync(o =>
     {
         o.GameDataDir = _data; o.CharacterAppearanceEnabled = enabled; o.CharacterDyePrice = 7;
+        o.CharacterDyeVoucherItem = voucher;
         o.GmAccounts = ["alice"]; o.GmToolAccounts = ["bob"];
     });
 
@@ -108,6 +109,8 @@ public sealed class CharacterAppearanceTests : IDisposable
         await using (var alice = await host.InWorldAsync("Alice"))
         {
             Assert.NotEqual(0, await Buy(alice, Hair)); // cannot sell unknown item ids to an old client
+            await alice.SendGameBytesAsync(CharacterAppearanceRules.ClientReadyMessage, [1]);
+            Assert.NotEqual(0, await Buy(alice, Hair)); // the old Zeny-only catalogue capability is insufficient
             await Enable(alice);
             await Gm(host, "alice", "!item 1 100");
             long before = Session(host, "alice").Progress!.Currency[1];
@@ -117,14 +120,14 @@ public sealed class CharacterAppearanceTests : IDisposable
             long guid = session.Items.Single(i => i.Entry == Hair).Guid;
             Assert.Equal(0, await Use(alice, guid));
             Assert.DoesNotContain(session.Items, i => i.Guid == guid);
-            Assert.Equal(4, session.CharacterAppearance!.Hair);
+            Assert.Equal(2, session.CharacterAppearance!.Hair);
             await Next(bob, WorldCoreService.CustomChange, CustomDataChange.Parser,
-                p => p.EntityId == session.Role!.Id && Selection(p.CustomDatas) == CharacterAppearanceRules.Pack(4, 0, false));
+                p => p.EntityId == session.Role!.Id && Selection(p.CustomDatas) == CharacterAppearanceRules.Pack(2, 0, false));
             Assert.NotEqual(0, await Use(alice, guid)); // replay of spent item cannot change anything
         }
         await host.RestartAsync();
         await using var again = await host.InWorldAsync("Alice", create: false);
-        Assert.Equal(CharacterAppearanceRules.Pack(4, 0, false), Selection(again.Self!.CustomDatas));
+        Assert.Equal(CharacterAppearanceRules.Pack(2, 0, false), Selection(again.Self!.CustomDatas));
     }
 
     [Fact]
@@ -224,24 +227,75 @@ public sealed class CharacterAppearanceTests : IDisposable
         await Gm(host, "alice", "!aura on");
         Assert.False(Session(host, "alice").CharacterAppearance!.Aura);
         Assert.NotEqual(0, await Buy(alice, Hair));
-        await Assert.ThrowsAsync<ArgumentException>(() => host.Service<GameLoop>().InvokeAsync(() =>
-            host.Service<WorldCoreService>().SetCustomAsync(Session(host, "alice"), new CustomData
+        foreach (long marker in new[] { CharacterAppearanceRules.SelectionCustomData, CharacterAppearanceRules.PriceCustomData,
+                     CharacterAppearanceRules.VoucherCustomData })
+            await Assert.ThrowsAsync<ArgumentException>(() => host.Service<GameLoop>().InvokeAsync(() =>
+                host.Service<WorldCoreService>().SetCustomAsync(Session(host, "alice"), new CustomData
+                {
+                    Id = marker,
+                    CustomParam = new CustomParam { Tp = CustomParam.Types.ParamType.Long, LongParam = 256 }
+                })));
+    }
+
+    [Fact]
+    public async Task RareColoursCannotBePurchasedUntilTheExistingVoucherIsConfigured()
+    {
+        await using var host = await Start();
+        await using var alice = await host.InWorldAsync("Alice");
+        await Enable(alice);
+        await Gm(host, "alice", "!item 1 1000");
+        long before = Session(host, "alice").Progress!.Currency[1];
+        foreach (int palette in new[] { 4, 5, 6 })
+            foreach (int item in new[] { CharacterAppearanceRules.HairItemBase + palette, CharacterAppearanceRules.ArmourItemBase + palette })
             {
-                Id = CharacterAppearanceRules.SelectionCustomData,
-                CustomParam = new CustomParam { Tp = CustomParam.Types.ParamType.Long, LongParam = 256 }
-            })));
+                Assert.True(CharacterAppearanceRules.RequiresVoucher(item));
+                Assert.Null(host.Service<Ro3Emu.Server.Data.GameData>().Row("ShopCommodityConfig", CharacterAppearanceRules.CommodityForItem(item)));
+                Assert.NotEqual(0, await Buy(alice, item, quote: 0));
+            }
+        Assert.Equal(before, Session(host, "alice").Progress!.Currency[1]);
+    }
+
+    [Fact]
+    public async Task RarePurchaseUsesOnlyTheConfiguredVoucherAndRollsBackPaymentWithARejectedGrant()
+    {
+        const int voucher = 1009001, rare = CharacterAppearanceRules.HairItemBase + 5;
+        await using var host = await Start(voucher: voucher);
+        await using var alice = await host.InWorldAsync("Alice");
+        await Enable(alice);
+        await Gm(host, "alice", "!item 1 1000");
+        long before = Session(host, "alice").Progress!.Currency[1];
+        Assert.NotEqual(0, await Buy(alice, rare)); // Zeny cannot substitute for the voucher.
+        await Gm(host, "alice", "!item " + voucher + " 2");
+        var session = Session(host, "alice");
+        var accounts = host.Service<AccountStore>();
+        FixtureSql.Execute(accounts, $"CREATE TRIGGER reject_rare_dye BEFORE INSERT ON item WHEN NEW.entry={rare} BEGIN SELECT RAISE(ABORT,'rare dye'); END");
+        try
+        {
+            await Assert.ThrowsAsync<SqliteException>(() => host.Service<GameLoop>().InvokeAsync(() =>
+                host.Service<ShopService>().BuyAsync(session, new BuyCommodityReq
+                { CommodityId = CharacterAppearanceRules.CommodityForItem(rare), Count = 1, Price = 0 })));
+            Assert.Equal(2, session.Items.Single(i => i.Entry == voucher).Stack);
+            Assert.DoesNotContain(session.Items, i => i.Entry == rare);
+            Assert.Equal(2, host.Service<ItemStore>().Load(session.Role!.Id).Single(i => i.Entry == voucher).Stack);
+        }
+        finally { FixtureSql.Execute(accounts, "DROP TRIGGER reject_rare_dye"); }
+        Assert.Equal(0, await Buy(alice, rare, quote: 0)); // An untrusted quote cannot lower the server-owned cost.
+        Assert.Equal(1, session.Items.Single(i => i.Entry == voucher).Stack);
+        Assert.Equal(1, host.Service<ItemStore>().Load(session.Role!.Id).Single(i => i.Entry == voucher).Stack);
+        Assert.Single(session.Items, i => i.Entry == rare);
+        Assert.Equal(before, session.Progress!.Currency[1]);
     }
 
     private static GameSession Session(SyntheticHost host, string account) => host.Service<SessionRegistry>().All().Single(s => s.Account == account);
     private static long Selection(IEnumerable<CustomData> values) => values.FirstOrDefault(d => d.Id == CharacterAppearanceRules.SelectionCustomData)?.CustomParam.LongParam ?? 0;
     private static async Task Enable(BotClient bot)
     {
-        await bot.SendGameBytesAsync(CharacterAppearanceRules.ClientReadyMessage, [1]);
+        await bot.SendGameBytesAsync(CharacterAppearanceRules.ClientReadyMessage, [CharacterAppearanceRules.ClientVersion]);
         await Next(bot, WorldCoreService.CustomChange, CustomDataChange.Parser, p => p.CustomDatas.Any(c => c.Id == CharacterAppearanceRules.PriceCustomData));
     }
-    private static async Task<int> Buy(BotClient bot, int item)
+    private static async Task<int> Buy(BotClient bot, int item, int quote = 7)
     {
-        await bot.SendGameAsync(ShopService.BuyCommodity, new BuyCommodityReq { CommodityId = CharacterAppearanceRules.CommodityForItem(item), Count = 1, Price = 7 });
+        await bot.SendGameAsync(ShopService.BuyCommodity, new BuyCommodityReq { CommodityId = CharacterAppearanceRules.CommodityForItem(item), Count = 1, Price = quote });
         return (await Next(bot, ShopService.BuyCommodity, BuyCommodityResp.Parser)).Result;
     }
     private static async Task<int> Use(BotClient bot, long guid, int count = 1)

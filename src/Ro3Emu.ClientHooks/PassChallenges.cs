@@ -119,6 +119,8 @@ namespace Ro3Emu.ClientHooks
         private static void Reload(Obf_R.Obf_ff self)
         {
             _originalReload?.Obf_HuA(self);
+            // Item and NPC proxies can reload independently. Rebuild the appearance catalogue before scene AOI resumes.
+            CharacterAppearance.ConfigsReloaded();
             try { Debug.Log("[Ro3Emu.Pass] configs reloaded; challenge rows " + (Inject() ? "added again" : "NOT added")); }
             catch (Exception e) { Debug.LogWarning("[Ro3Emu.Pass] rows after reload failed: " + e.Message); }
         }

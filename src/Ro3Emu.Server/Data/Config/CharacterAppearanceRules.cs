@@ -6,7 +6,8 @@ namespace Ro3Emu.Shared;
 public static class CharacterAppearanceRules
 {
     public const uint ClientReadyMessage = 77018;
-    public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002;
+    public const byte ClientVersion = 2;
+    public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002, VoucherCustomData = 9_930_003;
     public const int HairItemBase = 1_999_100, ArmourItemBase = 1_999_200, CommodityBase = 9_930_100;
     public const int PaletteCount = 9, ClothingSlot = 4, ItemTemplate = 1_920_003, ShopTemplate = 113;
     public const int MerchantId = 993001, MerchantMap = 10100;
@@ -15,8 +16,10 @@ public static class CharacterAppearanceRules
     public const long NameTextBase = 99_300_001_000, DescriptionTextBase = 99_300_002_000;
 
     public static bool ValidPalette(int palette) => palette >= 0 && palette < PaletteCount;
+    public static bool IsServerMarker(long id) => id == SelectionCustomData || id == PriceCustomData || id == VoucherCustomData;
     public static bool IsDye(int item) => ValidPalette(item - HairItemBase) || ValidPalette(item - ArmourItemBase);
     public static bool IsArmour(int item) => ValidPalette(item - ArmourItemBase);
+    public static bool RequiresVoucher(int item) => IsDye(item) && Palette(item) is 4 or 5 or 6;
     public static int Palette(int item) => item - (IsArmour(item) ? ArmourItemBase : HairItemBase);
     public static bool IsCommodity(int id) => id >= CommodityBase && id < CommodityBase + PaletteCount * 2;
     public static int ItemForCommodity(int id) => id - CommodityBase < PaletteCount
@@ -61,7 +64,8 @@ public static class CharacterAppearanceRules
     public static string ItemName(int item) => ColourName(Palette(item)) + (IsArmour(item) ? " Class Armour Dye" : " Hair Dye");
     public static string Description(int item) => (Palette(item) == 0 ? "Restores the original colour. " : "Changes this character's colour. ")
         + (IsArmour(item) ? "PTR: female Novice cloth panels only. Cosmetic outfits are never dyed. " : "Keeps your hairstyle. ")
-        + "Consumed on use. Replaces your previous dye. Buy from the Dye Merchant at Prontera's central fountain.";
+        + "Consumed on use. Replaces your previous dye. Buy from the Dye Merchant at Prontera's central fountain."
+        + (RequiresVoucher(item) ? " Purchase requires one Colour Voucher." : "");
 
     public static int MerchantTemplate(string table) => table switch
     {
@@ -72,7 +76,7 @@ public static class CharacterAppearanceRules
     };
 
     // Clone the resident merchant model and shop shape; the placement and dedicated catalogue are house policy.
-    public static Dictionary<string, object> MerchantFields(string table) => table switch
+    public static Dictionary<string, object> MerchantFields(string table, int voucher = 0) => table switch
     {
         "NPCConfig" => new Dictionary<string, object>
         {
@@ -88,7 +92,8 @@ public static class CharacterAppearanceRules
         "ShopConfig" => new Dictionary<string, object>
         {
             { "_iID", (long)MerchantId }, { "_iClassID", (long)MerchantId }, { "_iShopId", (long)MerchantId },
-            { "_iNpcId", (long)MerchantId }, { "_iShopName", new[] { MerchantNameText } }, { "_kCurrencyDisplay", new long[] { 1 } }
+            { "_iNpcId", (long)MerchantId }, { "_iShopName", new[] { MerchantNameText } },
+            { "_kCurrencyDisplay", voucher > 0 ? new long[] { 1, voucher } : new long[] { 1 } }
         },
         _ => new Dictionary<string, object>()
     };
@@ -107,10 +112,15 @@ public static class CharacterAppearanceRules
         { "_kIcon", "item_1001000.png" }, { "_iSort", 990L }, { "_iQuality", 2L }
     };
 
-    public static Dictionary<string, object> ShopFields(int item, int price) => new Dictionary<string, object>
+    public static Dictionary<string, object> ShopFields(int item, int price, int voucher = 0)
     {
-        { "_iID", (long)CommodityForItem(item) }, { "_iClassID", (long)MerchantId }, { "_iItemId", (long)item }, { "_iItemPerMount", 1L },
-        { "_kItemPerPrice", new long[] { 1, price } }, { "_iDiscount", 0L }, { "_iPurchaseTimesLimit", 0L },
-        { "_iPurchaseNum", 0L }, { "_iSortId", (long)(990 + item - HairItemBase) }
-    };
+        if (RequiresVoucher(item) && voucher <= 0) throw new System.ArgumentOutOfRangeException(nameof(voucher));
+        return new Dictionary<string, object>
+        {
+            { "_iID", (long)CommodityForItem(item) }, { "_iClassID", (long)MerchantId }, { "_iItemId", (long)item }, { "_iItemPerMount", 1L },
+            { "_kItemPerPrice", RequiresVoucher(item) ? new long[] { voucher, 1 } : new long[] { 1, price } },
+            { "_iDiscount", 0L }, { "_iMerchantDiscount", 0L }, { "_iPurchaseTimesLimit", 0L },
+            { "_iPurchaseNum", 0L }, { "_iSortId", (long)(990 + item - HairItemBase) }
+        };
+    }
 }

@@ -3,6 +3,8 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Server.Accounts;
+using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 using Ro3Emu.Shared;
 
@@ -19,10 +21,14 @@ public sealed class CharacterAppearanceService
     private readonly ServerOptions _options;
 
     public CharacterAppearanceService(RoleStore roles, CharacterService character, World world, WorldData worldData,
-        IOptions<ServerOptions> options, GmCommands gm)
+        IOptions<ServerOptions> options, GmCommands gm, GameData data)
     {
         _roles = roles; _character = character; _world = world; _worldData = worldData; _options = options.Value;
         if (_options.CharacterDyePrice is <= 0 or > 999_999_999) throw new ArgumentOutOfRangeException(nameof(options), "Dye price must be 1..999999999.");
+        int voucher = _options.CharacterDyeVoucherItem;
+        if (voucher < 0 || voucher > 0 && (ItemConfig.Get(data, voucher) is not { } row
+            || row.Type == 1 || CharacterAppearanceRules.IsDye(voucher)))
+            throw new ArgumentOutOfRangeException(nameof(options), "Dye voucher must be an existing inventory item; zero disables rare offers.");
         character.SpecialItemUse.Insert(0, TryUseAsync);
         gm.Register("aura", "on|off (explicit GM cosmetic aura)", AuraAsync);
     }
@@ -41,14 +47,15 @@ public sealed class CharacterAppearanceService
 
     internal async Task ClientReadyAsync(GameSession s, ReadOnlyMemory<byte> body)
     {
-        if (body.Length != 1 || body.Span[0] != 1 || s.CharacterAppearanceClientReady || s.CharacterAppearance == null) return;
+        if (body.Length != 1 || body.Span[0] != CharacterAppearanceRules.ClientVersion || s.CharacterAppearanceClientReady || s.CharacterAppearance == null) return;
         using var held = await CharacterService.Lock(s);
         s.CharacterAppearanceClientReady = true;
         await s.SendGameAsync(WorldCoreService.CustomChange, new CustomDataChange
         {
             EntityId = s.Role!.Id,
             CustomDatas = { Marker(s), LongMarker(CharacterAppearanceRules.PriceCustomData,
-                s.CharacterAppearanceEnabled ? _options.CharacterDyePrice : 0) }
+                s.CharacterAppearanceEnabled ? _options.CharacterDyePrice : 0), LongMarker(CharacterAppearanceRules.VoucherCustomData,
+                s.CharacterAppearanceEnabled ? _options.CharacterDyeVoucherItem : 0) }
         });
         await _character.ResendAppearanceItemsAsync(s);
         if (_worldData.Map(s.SceneEntry)?.Npcs.FirstOrDefault(n => n.NpcId == CharacterAppearanceRules.MerchantId) is { } merchant)

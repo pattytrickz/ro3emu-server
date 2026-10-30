@@ -7,17 +7,17 @@ namespace Ro3Emu.Server.Data.Config;
 
 internal static class CharacterAppearanceOverlay
 {
-    internal static Dictionary<string, JsonElement> Merchant(IReadOnlyDictionary<string, JsonElement> source, string table)
+    internal static Dictionary<string, JsonElement> Merchant(IReadOnlyDictionary<string, JsonElement> source, string table, int voucher = 0)
     {
         var rows = new Dictionary<string, JsonElement>(source);
         if (!source.TryGetValue(CharacterAppearanceRules.MerchantTemplate(table).ToString(CultureInfo.InvariantCulture), out var shape)) return rows;
         var node = JsonNode.Parse(shape.GetRawText())!.AsObject();
-        foreach (var (key, value) in CharacterAppearanceRules.MerchantFields(table)) node[key] = JsonSerializer.SerializeToNode(value);
+        foreach (var (key, value) in CharacterAppearanceRules.MerchantFields(table, voucher)) node[key] = JsonSerializer.SerializeToNode(value);
         rows[CharacterAppearanceRules.MerchantId.ToString(CultureInfo.InvariantCulture)] = JsonSerializer.SerializeToElement(node);
         return rows;
     }
 
-    internal static Dictionary<string, JsonElement> Apply(IReadOnlyDictionary<string, JsonElement> source, bool shop, int price)
+    internal static Dictionary<string, JsonElement> Apply(IReadOnlyDictionary<string, JsonElement> source, bool shop, int price, int voucher = 0)
     {
         var rows = new Dictionary<string, JsonElement>(source);
         int template = shop ? CharacterAppearanceRules.ShopTemplate : CharacterAppearanceRules.ItemTemplate;
@@ -26,8 +26,9 @@ internal static class CharacterAppearanceOverlay
         {
             int commodity = CharacterAppearanceRules.CommodityBase + i;
             int item = CharacterAppearanceRules.ItemForCommodity(commodity);
+            if (shop && CharacterAppearanceRules.RequiresVoucher(item) && voucher <= 0) continue;
             var node = JsonNode.Parse(shape.GetRawText())!.AsObject();
-            var fields = shop ? CharacterAppearanceRules.ShopFields(item, price) : CharacterAppearanceRules.ItemFields(item);
+            var fields = shop ? CharacterAppearanceRules.ShopFields(item, price, voucher) : CharacterAppearanceRules.ItemFields(item);
             foreach (var (key, value) in fields) node[key] = JsonSerializer.SerializeToNode(value);
             rows[(shop ? commodity : item).ToString(CultureInfo.InvariantCulture)] = JsonSerializer.SerializeToElement(node);
         }
