@@ -566,6 +566,36 @@ public sealed class WildAfkTests : IAsyncLifetime
         Assert.Equal(remaining, await Query(again));
     }
 
+    /// <summary>Supporter perk (plan §2.1): unused time banks up to Supporter:AfkBankDays days for an active supporter;
+    /// everyone else keeps OnHookFightTimeLimit, and time banked as a supporter is not taken away after they lapse.</summary>
+    [ClientDataFact]
+    public async Task SupportersBankSevenDaysOfAutoBattleTimeOthersKeepTheNormalLimit()
+    {
+        Service<Microsoft.Extensions.Options.IOptions<ServerOptions>>().Value.Supporter.AfkBankDays = 7;
+        var access = Service<Ro3Emu.Server.Accounts.AccessList>();
+        access.Run("supporter alice");
+        async Task<long> DaysAway(BotClient bot, int days)
+        {
+            await OnOwnedLoop(bot, "AFK bank fixture", _ =>
+            {
+                var state = Session(bot).WildAfk!;
+                state.DailyEpoch = new DateTimeOffset(DateTimeOffset.FromUnixTimeSeconds(state.DailyEpoch).LocalDateTime.AddDays(-days)).ToUnixTimeSeconds();
+                return Task.CompletedTask;
+            });
+            return await Query(bot);
+        }
+        await using (var alice = await InWorld("Alice"))
+        {
+            await Eligible(alice);
+            Assert.Equal(7 * 3600, await DaysAway(alice, 10));
+            access.Run("unsupporter alice");
+            Assert.Equal(7 * 3600, await DaysAway(alice, 1)); // lapsed: keeps what was banked, banks no more
+        }
+        await using var bob = await InWorld("Bob");
+        await Eligible(bob);
+        Assert.Equal(10800, await DaysAway(bob, 10));
+    }
+
     [ClientDataFact]
     public async Task FinalSecondBeforeDailyBoundarySettlesBeforeQuestReset()
     {

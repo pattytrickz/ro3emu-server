@@ -139,6 +139,37 @@ public sealed class StoryBlockerTests : IAsyncLifetime
         Assert.Equal(1, await Read(s => s.Items.Where(i => i.Entry == 1002000).Sum(i => i.Stack)));
     }
 
+    /// <summary>Supporter perk (plan §2.1, Supporter:FreeWings): an active supporter's wing flies with every check of a
+    /// normal one and is not used up; after they lapse it is spent again.</summary>
+    [ClientDataFact]
+    public async Task ASupportersWingFliesAndStaysInTheBag()
+    {
+        Service<Microsoft.Extensions.Options.IOptions<ServerOptions>>().Value.Supporter.FreeWings = true;
+        await using var bot = await InWorld();
+        Service<Ro3Emu.Server.Accounts.AccessList>().Run("supporter " + bot.Account);
+        await Gm("!item 1002000 1");
+        var point = Service<WorldData>().Map(10220)!.Points.Values.First();
+        await WarpAsync(bot, Gm, 10220, point.X, point.Z);
+        long guid = await Read(s => s.Items.Single(i => i.Entry == 1002000).Guid);
+        Assert.NotEqual(0, (await Request(bot, CharacterService.ItemUse, new ItemUseReq { ItemGuid = guid, ItemCount = 1 }, ItemUseResp.Parser)).Result);
+        async Task Fly(int map)
+        {
+            using var sw = bot.Inbox.Expect(e => e.IsGame(MsgId.SwitchSceneLine) && SwitchSceneLineResp.Parser.ParseFrom(e.Body).SceneEntry == map);
+            var use = new ItemUseReq { ItemGuid = guid, ItemCount = 1 };
+            use.ItemParam.Add(new ItemUseParamInfo { ButterflyWings = new ItemUseParamInfo.Types.ButterflyWings { MapId = map } });
+            Assert.Equal(0, (await Request(bot, CharacterService.ItemUse, use, ItemUseResp.Parser)).Result);
+            await sw.WaitAsync(Wait);
+            await LoadAsync(bot, map); // the client's scene-loaded report, as after a warp
+        }
+        await Fly(10100);
+        Assert.Equal(1, await Read(s => s.Items.Where(i => i.Entry == 1002000).Sum(i => i.Stack)));
+        Service<Ro3Emu.Server.Accounts.AccessList>().Run("unsupporter " + bot.Account);
+        await Read(s => { s.ItemCds.Clear(); s.ItemGroupCds.Clear(); return 0; }); // the wing's cooldown still applies to supporters
+        await WarpAsync(bot, Gm, 10220, point.X, point.Z);
+        await Fly(10100);
+        Assert.Equal(0, await Read(s => s.Items.Where(i => i.Entry == 1002000).Sum(i => i.Stack)));
+    }
+
     [ClientDataFact]
     public async Task TheGrowthManualOffersOneTitleAtATimeAndItsChapterIsClaimedAfterItsChildren()
     {

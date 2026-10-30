@@ -655,6 +655,14 @@ public sealed class SupporterOptions
 
     /// <summary>Staff test accounts that may pay in sandbox mode.</summary>
     public string[] SandboxAccounts { get; set; } = [];
+
+    /// <summary>Supporter perk (plan §2.1): an active supporter's Fly and Butterfly Wings are not used up (the wing's
+    /// map, instance and loading checks still apply; the client only offers a wing that is in the bag).</summary>
+    public bool FreeWings { get; set; }
+
+    /// <summary>Supporter perk (plan §2.1): unused daily auto-battle time banks up to this many days for an active
+    /// supporter (7 in the plan); 0 keeps everyone on PublicParamConfig.OnHookFightTimeLimit.</summary>
+    public int AfkBankDays { get; set; }
 }
 
 /// <summary>

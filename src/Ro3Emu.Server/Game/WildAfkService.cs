@@ -59,8 +59,9 @@ public sealed class WildAfkService : IGameTicker
 
     public WildAfkService(GameData data, RoleStore roles, FunctionService functions, TaskService tasks, DailyActivityService daily,
         SessionRegistry sessions, World world, GameLoop loop, SceneService scene, CombatService combat, RewardService rewards,
-        IOptions<ServerOptions> options)
+        IOptions<ServerOptions> options, Accounts.AccessList access)
     {
+        this._access = access;
         this._data = data;
         this._roles = roles;
         this._functions = functions;
@@ -85,6 +86,12 @@ public sealed class WildAfkService : IGameTicker
     // ServerOptions.BonusTimeMultiplier (house rule) scales both the daily grant and the banked maximum.
     private long DailySeconds => Param("OnHookDailyFightTime", 60) * 60 * Math.Max(1, _options.Value.BonusTimeMultiplier);
     private long CapSeconds => Param("OnHookFightTimeLimit", 180) * 60 * Math.Max(1, _options.Value.BonusTimeMultiplier);
+    private readonly Accounts.AccessList _access;
+
+    /// <summary>The bank's limit for this player: ServerOptions.Supporter.AfkBankDays of daily time for an active
+    /// supporter (never below the normal limit), else OnHookFightTimeLimit. Time already banked is never taken away.</summary>
+    private long CapFor(GameSession s) => _options.Value.Supporter.AfkBankDays is > 0 and var days && _access.IsSupporter(s.Account)
+        ? Math.Max(CapSeconds, days * DailySeconds) : CapSeconds;
     private long MonitorMs => Param("OnHookConditionMonito", 10) * 1000;
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     // A queued operation may acquire the old role's gate after logout or a role switch replaced this state.
@@ -149,7 +156,7 @@ public sealed class WildAfkService : IGameTicker
         var oldRows = oldDaily == null ? null : DBDailyActivityInfo.Parser.ParseFrom(oldDaily.Rows);
         var questBytes = _roles.LoadTasks(s.Role.Id);
         var oldQuests = questBytes == null ? null : DBTaskInfo.Parser.ParseFrom(questBytes);
-        if (!PendingDailyAward(state, oldDaily, oldQuests, oldRows)) Restore(state, now);
+        if (!PendingDailyAward(state, oldDaily, oldQuests, oldRows)) Restore(state, now, CapFor(s));
         state.Info.IsSuspended = state.Info.IsHighMagnification;
         state.AccountedAtMs = now;
         state.LastKillAtMs = 0; // Never charge disconnected time or reuse a previous role's activity.
@@ -181,14 +188,16 @@ public sealed class WildAfkService : IGameTicker
     }
 
     /// <summary>Calendar-day catch-up (not 86400-second division, so local DST cannot skip a reset).</summary>
-    private bool Restore(State state, long now)
+    private bool Restore(State state, long now, long cap)
     {
         long epoch = Epoch(now);
         if (epoch <= state.DailyEpoch) return false;
         var previous = DateTimeOffset.FromUnixTimeSeconds(state.DailyEpoch).LocalDateTime.Date;
         var current = DateTimeOffset.FromUnixTimeSeconds(epoch).LocalDateTime.Date;
         long days = Math.Max(1, (current - previous).Days);
-        state.Info.HighMultiplierTimeSeconds = Math.Min(CapSeconds, state.Info.HighMultiplierTimeSeconds + days * DailySeconds);
+        // Never lowers what is banked (a supporter who lapsed keeps time banked while they were one).
+        state.Info.HighMultiplierTimeSeconds = Math.Max(state.Info.HighMultiplierTimeSeconds,
+            Math.Min(cap, state.Info.HighMultiplierTimeSeconds + days * DailySeconds));
         state.Info.TodayKillCount = 0;
         state.ConsumedTodaySeconds = 0;
         state.Info.IsHighMagnification = true;
@@ -231,7 +240,7 @@ public sealed class WildAfkService : IGameTicker
         }
         if (reset)
         {
-            Restore(state, now);
+            Restore(state, now, CapFor(s));
             state.AccountedAtMs = Math.Max(state.AccountedAtMs, state.DailyEpoch * 1000);
         }
         if (running) ConsumeUntil(state, now);
@@ -287,7 +296,7 @@ public sealed class WildAfkService : IGameTicker
         if (s.WildAfk is not { } state || !Owns(s, state)) return null;
         var before = JsonSerializer.SerializeToUtf8Bytes(state);
         long accountedBefore = state.AccountedAtMs;
-        if (Restore(state, Now)) state.AccountedAtMs = Math.Max(state.AccountedAtMs, state.DailyEpoch * 1000);
+        if (Restore(state, Now, CapFor(s))) state.AccountedAtMs = Math.Max(state.AccountedAtMs, state.DailyEpoch * 1000);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(state);
         if (state.Persisted is { } last && last.AsSpan().SequenceEqual(bytes)) return null;
         return (bytes, () => state.Persisted = bytes, () =>
