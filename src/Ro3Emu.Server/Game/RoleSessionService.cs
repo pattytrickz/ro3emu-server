@@ -439,8 +439,10 @@ public sealed class RoleSessionService(RoleStore roles, Data.GameData data, Buff
         BuffService.PopulateEntity(session, entity);
         EmojiService.PopulateEntity(session, entity);
         CareerSpecialService.PopulateEntity(session, entity);
-        entity.CustomDatas.Add(session.WorldState.CustomData.Values.Where(v => v.Id != Ro3Emu.Shared.SupporterIdentityRules.BadgeCustomData));
+        entity.CustomDatas.Add(session.WorldState.CustomData.Values.Where(v => v.Id != Ro3Emu.Shared.SupporterIdentityRules.BadgeCustomData
+            && !Ro3Emu.Shared.CharacterAppearanceRules.IsServerMarker(v.Id)));
         entity.CustomDatas.Add(PlayerIdentityService.Marker(session));
+        entity.CustomDatas.Add(CharacterAppearanceService.Marker(session));
         return entity;
     }
 

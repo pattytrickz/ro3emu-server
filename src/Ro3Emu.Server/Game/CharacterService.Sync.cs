@@ -111,6 +111,12 @@ public sealed partial class CharacterService
     /// 5009: bag packs and currencies. A pack the client has stays present (empty) when its last item goes: a full
     /// pack without items decodes to nil and the bag code crashes on it.
     /// </summary>
+    internal Task ResendAppearanceItemsAsync(GameSession session)
+    {
+        session.Synced.Remove(ItemsSync);
+        return SyncItemsAsync(session);
+    }
+
     private DBItemsInfo BuildItems(GameSession session)
     {
         var p = session.Progress!;
@@ -123,7 +129,8 @@ public sealed partial class CharacterService
         info.ItemCds = preferences.ItemCds?.Clone();
         info.ShareCds = preferences.ShareCds?.Clone();
         foreach (var (entry, used) in CurrentUseTimes(preferences)) info.UseTimes[entry] = used;
-        var bag = session.Items.Where(i => i.Grid == 0).ToList();
+        var bag = session.Items.Where(i => i.Grid == 0 && (session.CharacterAppearanceClientReady
+            || !Ro3Emu.Shared.CharacterAppearanceRules.IsDye(i.Entry))).ToList();
         var packs = bag.Select(i => i.Pack).ToHashSet();
         if (session.Synced.GetValueOrDefault(ItemsSync) is DBItemsInfo sent) packs.UnionWith(sent.PackInfo.Keys);
         foreach (var pack in packs.Order())

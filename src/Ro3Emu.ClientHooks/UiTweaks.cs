@@ -26,6 +26,7 @@ namespace Ro3Emu.ClientHooks
         public static void Tick()
         {
             Diagnostics.AutoDump();
+            ClientProbe.Tick();
             TextFit.Tick();
             if (++_frame % 10 != 0) return;
             try
@@ -45,6 +46,7 @@ namespace Ro3Emu.ClientHooks
                 LuaPatches.Tick();
                 PassChallenges.Tick();
                 PlayerIdentity.Tick();
+                CharacterAppearance.Tick();
                 PassButton.Tick();
                 QuestAutoBattle.Tick();
                 TitleButton.Tick();

@@ -21,7 +21,7 @@ internal sealed class FamilyEconomyTransactionPlan(RoleItemPlan child, EconomyMu
             // career_special: a Special Class Item lease (cd13b/mount-career) also selects the battle mount slot.
             "mount" => new HashSet<string>(["mounts", "wardrobe", "career_special", "bag_state", "library", "tasks", "task_runtime",
                 "task_followup"], StringComparer.Ordinal),
-            "wardrobe" => new HashSet<string>(["wardrobe", "bag_state", "library", "tasks", "task_runtime",
+            "wardrobe" => new HashSet<string>(["wardrobe", "character_appearance", "bag_state", "library", "tasks", "task_runtime",
                 "task_followup"], StringComparer.Ordinal),
             "totem" => new HashSet<string>(["totems", "totem_refine_epoch", "library", "tasks",
                 "task_runtime", "task_followup"], StringComparer.Ordinal),

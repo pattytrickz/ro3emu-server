@@ -129,7 +129,8 @@ public sealed class ShopService(GameData data, CharacterService character, Funct
     {
         using var guard = await CharacterService.Lock(session);
         var row = _data.Row("ShopCommodityConfig", commodityId);
-        Fail? error = row is not { } c ? new(ErrorCodes.ShopNoConfig, "unknown commodity")
+        Fail? error = !CharacterAppearanceService.CanBuy(session, commodityId) ? new(ErrorCodes.FeatureUnavailable, "appearance capability or body unsupported")
+            : row is not { } c ? new(ErrorCodes.ShopNoConfig, "unknown commodity")
             : count < 1 ? new(ErrorCodes.Parameter, "bad count")
             : Unavailable(session, c);
         int unit = row is { } r ? UnitPrice(session, r) : 0;

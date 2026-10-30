@@ -5,12 +5,14 @@ using Romsg;
 namespace Ro3Emu.Server.Game;
 
 /// <summary>Chat, teams, friends, guilds and their caravan, challenge, campfire and home, emblems.</summary>
-public sealed class SocialMessages(ChatService chat, TeamService teams, EmblemService emblems, GuildService guilds, GuildCaravanService caravan, GuildChallengeService guildChallenge, FriendExtraService friendExtra, GuildCampfireService campfire, GuildHomeService guildHome, GuildHuntingService hunting, PersonalService personal, SocialOutfitService socialOutfit, PlayerIdentityService identity) : Messaging.IMessageModule
+public sealed class SocialMessages(ChatService chat, TeamService teams, EmblemService emblems, GuildService guilds, GuildCaravanService caravan, GuildChallengeService guildChallenge, FriendExtraService friendExtra, GuildCampfireService campfire, GuildHomeService guildHome, GuildHuntingService hunting, PersonalService personal, SocialOutfitService socialOutfit, PlayerIdentityService identity, CharacterAppearanceService appearance) : Messaging.IMessageModule
 {
     private const uint SetFriendSystemMetadata = 82208, GetGuildLeagueMgrData = GuildLeagueService.MgrData;
 
     public void Map(Messaging.MessageRoutes routes)
     {
+        routes.AdmitRole(id => id == Ro3Emu.Shared.CharacterAppearanceRules.ClientReadyMessage);
+        routes.Map(Ro3Emu.Shared.CharacterAppearanceRules.ClientReadyMessage, "appearance", (session, _, body) => appearance.ClientReadyAsync(session, body));
         routes.AdmitRole(id => id == Ro3Emu.Shared.SupporterIdentityRules.ClientReadyMessage);
         routes.Map(Ro3Emu.Shared.SupporterIdentityRules.ClientReadyMessage, "identity", (session, _, body) => identity.ClientReadyAsync(session, body));
         // Guild-social owners admit their own guild and member keys; the route owner picks them.
