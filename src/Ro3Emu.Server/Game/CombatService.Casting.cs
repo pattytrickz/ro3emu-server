@@ -202,7 +202,9 @@ public sealed partial class CombatService
     /// in the Skill Bar that currently meets its activation requirements once" (client text). The client lists, checks and
     /// shows the Lineup; the casting is this script. Each skill is cast on the player in slot order, one after the
     /// previous one's action (a new cast ends the running one, and an ended cast never lands), and one that cannot be cast
-    /// now (cooldown, SP, state) is skipped.
+    /// now (cooldown, SP, state) is skipped. A skill that deals no damage (a buff) lands at once and the next one follows
+    /// without waiting for its action: players expect the buffs of one press together, the attacks one at a time
+    /// (inferred from their reports; the client script is not available here).
     /// </summary>
     private void StartLineup(GameSession s, ActiveSkillCast? bar)
     {
@@ -226,6 +228,13 @@ public sealed partial class CombatService
             if (id <= 0) continue;
             await CastAsync(s, new CastSkillReq { SkillId = id, TargetId = s.Role.Id, TargetPos = s.Position.Clone(), Face = s.Face }, lineup: true);
             if (s.SkillCast is not { Cancelled: false } cast || cast.Request.SkillId != id) continue; // skipped
+            if (!DealsDamage(cast.Row))
+            {
+                cast.Resolved = true;
+                await ResolveCastAsync(s, cast);
+                if (ReferenceEquals(s.SkillCast, cast)) s.SkillCast = null; // its timed impact finds no running cast and does nothing
+                continue;
+            }
             int next = index + 1;
             if (next < members.Count)
                 ScheduleRuntime(worldScene, TimeSpan.FromMilliseconds(cast.ChantMs + cast.ActionMs + 1),
@@ -233,6 +242,8 @@ public sealed partial class CombatService
             return;
         }
     }
+
+    private static bool DealsDamage(JsonElement row) => Numbers(row, "_kDamageParam1").Any(v => v > 0) || Numbers(row, "_kDamageParam2").Any(v => v > 0);
 
     /// <summary>Cast item cost and frozen intent share one owner receipt; HP/SP/buffs remain runtime resources.
     /// The admission uses the same scheduled cast and lethal pipeline as every ordinary skill.</summary>

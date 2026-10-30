@@ -93,4 +93,41 @@ public sealed partial class SkillCombatTests
         var second = await Next(alice, BuffService.BuffUpdate, BuffUpdateNotify.Parser, x => x.Buffs.Any(b => b.ConfigId == BlessingBuff));
         Assert.Contains(second.Buffs, b => b.ConfigId == BlessingBuff);
     }
+
+    /// <summary>
+    /// Gnogger (27 Oct): the Skill Bar cast its buffs one after the other, each after the previous one's action (about
+    /// 500 ms apiece), where another server gave "all buffs instant". Skills that deal no damage are cast together; attack
+    /// skills keep their one-after-the-other order (the players' own wish: "for attack it should be 1 at a time").
+    /// </summary>
+    [ClientDataFact]
+    public async Task TheSkillBarCastsTheBuffsInTheLineupTogether()
+    {
+        const int Blessing = 14001, IncreaseAgi = 14010, SkillBar = 1400001, BlessingBuff = 1400101, IncreaseAgiBuff = 1401001;
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99 40");
+        await Gm("alice", "!job 4300");
+        var learn = new SkillGrowthSkillPlanUpdateReq { Plan = 0 };
+        foreach (var (group, level) in new[] { (14013, 5), (Blessing, 1), (14007, 5), (IncreaseAgi, 1) })
+            learn.LevelUpList[group] = new SkillData { SkillId = group, SkillLevel = level };
+        await alice.SendGameAsync(SkillService.PlanUpdate, learn);
+        Assert.Equal(0, (await Next(alice, SkillService.PlanUpdate, SkillGrowthSkillPlanUpdateResp.Parser)).Result);
+        int slot = 0;
+        foreach (int group in new[] { IncreaseAgi, Blessing })
+        {
+            await alice.SendGameAsync(SkillService.QueueUpdate, new SkillQueueUpdateReq
+            {
+                Plan = 0, OpType = SkillLoadOperation.SkillLoadOpLoad, QueueIndex = slot++,
+                Info = new SkillData { SkillId = group, SkillLevel = 1 }
+            });
+            Assert.Equal(0, (await Next(alice, SkillService.QueueUpdate, SkillQueueUpdateResp.Parser)).Result);
+        }
+
+        await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = SkillBar, TargetId = Session("alice").Role!.Id });
+        Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+        await Next(alice, BuffService.BuffUpdate, BuffUpdateNotify.Parser, x => x.Buffs.Any(b => b.ConfigId == IncreaseAgiBuff));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await Next(alice, BuffService.BuffUpdate, BuffUpdateNotify.Parser, x => x.Buffs.Any(b => b.ConfigId == BlessingBuff));
+        // Each action is 500 ms: one after the other puts the second buff that long after the first.
+        Assert.True(clock.ElapsedMilliseconds < 300, $"the second buff came {clock.ElapsedMilliseconds} ms after the first");
+    }
 }
