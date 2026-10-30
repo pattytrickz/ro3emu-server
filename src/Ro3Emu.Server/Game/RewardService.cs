@@ -38,6 +38,13 @@ public sealed class RewardService
     /// <summary>Actual committed kill drops, after EXP correction; excludes GM, quest and other item grants.</summary>
     public List<Func<GameSession, MonsterUnit, IReadOnlyList<(int Entry, long Count)>, Task>> KillDropsGranted { get; } = new();
     internal Action<GameSession, MonsterUnit, RewardSettlement, IReadOnlyList<(int Entry, int Count)>, long, long>? StageAfkKill { get; set; }
+
+    /// <summary>A recipient's Supporter EXP booster in percent (0 when none or not in active Auto Mode; Game.SupporterShop).</summary>
+    internal Func<GameSession, int>? SupporterExpPercent { get; set; }
+
+    /// <summary>The killer's Supporter drop booster: its extra-roll chance in percent and the allowlisted items it may
+    /// add (null when none or not in active Auto Mode; Game.SupporterShop).</summary>
+    internal Func<GameSession, (int Percent, IReadOnlySet<int> Items)?>? SupporterDropBoost { get; set; }
     /// <summary>Monster Hunt: the area drop rolled with an ordinary field kill (MonsterHuntService).</summary>
     internal List<Func<GameSession, MonsterUnit, IEnumerable<(int Entry, int Count)>>> ExtraKillDrops { get; } = [];
     /// <summary>Monster Hunt: its kill counters join the kill's own transaction, after the AFK child (MonsterHuntService).</summary>
@@ -182,13 +189,18 @@ public sealed class RewardService
                 eventDrops + (handsOn && _random.Next(100) < _handsOnLoot ? 1 : 0), eventCards)) is not { } drops)
             return ([], NoExp);
         foreach (var extra in ExtraKillDrops) drops.AddRange(extra(player, monster));
+        // Supporter drop booster (plan §2.2): at its chance the tables roll once more and only allowlisted common
+        // materials are kept, so those are 1.5 times as likely; everything else (cards, EXP, gear) keeps the data's odds.
+        if (SupporterDropBoost?.Invoke(player) is { } boost && boost.Items.Count > 0 && _random.Next(100) < boost.Percent
+            && RollDrops(player, monster, bonus, 1, 1) is { } again)
+            drops.AddRange(again.Where(d => boost.Items.Contains(d.Entry)));
         long rolled = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
         var items = drops.Where(d => d.Entry is not (BaseExpItem or JobExpItem) && _data.Row("ItemConfig", d.Entry) != null).ToList();
         int partyBonus = _teams.ExpBonus(player);
         int realParty = RealPartyPercent(player), handsOnPercent = handsOn ? 100 + _handsOnExp : 100;
         // Each recipient's own EXP boost (BoostService), never the killer's for the party; the same divisions as before.
         int Percent(GameSession recipient) => _killExpPercent * BoostService.ExpRate(eventExp, _boosts?.ExpPercent(recipient) ?? 0)
-            / 100 * realParty / 100 * handsOnPercent / 100;
+            / 100 * realParty / 100 * handsOnPercent / 100 * (100 + (SupporterExpPercent?.Invoke(recipient) ?? 0)) / 100;
         return (items, (recipient, members) => KillExp(recipient, monster, rolled, partyBonus, Percent(recipient), members));
     }
 

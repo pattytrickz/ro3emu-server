@@ -76,7 +76,7 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
         Items = new(); Pets = null;
         WorldState = new();
         Power = null; PowerPublishedMs = 0;
-        CharacterAppearance = null; CharacterAppearanceClientReady = false; CharacterAppearanceEnabled = false;
+        CharacterAppearance = null; CharacterAppearanceClientReady = false; CharacterAppearanceEnabled = false; ClientHookVersion = 0;
     }
     private CancellationTokenSource _pendingCharacterIntents = new();
     internal CancellationToken PendingCharacterIntent => _pendingCharacterIntents.Token;
@@ -463,6 +463,8 @@ public sealed class GameSession(PhonestChannel channel, TrafficLog traffic)
     public CharacterAppearanceService.State? CharacterAppearance { get; set; }
     public bool CharacterAppearanceEnabled { get; set; }
     public bool CharacterAppearanceClientReady { get; set; }
+    /// <summary>The client hooks' version from their ready message (CharacterAppearanceRules.ClientVersion); 0 before it.</summary>
+    public byte ClientHookVersion { get; set; }
 
     /// <summary>Property ids already sent in 31008; retained across local Refresh until a zero is sent.</summary>
     public HashSet<int> SentPropertyIds { get; } = new();

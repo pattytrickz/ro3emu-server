@@ -6,7 +6,9 @@ namespace Ro3Emu.Shared;
 public static class CharacterAppearanceRules
 {
     public const uint ClientReadyMessage = 77018;
-    public const byte ClientVersion = 2;
+    /// <summary>The hooks' version, sent in the client-ready message: 2 has the dyes, 3 also the Supporter Merchant
+    /// (SupporterShopRules). The server accepts both and shows each client only what its hooks have rows for.</summary>
+    public const byte ClientVersion = 3, FirstClientVersion = 2, SupporterShopClientVersion = 3;
     public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002, RarePriceCustomData = 9_930_003;
     /// <summary>The rare colours' currency: Supporter Tokens, never Zeny.</summary>
     public const int RareCurrency = F2PRules.SupporterToken;

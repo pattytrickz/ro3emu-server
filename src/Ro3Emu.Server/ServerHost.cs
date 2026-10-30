@@ -54,6 +54,7 @@ public static class ServerHost
         builder.Services.AddSingleton<SupporterEntitlements>();
         builder.Services.AddSingleton<SupporterCheckout>();
         builder.Services.AddSingleton<SupporterTokenMail>();
+        builder.Services.AddSingleton<SupporterShop>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<SupporterTokenMail>());
         builder.Services.AddSingleton<AccessList>();
         builder.Services.AddSingleton<CrystalEconomy>();
@@ -441,6 +442,7 @@ public static class ServerHost
         app.Services.GetRequiredService<TeamService>(); // party card ticker
         app.Services.GetRequiredService<MvpService>(); // field MVP spawns and timers
         app.Services.GetRequiredService<BoostService>(); // boost items' use handler (ServerOptions.BoostItems)
+        app.Services.GetRequiredService<SupporterShop>(); // Supporter Merchant boosters: use, timers, kill hooks
         var territory = app.Services.GetRequiredService<TerritoryWarsService>();
         var escort = app.Services.GetRequiredService<TerritoryEscortService>();
         escort.OwnerOf = territory.OwnerOf;

@@ -169,10 +169,12 @@ internal sealed class EconomyTransactionPlan(RoleItemPlan child, EconomyMutation
         if (EconomyMutation.IsOwnedExchangeCommand(mutation.CommandKind)) { ValidateOwnedExchangeShape(); return; }
         if (mutation.RewardEvidence is not null) { ValidateRewardShape(); return; }
         if (mutation.CommandKind != "npc-shop-buy") throw new InvalidOperationException("E01 covers one NPC purchase only.");
-        if (child.Guards.Count != 0 || child.Parts.Count != 3 ||
+        // A Supporter Merchant purchase adds its account-wide weekly counter (SupporterPurchasePlan) and nothing else.
+        if (child.Guards.Count != 0 || child.Parts.Count is not (3 or 4) ||
             child.Parts[0] is not ItemDeltaWritePlan ||
             child.Parts[1] is not RoleProgressWritePlan ||
-            child.Parts[2] is not RoleBlobWritePlan { Column: "shop" })
+            child.Parts[2] is not RoleBlobWritePlan { Column: "shop" } ||
+            child.Parts.Count == 4 && child.Parts[3] is not SupporterPurchasePlan)
             throw new InvalidOperationException("E01 purchase requires the exact item/progress/shop typed child group.");
         if (RolePins.Count != 1 || RolePins[0] != mutation.ActorRoleId ||
             RoleWrites.Any(x => x.RoleId != mutation.ActorRoleId ||
@@ -593,7 +595,9 @@ internal sealed class EconomyTransactionPlan(RoleItemPlan child, EconomyMutation
             throw new InvalidDataException("Economic child item/progress result is invalid.");
         if (commandKind == "npc-shop-buy")
         {
-            if (sourceValues.Length != 3 || sourceValues[2] is not int shopRows || shopRows != 1)
+            // A Supporter Merchant purchase's weekly counter writes one row as a fourth result (SupporterPurchasePlan).
+            if (sourceValues.Length is not (3 or 4) || sourceValues[2] is not int shopRows || shopRows != 1
+                || sourceValues.Length == 4 && sourceValues[3] is not 1)
                 throw new InvalidDataException("Purchase child result shape is invalid.");
             return;
         }

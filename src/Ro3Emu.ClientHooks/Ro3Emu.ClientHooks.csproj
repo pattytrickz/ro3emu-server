@@ -53,6 +53,7 @@
     <Compile Include="..\Ro3Emu.Server\Game\F2PRules.cs" Link="F2PRules.cs" />
     <Compile Include="..\Ro3Emu.Server\Data\Config\SupporterIdentityRules.cs" Link="SupporterIdentityRules.cs" />
     <Compile Include="..\Ro3Emu.Server\Data\Config\CharacterAppearanceRules.cs" Link="CharacterAppearanceRules.cs" />
+    <Compile Include="..\Ro3Emu.Server\Data\Config\SupporterShopRules.cs" Link="SupporterShopRules.cs" />
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(ClientManaged)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ClientManaged)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>

@@ -127,7 +127,7 @@ public sealed partial class NewActivityService
     private long? OpenPass(GameSession session) =>
         PassIds.Where(id => id != 9201).Cast<long?>().LastOrDefault(id => ActivityError(session, id!.Value, 23) == 0);
 
-    private static (long Day, long Week) PassPeriod(DateTimeOffset localNow)
+    internal static (long Day, long Week) PassPeriod(DateTimeOffset localNow)
     {
         // The game day turns at 05:00, like the daily activity rows.
         var day = DateOnly.FromDateTime(localNow.AddHours(-5).Date);

@@ -18,10 +18,15 @@ internal static class CharacterFamilyEconomy
     /// bag_state carries the item's cooldown.</summary>
     internal const string ItemActionKind = "cd13a/character-item-action";
 
+    /// <summary>The Supporter Merchant's Auto-Battle Time Recharge (Game.SupporterShop): the used item and the 60
+    /// minutes it adds to the character's auto-battle bank (wild_afk) commit together.</summary>
+    internal const string SupporterRechargeKind = "cd13a/character-supporter-recharge";
+
     internal static IReadOnlySet<string> AllowedBlobs(string kind)
     {
         string[] parts = kind == ShopAppearanceKind ? ["shop", "wardrobe", "mounts", "equip_plans"]
             : kind == ItemActionKind ? ["bag_state", "emoji_info", "personal", "social_outfit"]
+            : kind == SupporterRechargeKind ? ["bag_state", "wild_afk"]
             : kind[6..].Split('-')[0] switch
             {
                 "character" => ["bag_state", "equip_plans", "stat_plans", "activity_runtime", "title"],
