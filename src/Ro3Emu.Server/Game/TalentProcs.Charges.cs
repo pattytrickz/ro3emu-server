@@ -55,6 +55,14 @@ public sealed partial class TalentProcs
     // enemies within the area."
     private const long EmberZone = 1244301;
 
+    // Gale Beat (SkillConfig 11336201, held through Echo Resonance, EmblemService.ResonanceSkills): "Casting [Focused Arrow
+    // Strike] ${1} times will Enhance the next [Focused Arrow Strike], causing it to deal ${2}% Neutral Physical damage."
+    // The enhanced cast is the season variant 11330201, whose only differences are the ratio ${2} (_kDamageParam1) and its
+    // script; here it is the ratio, set on the next cast's first damage value (inferred, as the other charges).
+    private const int FocusedArrowStrike = 13305;
+    private const long GaleBeat = 11336201;
+    private const int DamageParam1Type = 29, SetOperation = 2; // SkillParameterRules: _kDamageParam1; set the value
+
     private sealed class ChargeState
     {
         public readonly Dictionary<long, int> Casts = [];
@@ -107,6 +115,32 @@ public sealed partial class TalentProcs
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Counts the Focused Arrow Strike casts of a role holding Gale Beat. The cast that uses the charge does not count
+    /// toward the next one. The charge ends with the resonance: the first cast after losing it clears it.
+    /// </summary>
+    private void GaleBeatCast(GameSession s, SkillConfig cast)
+    {
+        if (cast.SkillId != FocusedArrowStrike) return;
+        var state = _charges.GetOrCreateValue(s);
+        bool changed = state.Bonuses.Remove(GaleBeat);
+        if (!changed && SkillConfig.Get(_data, GaleBeat) is { } passive && passive.DescData.Length > 1
+            && EmblemService.ResonanceSkills(s, _data).Contains((int)passive.Id))
+        {
+            int casts = state.Casts.GetValueOrDefault(GaleBeat) + 1;
+            if (casts < Math.Max(1, (int)Value(passive.DescData, 0)))
+            {
+                state.Casts[GaleBeat] = casts;
+                return;
+            }
+            state.Bonuses[GaleBeat] = [new SkillParameterRules.Modifier(FocusedArrowStrike, DamageParam1Type, SetOperation,
+                (long)(Value(passive.DescData, 1) * 100), 0)];
+            changed = true;
+        }
+        state.Casts.Remove(GaleBeat);
+        if (changed) s.TalentChargeModifiers = [.. state.Bonuses.Values.SelectMany(m => m)];
     }
 
     private async Task ChargeAsync(GameSession s, ChargeState state, long buff, Charge charge, string[] description, int group)

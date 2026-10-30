@@ -244,4 +244,59 @@ public sealed partial class SkillCombatTests
         var tick = await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, x => x.SrcID == zone);
         Assert.Contains(tick.Dsts, d => d.DstID == monster.Uid && d.Damage > 0);
     }
+
+    // Gale Beat (SkillConfig 11336201, a SkillInUse row of Echo Resonance stage 2 of mark 1002): "Casting [Focused Arrow
+    // Strike] ${1} (4) times will Enhance the next [Focused Arrow Strike], causing it to deal ${2}% (75) Neutral Physical
+    // damage." The fourth cast arms the next one's percentage damage multiplier (SkillConfig 11330201: 7500); the fifth
+    // uses it up and does not count toward the next.
+    [ClientDataFact]
+    public async Task GaleBeatEnhancesTheFocusedArrowStrikeAfterEveryFourthCast()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99"); await Gm("alice", "!job 3400"); await Teach("alice", 13305);
+        const int echo = 1850101; // four mark slots
+        var data = _app.Services.GetRequiredService<GameData>();
+        await Loop.InvokeAsync(() =>
+        {
+            var s = Session("alice");
+            s.Emblems.Plans[s.Emblems.CurrentPlan].Slots.Clear();
+            for (int slot = 1; slot <= 4; slot++)
+            {
+                var item = new InvItem
+                {
+                    Entry = echo, Stack = 1, Pack = 5, Sort = 100 + slot, Guid = 9_000_000 + slot,
+                    Attrs = new() { [1001] = 0, [10001] = 2, [10002] = slot }
+                };
+                for (int i = 0; i < 4; i++) item.Attrs[1021 + i] = 1002;
+                s.Items.Add(item);
+                s.Emblems.Plans[s.Emblems.CurrentPlan].Slots[slot] = item.Guid;
+            }
+            return Task.CompletedTask;
+        });
+        var monster = await Target("alice", stationary: true);
+        await Loop.InvokeAsync(() => { monster.Hp = 1_000_000; return Task.CompletedTask; });
+
+        async Task<long> CastAsync()
+        {
+            await Loop.InvokeAsync(() =>
+            {
+                var s = Session("alice");
+                s.SkillCds.Clear();
+                s.SkillModeCds.Clear();
+                return Task.CompletedTask;
+            });
+            await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1330501, TargetId = monster.Uid });
+            var accepted = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+            Assert.Equal(0, accepted.Result);
+            await Next(alice, CombatService.SkillHit, SkillHitInfo.Parser, x => x.SessionId == accepted.SessionId);
+            await Task.Delay(1500);
+            // The ratio the next Focused Arrow Strike would be cast with.
+            return await Loop.InvokeAsync(() => Task.FromResult(SkillParameterRules
+                .Effective(Session("alice"), data, SkillConfig.Get(data, 1330501)!.Value.Row).GetProperty("_kDamageParam1")[0].GetInt64()));
+        }
+
+        var ratios = new List<long>();
+        for (int cast = 0; cast < 5; cast++) ratios.Add(await CastAsync());
+        Assert.Equal([5600, 5600, 5600, 7500, 5600], ratios);
+    }
 }
