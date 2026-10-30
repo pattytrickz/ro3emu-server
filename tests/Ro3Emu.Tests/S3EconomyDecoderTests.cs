@@ -20,6 +20,27 @@ public sealed class S3EconomyDecoderTests
             x => x.Kind == EconomyIssueKind.Corruption && x.Key == "role/101/task_followup");
     }
 
+    /// <summary>
+    /// 30 Oct: the first Night of the Pumpkin login gift wrote login_gift/pumpkin-2026/&lt;role&gt; to server_state, which the decoder
+    /// did not know, so every economy write after it failed ("Unclassified server_state key": logins, the guild caravan).
+    /// </summary>
+    [Fact]
+    public void EventGiftAndRateStateIsClassifiedButAMalformedClaimIsNot()
+    {
+        using var f = new Fixture();
+        f.Exec("INSERT INTO server_state VALUES('login_gift/pumpkin-2026/100049','2026-10-30T00:00:34.1234567+00:00')");
+        f.Exec("INSERT INTO server_state VALUES('event_rates','[{\"Name\":\"Bonus Sunday\",\"ExpPercent\":150}]')");
+        f.Exec("INSERT INTO server_state VALUES('login_gifts','[]')");
+        var snapshot = EconomySnapshotReader.Read(f.PathName, Catalog, "realm-fixture");
+        Assert.DoesNotContain(snapshot.Issues, i => i.Key.StartsWith("server_state/", StringComparison.Ordinal));
+
+        f.Exec("INSERT INTO server_state VALUES('login_gift/pumpkin-2026/not-a-role','2026-10-30T00:00:34.1234567+00:00')");
+        f.Exec("INSERT INTO server_state VALUES('login_gift/pumpkin-2026/100050','yesterday')");
+        var broken = EconomySnapshotReader.Read(f.PathName, Catalog, "realm-fixture");
+        Assert.Contains(broken.Issues, i => i.Kind == EconomyIssueKind.Corruption && i.Key == "server_state/login_gift/pumpkin-2026/not-a-role");
+        Assert.Contains(broken.Issues, i => i.Kind == EconomyIssueKind.Corruption && i.Key == "server_state/login_gift/pumpkin-2026/100050");
+    }
+
     private static byte[] B(string value) => System.Text.Encoding.UTF8.GetBytes(value);
     private static readonly EconomyCatalog Catalog = new(new Dictionary<long, EconomyAssetKind>
     {
