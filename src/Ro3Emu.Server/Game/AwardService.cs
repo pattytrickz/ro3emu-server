@@ -23,9 +23,13 @@ public sealed class AwardResolutionException(string message) : InvalidOperationE
 /// Resolves MultiverseGroupConfig type 0 to AwardConfig, including fixed tuples and actual DropPool terminals.
 /// Pool slot chance/roll/pick and candidate weight/count semantics follow the current RewardService (inferred);
 /// unsupported server policy fails the source grant instead of silently omitting an obligation.
+/// Sol RO3 house rule: ServerOptions.BoostItems are left out of every award (the battle pass's level 7 premium reward
+/// gave Armor Plates), so they come only from events and GMs (docs/guide/boosts.md).
 /// </summary>
-public sealed class AwardService(GameData data)
+public sealed class AwardService(GameData data, Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null)
 {
+    private readonly HashSet<int> _boostItems = [.. (options?.Value.BoostItems ?? []).Select(b => b.Item)];
+
     public AwardPlan Resolve(GameSession session, long multiverseGroupId, int? playBookId = null)
         => ResolveGroup(session?.Progress, multiverseGroupId, playBookId);
 
@@ -93,6 +97,7 @@ public sealed class AwardService(GameData data)
         long poolId = GameData.Int(row, "_iDropPool");
         if (poolId < 0) throw Fail($"AwardConfig {awardId} has invalid pool id");
         if (poolId > 0) RollPool(poolId, progress, grants);
+        grants.RemoveAll(g => _boostItems.Contains(g.Entry));
         return new AwardPlan(multiverseGroupId, awardId, grants);
     }
 

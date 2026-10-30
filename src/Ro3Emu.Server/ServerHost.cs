@@ -70,6 +70,7 @@ public static class ServerHost
         builder.Services.AddSingleton<RewardService>();
         builder.Services.AddSingleton<EventService>();
         builder.Services.AddSingleton<AiGmService>();
+        builder.Services.AddSingleton<BoostService>();
         builder.Services.AddSingleton<TaskService>();
         builder.Services.AddSingleton<AwardService>();
         builder.Services.AddSingleton<DailyActivityService>();
@@ -423,6 +424,7 @@ public static class ServerHost
         app.Services.GetRequiredService<WildAfkService>(); // field drop accounting and Bonus Time ticker
         app.Services.GetRequiredService<TeamService>(); // party card ticker
         app.Services.GetRequiredService<MvpService>(); // field MVP spawns and timers
+        app.Services.GetRequiredService<BoostService>(); // boost items' use handler (ServerOptions.BoostItems)
         var territory = app.Services.GetRequiredService<TerritoryWarsService>();
         var escort = app.Services.GetRequiredService<TerritoryEscortService>();
         escort.OwnerOf = territory.OwnerOf;

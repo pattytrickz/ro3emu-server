@@ -30,6 +30,7 @@ public sealed class RewardService
     private readonly int _killExpPercent;
     private readonly double _cardDropRolls;
     private readonly EventService? _events;
+    private readonly BoostService? _boosts;
 
     /// <summary>Field AFK selects the enhanced _iDrop table only for qualified ordinary field kills.
     /// Other kills use environment 0, preserving ordinary rewards (localization 10960000077; mapping inferred).</summary>
@@ -43,9 +44,10 @@ public sealed class RewardService
     internal Action<GameSession, MonsterUnit, RewardSettlement>? StageHuntKill { get; set; }
 
     public RewardService(CombatService combat, CharacterService character, TeamService teams, GameData data, ILogger<RewardService> log,
-        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null, EventService? events = null)
+        Microsoft.Extensions.Options.IOptions<ServerOptions>? options = null, EventService? events = null, BoostService? boosts = null)
     {
         _events = events;
+        _boosts = boosts;
         _noShare = options?.Value.PartyShareExcludedAccounts ?? [];
         _realPartyPercent = Math.Clamp(options?.Value.RealPartyExpPercent ?? 0, 0, 100);
         _realPartyMinPlayers = options?.Value.RealPartyMinPlayers ?? 3;
@@ -174,6 +176,8 @@ public sealed class RewardService
             return ([], NoExp);
         var (eventExp, eventDrops, eventCards) = _events?.Current ?? (100, 1, 1);
         bool handsOn = HandsOn(player);
+        // BoostService: the killer's item-drop boost adds to the loot rolls, as an event's do (the higher applies).
+        if (_boosts?.DropPercent(player) is int drop and > 0) eventDrops = BoostService.LootRolls(eventDrops, drop, _random.Next(100));
         if ((RollKillForTest?.Invoke(player, monster) ?? RollDrops(player, monster, bonus,
                 eventDrops + (handsOn && _random.Next(100) < _handsOnLoot ? 1 : 0), eventCards)) is not { } drops)
             return ([], NoExp);
@@ -181,8 +185,11 @@ public sealed class RewardService
         long rolled = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
         var items = drops.Where(d => d.Entry is not (BaseExpItem or JobExpItem) && _data.Row("ItemConfig", d.Entry) != null).ToList();
         int partyBonus = _teams.ExpBonus(player);
-        int percent = _killExpPercent * eventExp / 100 * RealPartyPercent(player) / 100 * (handsOn ? 100 + _handsOnExp : 100) / 100;
-        return (items, (recipient, members) => KillExp(recipient, monster, rolled, partyBonus, percent, members));
+        int realParty = RealPartyPercent(player), handsOnPercent = handsOn ? 100 + _handsOnExp : 100;
+        // Each recipient's own EXP boost (BoostService), never the killer's for the party; the same divisions as before.
+        int Percent(GameSession recipient) => _killExpPercent * BoostService.ExpRate(eventExp, _boosts?.ExpPercent(recipient) ?? 0)
+            / 100 * realParty / 100 * handsOnPercent / 100;
+        return (items, (recipient, members) => KillExp(recipient, monster, rolled, partyBonus, Percent(recipient), members));
     }
 
     /// <summary>A recipient's share of a kill, split among <c>members</c> (the killer and its sharing party members).</summary>
