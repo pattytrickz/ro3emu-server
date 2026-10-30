@@ -133,7 +133,12 @@ public sealed partial class CharacterService
             if (reply) await session.SendGameAsync(ItemUse, new ItemUseResp { Result = result, ItemGuid = req.ItemGuid });
             return result;
         }
-        if (specialized == null)
+        // ServerOptions.Supporter.FreeWings: an active supporter's wing flies (all of WingError's checks passed) and stays.
+        bool freeWing = specialized == null && options.Value.Supporter.FreeWings && IsWing(row.Value) && access.IsSupporter(session.Account);
+        if (specialized == null && freeWing)
+            await CommitCharacterAsync(session, "use", blobs: new Dictionary<string, byte[]> { ["bag_state"] = cooldownBytes },
+                apply: PublishCooldown);
+        else if (specialized == null)
         {
             var stagedItems = session.Items.Select(i => i.Clone()).ToList();
             var stagedItem = stagedItems.Single(i => i.Guid == item.Guid);
