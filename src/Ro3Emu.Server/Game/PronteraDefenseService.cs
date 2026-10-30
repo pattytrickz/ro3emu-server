@@ -206,8 +206,7 @@ public sealed class PronteraDefenseService : IGameTicker
     {
         bool roundChanged;
         using (var scope = _loop.Owners is { } owners
-            ? await owners.EnterAsync("defense/advance",
-                [Ownership.ReservationKey.Entity("prontera_event", Opening().ToString(System.Globalization.CultureInfo.InvariantCulture))]) : null)
+            ? await owners.EnterAsync("defense/advance", AdvanceKeys()) : null)
         {
             int round = RoundAt(now);
             roundChanged = round != _activeRound;
@@ -257,6 +256,18 @@ public sealed class PronteraDefenseService : IGameTicker
         if (roundChanged)
             await RoleFanout.EachAsync(_sessions.All().Where(s => s.Role != null && s.ActivitiesReady),
                 async s => { await SettleClosedOwnedAsync(s); await NotifyAsync(s); });
+    }
+
+    /// <summary>The event plus every map's defense-point row: the invader damage step writes those rows, so they are
+    /// reserved up front (an unreserved commit is refused every second for as long as invaders live).</summary>
+    private Ownership.ReservationKey[] AdvanceKeys()
+    {
+        string open = Opening().ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var keys = new List<Ownership.ReservationKey> { Ownership.ReservationKey.Entity("prontera_event", open) };
+        foreach (var row in _data.Table("PronteraDefenseMapConfig").Values)
+            if (GameData.Int(row, "_iMapId") is > 0 and var map)
+                keys.Add(Ownership.ReservationKey.Entity("prontera_point", $"{open}:{map}"));
+        return [.. keys];
     }
 
     private async Task DamageDefensesAsync(long now)
