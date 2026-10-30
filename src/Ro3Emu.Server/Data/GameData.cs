@@ -53,15 +53,24 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
     private IReadOnlyDictionary<string, JsonElement> Overlaid(string name, Dictionary<string, JsonElement> table)
     {
         if (name == "SocialOutfitConfig") return _identityCosmetics ??= Config.SupporterIdentityOverlay.Apply(table);
-        if (name == "ItemConfig") return _dyeItems ??= Config.CharacterAppearanceOverlay.Apply(table, shop: false, 0);
-        if (options.Value.CharacterAppearanceEnabled && Ro3Emu.Shared.CharacterAppearanceRules.MerchantTemplate(name) != 0)
-            return _dyeMerchant.GetOrAdd(name, key => Config.CharacterAppearanceOverlay.Merchant(table, key, options.Value.CharacterDyeRarePrice));
+        // The Supporter Merchant's items always exist (owned boosters stay valid); its NPC and goods only with Supporter:Shop.
+        if (name == "ItemConfig") return _dyeItems ??= Config.SupporterShopOverlay.Items(Config.CharacterAppearanceOverlay.Apply(table, shop: false, 0));
+        bool dyes = options.Value.CharacterAppearanceEnabled, supporterShop = options.Value.Supporter.Shop;
+        if ((dyes || supporterShop) && Ro3Emu.Shared.CharacterAppearanceRules.MerchantTemplate(name) != 0)
+            return _dyeMerchant.GetOrAdd(name, key =>
+            {
+                var merchants = dyes ? Config.CharacterAppearanceOverlay.Merchant(table, key, options.Value.CharacterDyeRarePrice) : table;
+                return supporterShop ? Config.SupporterShopOverlay.Merchant(merchants, key) : merchants;
+            });
         if (name != "ShopCommodityConfig") return table;
         var shop = options.Value.F2P.Enabled ? _f2pShop ??= F2PShop(table) : table;
-        return options.Value.CharacterAppearanceEnabled
-            ? _dyeShop ??= Config.CharacterAppearanceOverlay.Apply(shop, shop: true, options.Value.CharacterDyePrice,
-                options.Value.CharacterDyeRarePrice) : shop;
+        if (!dyes && !supporterShop) return shop;
+        return _dyeShop ??= SupporterGoods(dyes ? Config.CharacterAppearanceOverlay.Apply(shop, shop: true, options.Value.CharacterDyePrice,
+            options.Value.CharacterDyeRarePrice) : shop, supporterShop);
     }
+
+    private static Dictionary<string, JsonElement> SupporterGoods(Dictionary<string, JsonElement> shop, bool on) =>
+        on ? Config.SupporterShopOverlay.Shop(shop) : shop;
 
     private static Dictionary<string, JsonElement> F2PShop(Dictionary<string, JsonElement> table)
     {

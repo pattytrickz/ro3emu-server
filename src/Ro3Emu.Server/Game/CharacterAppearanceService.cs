@@ -45,9 +45,11 @@ public sealed class CharacterAppearanceService
 
     internal async Task ClientReadyAsync(GameSession s, ReadOnlyMemory<byte> body)
     {
-        if (body.Length != 1 || body.Span[0] != CharacterAppearanceRules.ClientVersion || s.CharacterAppearanceClientReady || s.CharacterAppearance == null) return;
+        if (body.Length != 1 || body.Span[0] is < CharacterAppearanceRules.FirstClientVersion or > CharacterAppearanceRules.ClientVersion
+            || s.CharacterAppearanceClientReady || s.CharacterAppearance == null) return;
         using var held = await CharacterService.Lock(s);
         s.CharacterAppearanceClientReady = true;
+        s.ClientHookVersion = body.Span[0];
         await s.SendGameAsync(WorldCoreService.CustomChange, new CustomDataChange
         {
             EntityId = s.Role!.Id,
@@ -56,12 +58,18 @@ public sealed class CharacterAppearanceService
                 s.CharacterAppearanceEnabled ? _options.CharacterDyeRarePrice : 0) }
         });
         await _character.ResendAppearanceItemsAsync(s);
-        if (_worldData.Map(s.SceneEntry)?.Npcs.FirstOrDefault(n => n.NpcId == CharacterAppearanceRules.MerchantId) is { } merchant)
+        foreach (var merchant in _worldData.Map(s.SceneEntry)?.Npcs.Where(n => n.NpcId is CharacterAppearanceRules.MerchantId
+            or SupporterShopRules.MerchantId && NpcVisible(s, n)) ?? [])
             await s.SendGameAsync(GameAoiSink.SyncAoiView, new AoIViewChangeData { Bases = { SceneService.NpcEntity(merchant) } });
     }
 
-    internal static bool NpcVisible(GameSession s, WorldNpc npc) =>
-        npc.NpcId != CharacterAppearanceRules.MerchantId || s.CharacterAppearanceClientReady;
+    /// <summary>House NPCs only for hooks that have their rows: the Dye Merchant from version 2, the Supporter Merchant from 3.</summary>
+    internal static bool NpcVisible(GameSession s, WorldNpc npc) => npc.NpcId switch
+    {
+        CharacterAppearanceRules.MerchantId => s.CharacterAppearanceClientReady,
+        SupporterShopRules.MerchantId => s.CharacterAppearanceClientReady && s.ClientHookVersion >= CharacterAppearanceRules.SupporterShopClientVersion,
+        _ => true,
+    };
 
     internal static CustomData Marker(GameSession s)
     {

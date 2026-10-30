@@ -663,6 +663,17 @@ public sealed class SupporterOptions
     /// <summary>Supporter perk (plan §2.1): unused daily auto-battle time banks up to this many days for an active
     /// supporter (7 in the plan); 0 keeps everyone on PublicParamConfig.OnHookFightTimeLimit.</summary>
     public int AfkBankDays { get; set; }
+
+    /// <summary>The Supporter Merchant beside the Dye Merchant (Shared.SupporterShopRules, Game.SupporterShop): its NPC and
+    /// token-priced boosters. Needs the client hooks of the same release. Off by default.</summary>
+    public bool Shop { get; set; }
+
+    /// <summary>
+    /// The Common Drop Booster's allowlist (plan §2.2): item ids of common, bound crafting materials whose drops it makes
+    /// 1.5 times as likely. Fail closed: an item not listed is never boosted, and with an empty list the booster is not
+    /// sold. Never list cards, equipment, rare materials, MVP loot, Zeny, Crystals or other currencies.
+    /// </summary>
+    public int[] DropBoosterItems { get; set; } = [];
 }
 
 /// <summary>

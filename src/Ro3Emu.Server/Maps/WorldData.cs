@@ -279,6 +279,7 @@ public sealed partial class WorldData(IOptions<ServerOptions> options, GameData 
                     WorldNpc.Float(pos, "y"), WorldNpc.Float(pos, "z"), WorldNpc.Float(p, "direction"), p));
             }
         AddDyeMerchant(sceneEntry, map, npcs);
+        AddSupporterMerchant(sceneEntry, map, npcs);
         var spawnGroups = LoadSpawnGroups(se);
         log.LogInformation("Map {Scene} {Name}: {Npcs} NPC/portal/Kafra, {Groups} spawn groups, born {Born}, nav {W}x{H}",
             sceneEntry, data.MapName(sceneEntry), npcs.Count, spawnGroups.Count, born, map.Nav?.Width, map.Nav?.Height);

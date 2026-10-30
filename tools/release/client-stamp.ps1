@@ -10,7 +10,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Push-Location $root
 try {
     # Include linked shared code as well: either rules file changes what the hooks DLL does.
-    $files = @(git ls-files src/Ro3Emu.ClientHooks src/Ro3Emu.Loc src/Ro3Emu.Server/Game/F2PRules.cs src/Ro3Emu.Server/Data/Config/SupporterIdentityRules.cs src/Ro3Emu.Server/Data/Config/CharacterAppearanceRules.cs |
+    $files = @(git ls-files src/Ro3Emu.ClientHooks src/Ro3Emu.Loc src/Ro3Emu.Server/Game/F2PRules.cs src/Ro3Emu.Server/Data/Config/SupporterIdentityRules.cs src/Ro3Emu.Server/Data/Config/CharacterAppearanceRules.cs src/Ro3Emu.Server/Data/Config/SupporterShopRules.cs |
         Where-Object { $_ -notmatch '/(bin|obj)/' })
     $hashes = @($files | git hash-object --stdin-paths)
     $text = (0..($files.Count - 1) | ForEach-Object { "$($files[$_]) $($hashes[$_])" }) -join "`n"

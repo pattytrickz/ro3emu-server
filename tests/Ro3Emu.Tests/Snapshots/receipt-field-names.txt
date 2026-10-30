@@ -496,6 +496,13 @@ Ro3Emu.Server.Accounts.Persistence.SupporterOrderCreatePlan/<nowUtcMs>P
 Ro3Emu.Server.Accounts.Persistence.SupporterOrderCreatePlan/<provider>P
 Ro3Emu.Server.Accounts.Persistence.SupporterOrderCreatePlan/<tierCad>P
 Ro3Emu.Server.Accounts.Persistence.SupporterOrderCreatePlan/<tokens>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<account>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<commodity>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<count>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<group>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<groupLimit>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<limit>P
+Ro3Emu.Server.Accounts.Persistence.SupporterPurchasePlan/<week>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<amountCents>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<captureId>P
 Ro3Emu.Server.Accounts.Persistence.SupporterReversePlan/<eventKey>P

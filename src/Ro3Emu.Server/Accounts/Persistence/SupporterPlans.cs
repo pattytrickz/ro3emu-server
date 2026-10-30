@@ -48,6 +48,9 @@ internal sealed class SupporterSchemaPlan : DbPlan
             CREATE TABLE IF NOT EXISTS supporter_token_mail (
                 order_id INTEGER PRIMARY KEY, account TEXT NOT NULL, role_id INTEGER NOT NULL, tokens INTEGER NOT NULL,
                 delivery_key TEXT NOT NULL UNIQUE, sent_utc_ms INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS supporter_purchase (
+                account TEXT NOT NULL, week INTEGER NOT NULL, commodity INTEGER NOT NULL, count INTEGER NOT NULL CHECK(count >= 0),
+                PRIMARY KEY(account, week, commodity));
             """);
         return 1;
     }
@@ -267,5 +270,59 @@ internal static class EntitlementSql
         write.Parameters.AddWithValue("$current", current);
         write.ExecuteNonQuery();
         return new EntitlementResult(EntitlementOutcome.Applied, next);
+    }
+}
+
+/// <summary>An account's Supporter Merchant purchases in a pass week: commodity id -> count.</summary>
+internal sealed class SupporterPurchaseReadPlan(string account, long week) : DbReadPlan
+{
+    internal override int Bytes => 256 + account.Length * 2;
+    internal override string Label => "supporter/read-purchases";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        var counts = new Dictionary<int, int>();
+        using var cmd = DbSql.Command(db, tx, "SELECT commodity, count FROM supporter_purchase WHERE account=$account AND week=$week");
+        cmd.Parameters.AddWithValue("$account", account);
+        cmd.Parameters.AddWithValue("$week", week);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read()) counts[reader.GetInt32(0)] = reader.GetInt32(1);
+        return counts;
+    }
+}
+
+/// <summary>Over a Supporter Merchant weekly limit: thrown inside the purchase's transaction, so nothing is paid.</summary>
+internal sealed class SupporterLimitException(string message) : InvalidOperationException(message);
+
+/// <summary>
+/// Counts a Supporter Merchant purchase in the purchase's own transaction: the commodity's account-wide weekly limit
+/// and, for a product in a group (the two EXP boosters), the group's. Over either, it throws and the purchase rolls back.
+/// </summary>
+internal sealed class SupporterPurchasePlan(string account, long week, int commodity, int count, int limit, int[] group,
+    int groupLimit) : DbPlan
+{
+    internal override int Bytes => 256 + account.Length * 2 + group.Length * 4;
+    internal override string Label => "supporter/purchase";
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    {
+        long Sum(IEnumerable<int> commodities)
+        {
+            var ids = commodities.ToArray();
+            if (ids.Length == 0) return 0;
+            using var cmd = DbSql.Command(db, tx, $"SELECT COALESCE(SUM(count),0) FROM supporter_purchase WHERE account=$account AND week=$week AND commodity IN ({string.Join(',', ids)})");
+            cmd.Parameters.AddWithValue("$account", account);
+            cmd.Parameters.AddWithValue("$week", week);
+            return (long)cmd.ExecuteScalar()!;
+        }
+        if (Sum([commodity]) + count > limit) throw new SupporterLimitException($"weekly limit {limit} of commodity {commodity}");
+        if (group.Length > 0 && Sum(group) + count > groupLimit) throw new SupporterLimitException($"weekly group limit {groupLimit}");
+        using var write = DbSql.Command(db, tx, """
+            INSERT INTO supporter_purchase(account,week,commodity,count) VALUES($account,$week,$commodity,$count)
+                ON CONFLICT(account,week,commodity) DO UPDATE SET count=count+$count
+            """);
+        write.Parameters.AddWithValue("$account", account);
+        write.Parameters.AddWithValue("$week", week);
+        write.Parameters.AddWithValue("$commodity", commodity);
+        write.Parameters.AddWithValue("$count", count);
+        return write.ExecuteNonQuery();
     }
 }

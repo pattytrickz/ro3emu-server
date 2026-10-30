@@ -129,8 +129,11 @@ public sealed partial class CharacterService
         info.ItemCds = preferences.ItemCds?.Clone();
         info.ShareCds = preferences.ShareCds?.Clone();
         foreach (var (entry, used) in CurrentUseTimes(preferences)) info.UseTimes[entry] = used;
+        // House items only reach hooks that have their rows (CharacterAppearanceService.NpcVisible's versions).
         var bag = session.Items.Where(i => i.Grid == 0 && (session.CharacterAppearanceClientReady
-            || !Ro3Emu.Shared.CharacterAppearanceRules.IsDye(i.Entry))).ToList();
+            || !Ro3Emu.Shared.CharacterAppearanceRules.IsDye(i.Entry))
+            && (session.ClientHookVersion >= Ro3Emu.Shared.CharacterAppearanceRules.SupporterShopClientVersion
+                || Ro3Emu.Shared.SupporterShopRules.ByItem(i.Entry) == null)).ToList();
         var packs = bag.Select(i => i.Pack).ToHashSet();
         if (session.Synced.GetValueOrDefault(ItemsSync) is DBItemsInfo sent) packs.UnionWith(sent.PackInfo.Keys);
         foreach (var pack in packs.Order())

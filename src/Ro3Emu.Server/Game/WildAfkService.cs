@@ -231,7 +231,7 @@ public sealed class WildAfkService : IGameTicker
         // Settle the old day's eligible interval before adding the new allowance, even if the loop crossed 05:00.
         bool reset = Epoch(now) > state.DailyEpoch;
         if (reset && publish && s.DailyReady) await _daily.ReconcileAsync(s);
-        if (reset && running) ConsumeUntil(state, Math.Min(now, Epoch(now) * 1000));
+        if (reset && running) Used(s, ConsumeUntil(state, Math.Min(now, Epoch(now) * 1000)));
         if (reset && !publish && PendingDailyAward(state, s.Daily, s.Tasks, s.DailyRows))
         {
             info.IsSuspended = info.IsHighMagnification;
@@ -243,7 +243,7 @@ public sealed class WildAfkService : IGameTicker
             Restore(state, now, CapFor(s));
             state.AccountedAtMs = Math.Max(state.AccountedAtMs, state.DailyEpoch * 1000);
         }
-        if (running) ConsumeUntil(state, now);
+        if (running) Used(s, ConsumeUntil(state, now));
         state.AccountedAtMs = Math.Max(state.AccountedAtMs, now);
         if (info.HighMultiplierTimeSeconds <= 0)
         {
@@ -277,7 +277,7 @@ public sealed class WildAfkService : IGameTicker
         if (s.WildAfk is not { } state || !Owns(s, state) || state.DailyEpoch != s.Daily?.DailyEpoch) return true;
         if (state.Info.IsHighMagnification && !state.Info.IsSuspended && state.AccountedAtMs < boundary * 1000)
         {
-            ConsumeUntil(state, boundary * 1000);
+            Used(s, ConsumeUntil(state, boundary * 1000));
             Save(s);
         }
         if (PendingDailyAward(state, s.Daily, s.Tasks, s.DailyRows)) await _tasks.SettleOwnerProgressCoreAsync(s);
@@ -319,6 +319,43 @@ public sealed class WildAfkService : IGameTicker
         && afk.ConsumedTodaySeconds >= 3600 && quests?.Infos.ContainsKey(500130) == true
         && quests.CompleteTaskNum.GetValueOrDefault(500130) == 0
         && rows?.ActivityData.TryGetValue(106, out var row) == true && row.TaskCompleteTimes == 0;
+
+    /// <summary>Seconds of auto-battle time just used, in active Auto Mode only: timers that run on that time
+    /// (Game.SupporterShop's boosters) count down by them.</summary>
+    internal event Action<GameSession, long>? Consumed;
+
+    private void Used(GameSession s, long seconds)
+    {
+        if (seconds > 0) Consumed?.Invoke(s, seconds);
+    }
+
+    /// <summary>The player is in eligible Auto Mode now: auto-battle time on and being used (not paused, suspended,
+    /// idle, in town, dead or out of time; InactiveReason decides the pause).</summary>
+    internal static bool AutoActive(GameSession s) =>
+        s.WildAfk is { } state && state.Info.IsHighMagnification && !state.Info.IsSuspended && state.Info.HighMultiplierTimeSeconds > 0;
+
+    /// <summary>
+    /// A recharge of <paramref name="seconds"/> to the player's bank (the Supporter Merchant's Auto-Battle Time Recharge):
+    /// the state to save with the item's use and what to apply after it commits; null when it would go past the
+    /// player's bank limit (the item is then kept). Time that had run out comes back paused, for the player to resume.
+    /// </summary>
+    internal (byte[] Bytes, Action Apply)? PlanRecharge(GameSession s, long seconds)
+    {
+        if (s.Role == null || s.WildAfk is not { } state || !Owns(s, state)) return null;
+        if (state.Info.HighMultiplierTimeSeconds + seconds > CapFor(s)) return null;
+        void Add(State target)
+        {
+            target.Info.HighMultiplierTimeSeconds += seconds;
+            if (!target.Info.IsHighMagnification) { target.Info.IsHighMagnification = true; target.Info.IsSuspended = true; }
+        }
+        var next = JsonSerializer.Deserialize<State>(JsonSerializer.SerializeToUtf8Bytes(state))!;
+        Add(next);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(next);
+        return (bytes, () => { Add(state); state.Persisted = JsonSerializer.SerializeToUtf8Bytes(state); });
+    }
+
+    /// <summary>The bank after a recharge, to the client (5035).</summary>
+    internal Task PublishAsync(GameSession s) => s.WildAfk == null ? Task.CompletedTask : SyncAsync(s);
 
     private long ConsumeUntil(State state, long end)
     {

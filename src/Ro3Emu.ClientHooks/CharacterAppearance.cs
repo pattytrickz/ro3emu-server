@@ -42,6 +42,7 @@ internal static class CharacterAppearance
             PassChallenges.Text(texts, CharacterAppearanceRules.NameText(item), CharacterAppearanceRules.ItemName(item));
             PassChallenges.Text(texts, CharacterAppearanceRules.DescriptionText(item), CharacterAppearanceRules.Description(item));
         }
+        SupporterShopHooks.Apply(dbm, texts, rows, template);
         dbm.Obf_RuA<Obf_R.Obf_ff>("m_kCFG_ItemConfig")?.Obf_luA<string, object>("m_kAllIDList", null);
         _itemsReady = true;
         Debug.Log("[Ro3Emu.Appearance] dye items registered: " + Call(dbm.Obf_RuA<Obf_R.Obf_ff>("m_kCFG_ItemConfig"), "GetName", CharacterAppearanceRules.HairItemBase));
@@ -191,7 +192,7 @@ internal static class CharacterAppearance
         throw new InvalidOperationException("The Dye Merchant is not loaded in this scene.");
     }
     private static object First(object[] values) => values != null && values.Length > 0 ? values[0] : null;
-    private static Obf_R.Obf_ff CopyConfig(Obf_R.Obf_ff source)
+    internal static Obf_R.Obf_ff CopyConfig(Obf_R.Obf_ff source)
     {
         var copy = PassChallenges.Copy(source);
         // Publisher config rows inherit common defaults through __index; a raw-field-only copy drops interaction/effect lists.
@@ -199,7 +200,7 @@ internal static class CharacterAppearance
         if (defaults != null) _global.Obf_LuA<Obf_R.Obf_Ef>("setmetatable").Obf_HuA(copy, defaults);
         return copy;
     }
-    private static void Set(Obf_R.Obf_ff row, string key, object value)
+    internal static void Set(Obf_R.Obf_ff row, string key, object value)
     {
         if (value is long[] list) value = PassChallenges.List(Array.ConvertAll(list, n => (object)n));
         else if (value is string[][] actions) value = PassChallenges.List(Array.ConvertAll(actions, row => (object)PassChallenges.List(row)));

@@ -58,7 +58,9 @@ public static partial class EconomySnapshotReader
         ["supporter_order"] = "id account provider tier_cad amount_cents currency days tokens state provider_order_id capture_id reversed_cents created_utc_ms captured_utc_ms updated_utc_ms",
         ["supporter_payment_event"] = "event_key order_id kind amount_cents outcome recorded_utc_ms",
         // Which character an order's token letter went to; the tokens themselves move through the mail's own receipt.
-        ["supporter_token_mail"] = "order_id account role_id tokens delivery_key sent_utc_ms"
+        ["supporter_token_mail"] = "order_id account role_id tokens delivery_key sent_utc_ms",
+        // Supporter Merchant purchases per account and pass week, for its account-wide limits (Game.SupporterShop).
+        ["supporter_purchase"] = "account week commodity count"
     };
 
     private sealed partial class State

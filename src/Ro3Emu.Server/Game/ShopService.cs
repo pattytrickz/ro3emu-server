@@ -19,7 +19,7 @@ namespace Ro3Emu.Server.Game;
 /// </summary>
 public sealed class ShopService(GameData data, CharacterService character, FunctionService functions, RoleStore roles, SeasonService seasons,
     WardrobeService wardrobe, AwardService awards, TimeProvider clock, SessionRegistry sessions, GameLoop loop,
-    ILogger<ShopService> log) : IGameTicker
+    SupporterShop supporterShop, ILogger<ShopService> log) : IGameTicker
 {
     public const uint ShopSync = 5024;
     public const uint BuyCommodity = 82332, CommodityCollect = 82333, CommodityPresent = 82335, CommodityGetInfo = 82338,
@@ -137,6 +137,8 @@ public sealed class ShopService(GameData data, CharacterService character, Funct
         int bought = row is { } r2 ? Current(session, commodityId, session.Shop!.Bought.GetValueOrDefault(commodityId)) : 0;
         if (error == null && GameData.Int(row!.Value, "_iPurchaseNum") is var limit and > 0 && (long)bought + count > limit) error = new(ErrorCodes.PurchaseLimit, $"limit {bought}/{limit}");
         if (error == null && (long)bought + count > int.MaxValue) error = new(ErrorCodes.Parameter, "counter overflow");
+        // The Supporter Merchant: active supporters only, within account-wide weekly limits (SupporterShop).
+        if (error == null && await supporterShop.RefusalAsync(session, commodityId, count) is { } refused) error = new(refused.Code, refused.Why);
         int appearance = row is { } r3 ? (int)GameData.Int(r3, "_iAppearanceId") : 0;
         if (error == null) error = Malformed(row!.Value, appearance, count, unit);
         if (error == null && appearance > 0)
@@ -184,6 +186,7 @@ public sealed class ShopService(GameData data, CharacterService character, Funct
                     persist: tx =>
                     {
                         tx.RoleBlob(session.Role!.Id, "shop", JsonSerializer.SerializeToUtf8Bytes(next));
+                        if (supporterShop.PurchasePlan(session, commodityId, count) is { } counted) tx.Add(counted);
                         tx.WithEconomy(economy);
                     },
                     committed: () => session.Shop = next, asyncCommit: true) == null)
