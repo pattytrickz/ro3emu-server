@@ -749,7 +749,9 @@ public sealed partial class CardService
         if (!changed) return;
         SaveLibrary(session);
         var attachment = session.Attachment;
-        _loop.TrackLegacyDetached("card library sync", () =>
+        // The library is already committed. Publishing its snapshot needs no realm-wide reservation;
+        // unrelated role writes must not queue one realm waiter for every card sight or Codex kill.
+        _loop.TrackRuntimeDetached("card library sync", () =>
             attachment?.Cancelled == true || !ReferenceEquals(session.Attachment, attachment)
                 ? Task.CompletedTask : CharacterService.SyncAsync(session, LibrarySync, session.Library.Clone()));
     }
@@ -788,7 +790,7 @@ public sealed partial class CardService
             {
                 session.Library = next;
                 if (attachment?.Cancelled != true && ReferenceEquals(session.Attachment, attachment))
-                    _loop.TrackLegacyDetached("card library sync", () =>
+                    _loop.TrackRuntimeDetached("card library sync", () =>
                         attachment?.Cancelled == true || !ReferenceEquals(session.Attachment, attachment)
                             ? Task.CompletedTask : CharacterService.SyncAsync(session, LibrarySync, session.Library!.Clone()));
             });
