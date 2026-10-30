@@ -47,6 +47,7 @@ public sealed partial class NewActivityService
     private readonly bool _freePremiumPass, _passPlay;
     private readonly F2POptions _f2p;
     private readonly Accounts.AccessList _access;
+    private readonly CrystalEconomy _crystalEconomy;
     private readonly ILogger<NewActivityService> _log;
     private readonly HashSet<(GameSession Session, long Attachment)> _queued = new();
     private long Now => _clock.GetUtcNow().ToUnixTimeSeconds();
@@ -56,9 +57,10 @@ public sealed partial class NewActivityService
         AwardService awards, TaskService tasks, SessionRegistry sessions, GameLoop loop, SceneService scene,
         InstanceService instances, DungeonService dungeons, PronteraDefenseService defense, CombatService combat,
         Deadlines deadlines, TeamService teams, MvpService mvps, ChatService chat, Microsoft.Extensions.Options.IOptions<ServerOptions> options,
-        Accounts.AccessList access, ILogger<NewActivityService> log)
+        Accounts.AccessList access, CrystalEconomy crystalEconomy, ILogger<NewActivityService> log)
     {
         this._access = access;
+        this._crystalEconomy = crystalEconomy;
         this._data = data; this._character = character; this._functions = functions; this._roles = roles;
         this._accounts = accounts; this._items = items; this._mail = mail; this._seasons = seasons; this._clock = clock;
         this._activityClock = activityClock; this._awards = awards; this._tasks = tasks; this._sessions = sessions;

@@ -154,6 +154,82 @@ public sealed class F2PTests : IAsyncLifetime
         Assert.Equal(F2PRules.MvpCrystals, await Tokens(alice));
     }
 
+    private async Task<BotClient> Character(string account, string role)
+    {
+        for (int i = 0; i < 500 && Service<SessionRegistry>().All().Any(s => s.Account == account); i++) await Task.Delay(20);
+        var bot = new BotClient(http, File.ReadAllText(Path.Combine(dataDir, "gate_rsa_public.pem")));
+        await bot.LoginAsync(account, "pw"); await bot.EnterGateAsync();
+        await bot.EnterWorldAsync((await bot.CreateRoleAsync(role)).RoleBaseInfo.Id);
+        await Service<NewActivityService>().ReconcileAsync(Session(bot));
+        await Event(bot, []);
+        return bot;
+    }
+
+    private Task<long> Tokens(BotClient bot) => OnLoop(() => Service<CharacterService>().CountOf(Session(bot), F2PRules.SupporterToken));
+    private Task Mvp(BotClient bot) => Event(bot, [(NewActivityService.PassGoal.Mvps, 1)], mvps: 1);
+
+    /// <summary>Owner's decisions (30 Oct 2026): 700 repeatable Crystals per account and week over all its characters,
+    /// active supporters earn 1 token per 10 Crystals paid. A cap of 50 here keeps the test short.</summary>
+    [ClientDataFact]
+    public async Task TheWeeklyCrystalBudgetIsSharedByAnAccountsCharactersAndSupportersEarnOneTokenPerTenCrystals()
+    {
+        var supporter = Service<IOptions<ServerOptions>>().Value.Supporter;
+        supporter.CrystalEconomy = "on"; supporter.WeeklyCrystalCap = 50; supporter.CrystalsPerToken = 10;
+        Service<Ro3Emu.Server.Accounts.AccessList>().Run("supporter carol");
+
+        long crystals, tokens;
+        await using (var first = await Character("carol", "Carol"))
+        {
+            crystals = await Crystals(first); tokens = await Tokens(first);
+            await Mvp(first); // 20
+            await Mvp(first); // 20
+            await Mvp(first); // 20 + 80 for the weekly "3 MVP fights": only 10 left
+            Assert.Equal(crystals + 50, await Crystals(first));
+            Assert.Equal(tokens + 5, await Tokens(first));
+        }
+        // Another character of the same account finds the budget spent; its other rewards still come.
+        await using var second = await Character("carol", "Carolb");
+        crystals = await Crystals(second);
+        long passExp = await OnLoop(() => Session(second).Progress!.Currency.GetValueOrDefault(NewActivityService.PassExpCurrency));
+        await Mvp(second);
+        Assert.Equal(crystals, await Crystals(second));
+        Assert.Equal(0, await Tokens(second));
+        Assert.True(await OnLoop(() => Session(second).Progress!.Currency.GetValueOrDefault(NewActivityService.PassExpCurrency)) > passExp);
+
+        var week = await Service<Ro3Emu.Server.Accounts.AccountStore>().ReadAsync<Ro3Emu.Server.Accounts.Persistence.CrystalWeekReport>(
+            new Ro3Emu.Server.Accounts.Persistence.CrystalWeekReportReadPlan("live", Service<NewActivityService>().PassWeek()));
+        Assert.Equal(50, week.Accounts.Single().Earned);
+        Assert.Equal(160, week.Accounts.Single().Gross);
+        Assert.Equal(5, week.Tokens);
+    }
+
+    [ClientDataFact]
+    public async Task ShadowModeRecordsTheBudgetButPaysAsBefore()
+    {
+        var supporter = Service<IOptions<ServerOptions>>().Value.Supporter;
+        supporter.CrystalEconomy = "shadow"; supporter.WeeklyCrystalCap = 30;
+        Service<Ro3Emu.Server.Accounts.AccessList>().Run("supporter dave");
+        await using var dave = await Character("dave", "Dave");
+        long crystals = await Crystals(dave), tokens = await Tokens(dave);
+        await Mvp(dave);
+        await Mvp(dave);
+        Assert.Equal(crystals + 2 * F2PRules.MvpCrystals, await Crystals(dave));
+        Assert.Equal(tokens + 2 * F2PRules.MvpCrystals, await Tokens(dave)); // still 1:1 until the budget is on
+
+        var accounts = Service<Ro3Emu.Server.Accounts.AccountStore>();
+        long passWeek = Service<NewActivityService>().PassWeek();
+        Ro3Emu.Server.Accounts.Persistence.CrystalWeekReport week = null!;
+        for (int i = 0; i < 250; i++) // the shadow record is written just after the award
+        {
+            week = await accounts.ReadAsync<Ro3Emu.Server.Accounts.Persistence.CrystalWeekReport>(
+                new Ro3Emu.Server.Accounts.Persistence.CrystalWeekReportReadPlan("shadow", passWeek));
+            if (week.Accounts.Sum(a => a.Gross) >= 40) break;
+            await Task.Delay(20);
+        }
+        Assert.Equal((30L, 40L), (week.Accounts.Single().Earned, week.Accounts.Single().Gross));
+        Assert.Equal(3, week.Tokens);
+    }
+
     [ClientDataFact]
     public async Task WithoutF2PTheChallengesPayPassExpOnly()
     {

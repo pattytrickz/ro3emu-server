@@ -300,13 +300,27 @@ public sealed partial class NewActivityService
             notices.Add($"Weekly challenge done: {c.Text}, {Paid(PassWeeklyReward, weekly: true)}");
         }
 
+        // ServerOptions.Supporter.CrystalEconomy: these are the repeatable Crystals the account-wide weekly budget prices
+        // ("shadow" only records what it would pay). The account's awards are priced one at a time until committed.
+        bool supporter = crystals > 0 && _access.IsSupporter(session.Account);
+        var mode = crystals > 0 && session.Account != null ? _crystalEconomy.Current : CrystalEconomy.Mode.Off;
+        using var budget = mode != CrystalEconomy.Mode.Off ? await _crystalEconomy.LockAsync(session.Account!) : null;
+        var quote = budget != null ? await _crystalEconomy.QuoteAsync(mode, session.Account!, play.Week, crystals, supporter) : null;
+        var live = quote is { Live: true } ? quote : null;
+        long paidCrystals = live?.Credited ?? crystals;
+        // Supporters (AccessList.IsSupporter) earn Supporter Tokens, theirs to keep: 1:1 with these Crystals, or with the
+        // budget on, one per CrystalsPerToken Crystals actually paid.
+        long tokens = live?.Tokens ?? (supporter ? crystals : 0);
         var grants = new List<AwardGrant>();
-        if (crystals > 0) grants.Add(new AwardGrant(F2PRules.Crystal, checked((int)crystals)));
-        // Supporters (AccessList "supporter") earn Supporter Tokens 1:1 with these Crystals; earned tokens are theirs to keep.
-        if (crystals > 0 && _access.IsSupporter(session.Account))
+        if (paidCrystals > 0) grants.Add(new AwardGrant(F2PRules.Crystal, checked((int)paidCrystals)));
+        if (live != null && live.Credited < crystals)
+            notices.Add(live.Credited > 0
+                ? $"Weekly Crystal limit: +{live.Credited} of {crystals} Crystals paid ({live.EarnedAfter}/{live.Cap} this week, all your characters)"
+                : $"Weekly Crystal limit reached ({live.Cap}, all your characters): Crystals start again Monday 05:00 UTC");
+        if (tokens > 0)
         {
-            grants.Add(new AwardGrant(F2PRules.SupporterToken, checked((int)crystals)));
-            notices.Add($"Supporter bonus: +{crystals} Supporter Tokens");
+            grants.Add(new AwardGrant(F2PRules.SupporterToken, checked((int)tokens)));
+            notices.Add($"Supporter bonus: +{tokens} Supporter Tokens");
         }
         if (jerky > 0) grants.Add(new AwardGrant(F2PRules.MeowFishJerky, checked((int)jerky)));
         foreach (var drop in drops)
@@ -345,24 +359,72 @@ public sealed partial class NewActivityService
         {
             // Progress alone is kept on the session and saved with the next commit; every tenth change is saved now,
             // as a plain role blob like the activity calendar: it moves no asset, so it has no economy receipt.
+            // A live award the budget paid nothing for is saved now, with its receipt: the Crystals held back are counted.
             if (!dirty) return;
-            if (++play.Unsaved < 10) { session.ActivityRuntime = runtime; return; }
+            if (live == null && ++play.Unsaved < 10) { session.ActivityRuntime = runtime; return; }
             play.Unsaved = 0;
             play.Sequence++;
             var save = _roles.NewTransaction();
             save.RoleBlob(role, "activity_runtime", System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(runtime));
-            await _roles.CommitAsync(save, "activity/pass-progress", _ => session.ActivityRuntime = runtime);
+            if (live != null) save.Add(_crystalEconomy.Plan(live, PlaySource(role, play), role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
+            try
+            {
+                await _roles.CommitAsync(save, "activity/pass-progress", _ =>
+                {
+                    session.ActivityRuntime = runtime;
+                    if (live != null) _crystalEconomy.Committed(live);
+                });
+            }
+            catch when (live != null) { _crystalEconomy.Forget(live); throw; }
             foreach (var notice in notices) await GmCommands.ReplyAsync(session, notice);
             return;
         }
         play.Unsaved = 0;
         play.Sequence++;
-        int result = await CommitAsync(session, session.NewActivities!.Clone(), extra: grants, runtime: runtime,
-            source: string.Create(CultureInfo.InvariantCulture, $"pass/play/{role}/{play.Day}/{play.Sequence}"));
-        if (result != 0) { _log.LogWarning("Pass progress for role {Role} not saved: {Result}", role, result); return; }
+        string source = PlaySource(role, play);
+        int result;
+        try
+        {
+            // Live: the budget's accounting commits with the award or not at all.
+            result = await CommitAsync(session, session.NewActivities!.Clone(), extra: grants, runtime: runtime, source: source,
+                persist: live == null ? null : tx => tx.Add(_crystalEconomy.Plan(live, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds())),
+                committed: live == null ? null : () => _crystalEconomy.Committed(live));
+        }
+        catch when (live != null) { _crystalEconomy.Forget(live); throw; }
+        if (result != 0)
+        {
+            if (live != null) _crystalEconomy.Forget(live);
+            _log.LogWarning("Pass progress for role {Role} not saved: {Result}", role, result);
+            return;
+        }
+        // Shadow: recorded after the award, in its own transaction, so measuring can never cost a player a reward.
+        if (quote is { Live: false }) await RecordShadowAsync(quote, source, role);
+        budget?.Dispose();
         if (grants.Count > 0) await ReconcilePassAsync(session);
         foreach (var notice in notices) await GmCommands.ReplyAsync(session, notice);
     }
+
+    private static string PlaySource(long role, PassPlayState play) =>
+        string.Create(CultureInfo.InvariantCulture, $"pass/play/{role}/{play.Day}/{play.Sequence}");
+
+    private async Task RecordShadowAsync(CrystalEconomy.Quote quote, string source, long role)
+    {
+        try
+        {
+            var tx = _accounts.NewTransaction();
+            tx.Add(_crystalEconomy.Plan(quote, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
+            await tx.CommitAsync(_accounts, "crystal/shadow");
+            _crystalEconomy.Committed(quote);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            _crystalEconomy.Forget(quote);
+            _log.LogWarning(e, "Shadow Crystal budget not recorded for role {Role} ({Source})", role, source);
+        }
+    }
+
+    /// <summary>The pass week (Monday 05:00 server time, UTC on the realm) as the budget counts it.</summary>
+    internal long PassWeek() => PassPeriod(_clock.GetLocalNow()).Week;
 
     private IEnumerable<AwardGrant> OverflowChest(GameSession session, long passId)
     {
@@ -406,8 +468,11 @@ public sealed partial class NewActivityService
         }
         var today = DailyChallenges.Where(c => play.Daily.Contains(c.Id));
         string daily = _f2p.Enabled ? $"+{PassDailyReward} EXP, {F2PRules.DailyChallengeCrystals} Crystals each" : $"+{PassDailyReward} each";
+        string budget = _f2p.Enabled && _crystalEconomy.Current == CrystalEconomy.Mode.Live && session.Account != null
+            ? $". Crystals this week: {await _crystalEconomy.EarnedAsync(session.Account, week)}/{_crystalEconomy.Cap} (all your characters)"
+            : "";
         await GmCommands.ReplyAsync(session, $"{head}. Today ({daily}): "
-            + string.Join(" | ", today.Select(c => Line(c, play.DailyProgress, play.DailyDone))) + ". Weekly: /pass week");
+            + string.Join(" | ", today.Select(c => Line(c, play.DailyProgress, play.DailyDone))) + ". Weekly: /pass week" + budget);
     }
 
     private static PassPlayState JsonClone(PassPlayState play) =>
