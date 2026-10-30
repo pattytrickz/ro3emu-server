@@ -7,7 +7,9 @@ public static class CharacterAppearanceRules
 {
     public const uint ClientReadyMessage = 77018;
     public const byte ClientVersion = 2;
-    public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002, VoucherCustomData = 9_930_003;
+    public const long SelectionCustomData = 9_930_001, PriceCustomData = 9_930_002, RarePriceCustomData = 9_930_003;
+    /// <summary>The rare colours' currency: Supporter Tokens, never Zeny.</summary>
+    public const int RareCurrency = F2PRules.SupporterToken;
     public const int HairItemBase = 1_999_100, ArmourItemBase = 1_999_200, CommodityBase = 9_930_100;
     public const int PaletteCount = 9, ClothingSlot = 4, ItemTemplate = 1_920_003, ShopTemplate = 113;
     public const int MerchantId = 993001, MerchantMap = 10100;
@@ -16,10 +18,11 @@ public static class CharacterAppearanceRules
     public const long NameTextBase = 99_300_001_000, DescriptionTextBase = 99_300_002_000;
 
     public static bool ValidPalette(int palette) => palette >= 0 && palette < PaletteCount;
-    public static bool IsServerMarker(long id) => id == SelectionCustomData || id == PriceCustomData || id == VoucherCustomData;
+    public static bool IsServerMarker(long id) => id == SelectionCustomData || id == PriceCustomData || id == RarePriceCustomData;
     public static bool IsDye(int item) => ValidPalette(item - HairItemBase) || ValidPalette(item - ArmourItemBase);
     public static bool IsArmour(int item) => ValidPalette(item - ArmourItemBase);
-    public static bool RequiresVoucher(int item) => IsDye(item) && Palette(item) is 4 or 5 or 6;
+    /// <summary>Violet, Gold and Silver: sold for Supporter Tokens only.</summary>
+    public static bool IsRare(int item) => IsDye(item) && Palette(item) is 4 or 5 or 6;
     public static int Palette(int item) => item - (IsArmour(item) ? ArmourItemBase : HairItemBase);
     public static bool IsCommodity(int id) => id >= CommodityBase && id < CommodityBase + PaletteCount * 2;
     public static int ItemForCommodity(int id) => id - CommodityBase < PaletteCount
@@ -27,8 +30,9 @@ public static class CharacterAppearanceRules
     public static int CommodityForItem(int item) => CommodityBase + Palette(item) + (IsArmour(item) ? PaletteCount : 0);
     public static long NameText(int item) => NameTextBase + item;
     public static long DescriptionText(int item) => DescriptionTextBase + item;
-    // Until each atlas has its own checked mask, reject paid armour applications for other bodies.
-    public static bool SupportsArmour(int career, int sex) => career == 1000 && sex == 2;
+    // Until each atlas has its own checked mask, reject paid armour applications for other bodies. Novice: both sexes
+    // (Model_Body_Novice_F_LOD0 and _M_LOD0, Ro3Emu.ClientHooks.ClassArmourMask).
+    public static bool SupportsArmour(int career, int sex) => career == 1000 && sex is 1 or 2;
     public static long Pack(int hair, int armour, bool aura) => hair | (armour << 4) | (aura ? 256 : 0);
     public static int Hair(long state) => (int)(state & 15);
     public static int Armour(long state) => (int)((state >> 4) & 15);
@@ -63,9 +67,9 @@ public static class CharacterAppearanceRules
 
     public static string ItemName(int item) => ColourName(Palette(item)) + (IsArmour(item) ? " Class Armour Dye" : " Hair Dye");
     public static string Description(int item) => (Palette(item) == 0 ? "Restores the original colour. " : "Changes this character's colour. ")
-        + (IsArmour(item) ? "PTR: female Novice cloth panels only. Cosmetic outfits are never dyed. " : "Keeps your hairstyle. ")
+        + (IsArmour(item) ? "Novice class armour only for now. Cosmetic outfits are never dyed. " : "Keeps your hairstyle. ")
         + "Consumed on use. Replaces your previous dye. Buy from the Dye Merchant at Prontera's central fountain."
-        + (RequiresVoucher(item) ? " Purchase requires one Colour Voucher." : "");
+        + (IsRare(item) ? " Rare colour: bought with Supporter Tokens." : "");
 
     public static int MerchantTemplate(string table) => table switch
     {
@@ -76,7 +80,7 @@ public static class CharacterAppearanceRules
     };
 
     // Clone the resident merchant model and shop shape; the placement and dedicated catalogue are house policy.
-    public static Dictionary<string, object> MerchantFields(string table, int voucher = 0) => table switch
+    public static Dictionary<string, object> MerchantFields(string table, int rarePrice = 0) => table switch
     {
         "NPCConfig" => new Dictionary<string, object>
         {
@@ -93,7 +97,7 @@ public static class CharacterAppearanceRules
         {
             { "_iID", (long)MerchantId }, { "_iClassID", (long)MerchantId }, { "_iShopId", (long)MerchantId },
             { "_iNpcId", (long)MerchantId }, { "_iShopName", new[] { MerchantNameText } },
-            { "_kCurrencyDisplay", voucher > 0 ? new long[] { 1, voucher } : new long[] { 1 } }
+            { "_kCurrencyDisplay", rarePrice > 0 ? new long[] { 1, RareCurrency } : new long[] { 1 } }
         },
         _ => new Dictionary<string, object>()
     };
@@ -112,13 +116,13 @@ public static class CharacterAppearanceRules
         { "_kIcon", "item_1001000.png" }, { "_iSort", 990L }, { "_iQuality", 2L }
     };
 
-    public static Dictionary<string, object> ShopFields(int item, int price, int voucher = 0)
+    public static Dictionary<string, object> ShopFields(int item, int price, int rarePrice = 0)
     {
-        if (RequiresVoucher(item) && voucher <= 0) throw new System.ArgumentOutOfRangeException(nameof(voucher));
+        if (IsRare(item) && rarePrice <= 0) throw new System.ArgumentOutOfRangeException(nameof(rarePrice));
         return new Dictionary<string, object>
         {
             { "_iID", (long)CommodityForItem(item) }, { "_iClassID", (long)MerchantId }, { "_iItemId", (long)item }, { "_iItemPerMount", 1L },
-            { "_kItemPerPrice", RequiresVoucher(item) ? new long[] { voucher, 1 } : new long[] { 1, price } },
+            { "_kItemPerPrice", IsRare(item) ? new long[] { RareCurrency, rarePrice } : new long[] { 1, price } },
             { "_iDiscount", 0L }, { "_iMerchantDiscount", 0L }, { "_iPurchaseTimesLimit", 0L },
             { "_iPurchaseNum", 0L }, { "_iSortId", (long)(990 + item - HairItemBase) }
         };

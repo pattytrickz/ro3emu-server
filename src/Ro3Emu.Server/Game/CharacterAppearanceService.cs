@@ -25,10 +25,8 @@ public sealed class CharacterAppearanceService
     {
         _roles = roles; _character = character; _world = world; _worldData = worldData; _options = options.Value;
         if (_options.CharacterDyePrice is <= 0 or > 999_999_999) throw new ArgumentOutOfRangeException(nameof(options), "Dye price must be 1..999999999.");
-        int voucher = _options.CharacterDyeVoucherItem;
-        if (voucher < 0 || voucher > 0 && (ItemConfig.Get(data, voucher) is not { } row
-            || row.Type == 1 || CharacterAppearanceRules.IsDye(voucher)))
-            throw new ArgumentOutOfRangeException(nameof(options), "Dye voucher must be an existing inventory item; zero disables rare offers.");
+        if (_options.CharacterDyeRarePrice is < 0 or > 999_999)
+            throw new ArgumentOutOfRangeException(nameof(options), "Rare dye price must be 0..999999 Supporter Tokens; zero hides rare offers.");
         character.SpecialItemUse.Insert(0, TryUseAsync);
         gm.Register("aura", "on|off (explicit GM cosmetic aura)", AuraAsync);
     }
@@ -54,8 +52,8 @@ public sealed class CharacterAppearanceService
         {
             EntityId = s.Role!.Id,
             CustomDatas = { Marker(s), LongMarker(CharacterAppearanceRules.PriceCustomData,
-                s.CharacterAppearanceEnabled ? _options.CharacterDyePrice : 0), LongMarker(CharacterAppearanceRules.VoucherCustomData,
-                s.CharacterAppearanceEnabled ? _options.CharacterDyeVoucherItem : 0) }
+                s.CharacterAppearanceEnabled ? _options.CharacterDyePrice : 0), LongMarker(CharacterAppearanceRules.RarePriceCustomData,
+                s.CharacterAppearanceEnabled ? _options.CharacterDyeRarePrice : 0) }
         });
         await _character.ResendAppearanceItemsAsync(s);
         if (_worldData.Map(s.SceneEntry)?.Npcs.FirstOrDefault(n => n.NpcId == CharacterAppearanceRules.MerchantId) is { } merchant)

@@ -55,12 +55,12 @@ public sealed class GameData(IOptions<ServerOptions> options, ILogger<GameData> 
         if (name == "SocialOutfitConfig") return _identityCosmetics ??= Config.SupporterIdentityOverlay.Apply(table);
         if (name == "ItemConfig") return _dyeItems ??= Config.CharacterAppearanceOverlay.Apply(table, shop: false, 0);
         if (options.Value.CharacterAppearanceEnabled && Ro3Emu.Shared.CharacterAppearanceRules.MerchantTemplate(name) != 0)
-            return _dyeMerchant.GetOrAdd(name, key => Config.CharacterAppearanceOverlay.Merchant(table, key, options.Value.CharacterDyeVoucherItem));
+            return _dyeMerchant.GetOrAdd(name, key => Config.CharacterAppearanceOverlay.Merchant(table, key, options.Value.CharacterDyeRarePrice));
         if (name != "ShopCommodityConfig") return table;
         var shop = options.Value.F2P.Enabled ? _f2pShop ??= F2PShop(table) : table;
         return options.Value.CharacterAppearanceEnabled
             ? _dyeShop ??= Config.CharacterAppearanceOverlay.Apply(shop, shop: true, options.Value.CharacterDyePrice,
-                options.Value.CharacterDyeVoucherItem) : shop;
+                options.Value.CharacterDyeRarePrice) : shop;
     }
 
     private static Dictionary<string, JsonElement> F2PShop(Dictionary<string, JsonElement> table)

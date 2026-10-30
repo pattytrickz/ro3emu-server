@@ -33,6 +33,9 @@ public sealed class CharacterAppearanceTests : IDisposable
         items[CharacterAppearanceRules.ItemTemplate.ToString(System.Globalization.CultureInfo.InvariantCulture)] = JsonNode.Parse("""
             {"_iID":1920003,"_iType":2,"_iSubType":218,"_iBagTab":1,"_iStackLimit":17,"_iIsUse":1}
             """);
+        // Supporter Tokens, a currency like Zeny: the rare colours' only payment.
+        items[CharacterAppearanceRules.RareCurrency.ToString(System.Globalization.CultureInfo.InvariantCulture)] =
+            JsonNode.Parse($$"""{"_iID":{{CharacterAppearanceRules.RareCurrency}},"_iType":1,"_iBagTab":1,"_iTrade":0}""");
         File.WriteAllText(path, items.ToJsonString());
         File.WriteAllText(Path.Combine(_data, "config", "ShopConfig.json"), """
             {"10":{"_iID":10,"_iClassID":301,"_iShopType":3,"_iFunctionId":0}}
@@ -59,10 +62,10 @@ public sealed class CharacterAppearanceTests : IDisposable
 
     public void Dispose() => Directory.Delete(_data, true);
 
-    private Task<SyntheticHost> Start(bool enabled = true, int voucher = 0) => SyntheticHost.StartAsync(o =>
+    private Task<SyntheticHost> Start(bool enabled = true, int rarePrice = 0) => SyntheticHost.StartAsync(o =>
     {
         o.GameDataDir = _data; o.CharacterAppearanceEnabled = enabled; o.CharacterDyePrice = 7;
-        o.CharacterDyeVoucherItem = voucher;
+        o.CharacterDyeRarePrice = rarePrice;
         o.GmAccounts = ["alice"]; o.GmToolAccounts = ["bob"];
     });
 
@@ -181,7 +184,9 @@ public sealed class CharacterAppearanceTests : IDisposable
     public async Task UnsupportedArmourAndMultiUseRefuseWithoutConsuming()
     {
         await using var host = await Start();
-        await using var alice = await host.InWorldAsync("Alice"); // male body has no verified mask yet
+        await using var alice = await host.InWorldAsync("Alice");
+        // Novice armour has masks for both sexes; a first job's body has none yet.
+        await host.Service<GameLoop>().InvokeAsync(() => { Session(host, "alice").Progress!.Career = 1100; return Task.CompletedTask; });
         await Enable(alice);
         int armour = CharacterAppearanceRules.ArmourItemBase + 2;
         Assert.NotEqual(0, await Buy(alice, armour));
@@ -228,7 +233,7 @@ public sealed class CharacterAppearanceTests : IDisposable
         Assert.False(Session(host, "alice").CharacterAppearance!.Aura);
         Assert.NotEqual(0, await Buy(alice, Hair));
         foreach (long marker in new[] { CharacterAppearanceRules.SelectionCustomData, CharacterAppearanceRules.PriceCustomData,
-                     CharacterAppearanceRules.VoucherCustomData })
+                     CharacterAppearanceRules.RarePriceCustomData })
             await Assert.ThrowsAsync<ArgumentException>(() => host.Service<GameLoop>().InvokeAsync(() =>
                 host.Service<WorldCoreService>().SetCustomAsync(Session(host, "alice"), new CustomData
                 {
@@ -238,7 +243,7 @@ public sealed class CharacterAppearanceTests : IDisposable
     }
 
     [Fact]
-    public async Task RareColoursCannotBePurchasedUntilTheExistingVoucherIsConfigured()
+    public async Task RareColoursAreHiddenWhileTheirTokenPriceIsZero()
     {
         await using var host = await Start();
         await using var alice = await host.InWorldAsync("Alice");
@@ -248,7 +253,7 @@ public sealed class CharacterAppearanceTests : IDisposable
         foreach (int palette in new[] { 4, 5, 6 })
             foreach (int item in new[] { CharacterAppearanceRules.HairItemBase + palette, CharacterAppearanceRules.ArmourItemBase + palette })
             {
-                Assert.True(CharacterAppearanceRules.RequiresVoucher(item));
+                Assert.True(CharacterAppearanceRules.IsRare(item));
                 Assert.Null(host.Service<Ro3Emu.Server.Data.GameData>().Row("ShopCommodityConfig", CharacterAppearanceRules.CommodityForItem(item)));
                 Assert.NotEqual(0, await Buy(alice, item, quote: 0));
             }
@@ -256,17 +261,22 @@ public sealed class CharacterAppearanceTests : IDisposable
     }
 
     [Fact]
-    public async Task RarePurchaseUsesOnlyTheConfiguredVoucherAndRollsBackPaymentWithARejectedGrant()
+    public async Task RareColoursCostOnlySupporterTokensAndRollBackPaymentWithARejectedGrant()
     {
-        const int voucher = 1009001, rare = CharacterAppearanceRules.HairItemBase + 5;
-        await using var host = await Start(voucher: voucher);
+        const int rare = CharacterAppearanceRules.HairItemBase + 5, tokens = CharacterAppearanceRules.RareCurrency;
+        await using var host = await Start(rarePrice: 75);
         await using var alice = await host.InWorldAsync("Alice");
         await Enable(alice);
+        Assert.Equal(new long[] { tokens, 75 }, host.Service<Ro3Emu.Server.Data.GameData>()
+            .Row("ShopCommodityConfig", CharacterAppearanceRules.CommodityForItem(rare))!.Value.GetProperty("_kItemPerPrice")
+            .EnumerateArray().Select(e => e.GetInt64()).ToArray());
         await Gm(host, "alice", "!item 1 1000");
         long before = Session(host, "alice").Progress!.Currency[1];
-        Assert.NotEqual(0, await Buy(alice, rare)); // Zeny cannot substitute for the voucher.
-        await Gm(host, "alice", "!item " + voucher + " 2");
+        Assert.NotEqual(0, await Buy(alice, rare)); // Zeny cannot substitute for Supporter Tokens.
+        await Gm(host, "alice", "!item " + tokens + " 100");
         var session = Session(host, "alice");
+        Task<long> Tokens() => host.Service<GameLoop>().InvokeAsync(() => Task.FromResult(host.Service<CharacterService>().CountOf(session, tokens)));
+        Assert.Equal(100, await Tokens());
         var accounts = host.Service<AccountStore>();
         FixtureSql.Execute(accounts, $"CREATE TRIGGER reject_rare_dye BEFORE INSERT ON item WHEN NEW.entry={rare} BEGIN SELECT RAISE(ABORT,'rare dye'); END");
         try
@@ -274,16 +284,15 @@ public sealed class CharacterAppearanceTests : IDisposable
             await Assert.ThrowsAsync<SqliteException>(() => host.Service<GameLoop>().InvokeAsync(() =>
                 host.Service<ShopService>().BuyAsync(session, new BuyCommodityReq
                 { CommodityId = CharacterAppearanceRules.CommodityForItem(rare), Count = 1, Price = 0 })));
-            Assert.Equal(2, session.Items.Single(i => i.Entry == voucher).Stack);
+            Assert.Equal(100, await Tokens());
             Assert.DoesNotContain(session.Items, i => i.Entry == rare);
-            Assert.Equal(2, host.Service<ItemStore>().Load(session.Role!.Id).Single(i => i.Entry == voucher).Stack);
         }
         finally { FixtureSql.Execute(accounts, "DROP TRIGGER reject_rare_dye"); }
         Assert.Equal(0, await Buy(alice, rare, quote: 0)); // An untrusted quote cannot lower the server-owned cost.
-        Assert.Equal(1, session.Items.Single(i => i.Entry == voucher).Stack);
-        Assert.Equal(1, host.Service<ItemStore>().Load(session.Role!.Id).Single(i => i.Entry == voucher).Stack);
+        Assert.Equal(25, await Tokens());
         Assert.Single(session.Items, i => i.Entry == rare);
-        Assert.Equal(before, session.Progress!.Currency[1]);
+        Assert.Equal(before, session.Progress!.Currency[1]); // no Zeny was taken for a rare colour
+        Assert.NotEqual(0, await Buy(alice, rare, quote: 0)); // 25 tokens left: not enough for another
     }
 
     private static GameSession Session(SyntheticHost host, string account) => host.Service<SessionRegistry>().All().Single(s => s.Account == account);

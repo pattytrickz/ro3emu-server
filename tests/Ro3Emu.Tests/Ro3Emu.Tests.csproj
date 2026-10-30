@@ -29,6 +29,7 @@
     <Compile Include="..\..\src\Ro3Emu.ClientHooks\VoiceLinkState.cs" Link="ClientHooks\VoiceLinkState.cs" />
     <Compile Include="..\..\src\Ro3Emu.ClientHooks\VoiceOffHint.cs" Link="ClientHooks\VoiceOffHint.cs" />
     <Compile Include="..\..\src\Ro3Emu.ClientHooks\ClassArmourMask.cs" Link="ClientHooks\ClassArmourMask.cs" />
+    <Compile Include="..\..\src\Ro3Emu.ClientHooks\ClassArmourMask.NoviceMale.cs" Link="ClientHooks\ClassArmourMask.NoviceMale.cs" />
   </ItemGroup>
 
   <ItemGroup>

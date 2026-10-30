@@ -2,12 +2,10 @@
 
 This opt-in Sol feature is inferred house policy, not a recreation of a publisher dye system. Enable it with
 `Ro3Emu:CharacterAppearanceEnabled=true`; the default is false. `Ro3Emu:CharacterDyePrice` defaults to 1,000 Zeny.
-Violet, Gold and Silver require one Colour Voucher per bottle (hair or supported class armour). Set
-`Ro3Emu:CharacterDyeVoucherItem` to the existing voucher's inventory item ID once that item has been created.
-That item must also exist in the matching client configuration; this feature adds no voucher rows.
-The default is zero: these six offers are absent and server purchases are refused until a voucher is configured.
-This feature does not create or distribute a voucher. Zeny cannot substitute for it; the normal shop transaction
-atomically consumes the configured item and grants the dye. Other colours and Original keep the Zeny price.
+Violet, Gold and Silver are rare colours sold for Supporter Tokens only (currency 4, `F2PRules.SupporterToken`):
+`Ro3Emu:CharacterDyeRarePrice` defaults to 75 tokens per bottle (hair or supported class armour), the Colour Change
+Voucher price in the supporter plan of 29 Oct 2026. Zeny cannot substitute; zero hides those six offers. The normal shop
+transaction atomically debits the tokens and grants the dye. Other colours and Original keep the Zeny price.
 It requires matching client hooks. This is a PTR implementation: armour coverage is limited to female Novice cloth
 panels, and broader class, sex, LOD and gameplay visual validation remains a release gate.
 
@@ -31,7 +29,7 @@ after the appearance capability handshake, and subsequent map loads and reconnec
 Client capability 77018/version 2 is sent only after the item rows exist. Version 1 clients are not admitted to the new catalogue.
 The hook rechecks the current config table because the client replaces it during login. Before that handshake, the server refuses
 dye purchases and omits saved dye items from 5009. After it, a full inventory sync reveals them. The self-only price
-marker 9930002 advertises the server's enabled Zeny price or zero; marker 9930003 carries the voucher item ID or zero.
+marker 9930002 advertises the server's enabled Zeny price or zero; marker 9930003 carries the rare colours' Supporter Token price or zero.
 Together they control client shop injection and payment icons. Both are server-owned and cannot be forged with generic custom data.
 `PassChallenges.Reload` invalidates the appearance catalogue immediately after `Lua_DBManager.ReLoadAllCfg`, so the
 merchant's NPC, interaction and shop rows are restored before scene creation resumes. The periodic check also verifies
