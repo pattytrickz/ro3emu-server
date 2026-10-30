@@ -17,6 +17,15 @@ public sealed record PublisherConfig
     [JsonPropertyName("origins")]
     public string[] Origins { get; init; } = [];
 
+    /// <summary>
+    /// Origins tried for the manifests only after every one of <see cref="Origins"/> failed. 30 Oct 2026: Genesis' own
+    /// hosts stopped resolving, the Linode mirror (Sao Paulo) is unreachable or crawls from some networks, and CloudFront
+    /// still serves an older release. Manifests from here are marked <see cref="ClientInstaller.Manifests.Fallback"/>, so
+    /// callers can refuse to update an existing game to that older release.
+    /// </summary>
+    [JsonPropertyName("fallbackOrigins")]
+    public string[] FallbackOrigins { get; init; } = [];
+
     /// <summary>Origins a manifest's immutable_url may point into (rewritten onto <see cref="Origins"/>).</summary>
     [JsonPropertyName("allowedOrigins")]
     public string[] AllowedOrigins { get; init; } = [];
@@ -53,6 +62,10 @@ public sealed record PublisherConfig
             "https://update.genesis3.is/", "https://br-gru-1.linodeobjects.com/update.genesis3.is/", "https://update.playgenesis3.com/",
             "https://update.playragnarok3.com/", "https://d26b54t50zhv93.cloudfront.net/",
         ],
+        // None built in. CloudFront (https://d26b54t50zhv93.cloudfront.net/) serves a complete, signed release, but 140035
+        // (Sep 2026): the client patch matches build-specific member names and fails on it (tested 30 Oct 2026), so it
+        // would install a client that cannot reach a private server. An RO3Emu.download.json can name fallbacks.
+        FallbackOrigins = [],
         FullManifest = "windows/launcher/v1/channels/ro3_recovery/full/manifest.json",
         FullSignature = "windows/launcher/v1/channels/ro3_recovery/full/manifest.sig",
         DeltaManifest = "windows/launcher/v1/channels/ro3_recovery/delta/manifest.json",
@@ -74,7 +87,9 @@ public sealed record PublisherConfig
         return new PublisherConfig
         {
             Origins = custom.Origins.Length > 0 ? custom.Origins : Genesis.Origins,
-            AllowedOrigins = custom.AllowedOrigins.Length > 0 ? custom.AllowedOrigins : Genesis.AllowedOrigins.Concat(custom.Origins).ToArray(),
+            FallbackOrigins = custom.FallbackOrigins.Length > 0 ? custom.FallbackOrigins : Genesis.FallbackOrigins,
+            AllowedOrigins = custom.AllowedOrigins.Length > 0 ? custom.AllowedOrigins
+                : Genesis.AllowedOrigins.Concat(custom.Origins).Concat(custom.FallbackOrigins).ToArray(),
             FullManifest = custom.FullManifest.Length > 0 ? custom.FullManifest : Genesis.FullManifest,
             FullSignature = custom.FullSignature.Length > 0 ? custom.FullSignature : Genesis.FullSignature,
             DeltaManifest = custom.DeltaManifest ?? Genesis.DeltaManifest,
@@ -101,15 +116,23 @@ public sealed record PublisherConfig
     /// <summary>
     /// The URLs to try for a package, best first: its immutable_url moved onto each configured origin (when it lies in
     /// an allowed origin), then the URL itself if its origin is allowed. A URL outside every allowed origin is refused.
+    /// <paramref name="preferred"/> (the origin the manifest came from) goes first: mirrors hold different releases, so
+    /// the one that served the manifest is the one most likely to hold its packages.
     /// </summary>
-    public List<string> PackageUrls(string immutableUrl)
+    public List<string> PackageUrls(string immutableUrl, string? preferred = null)
     {
-        var allowed = AllowedOrigins.Concat(Origins).FirstOrDefault(o => immutableUrl.StartsWith(o, StringComparison.OrdinalIgnoreCase))
+        var allowed = AllowedOrigins.Concat(Origins).Concat(FallbackOrigins).FirstOrDefault(o => immutableUrl.StartsWith(o, StringComparison.OrdinalIgnoreCase))
             ?? throw new InstallException($"The publisher's manifest points outside its own servers ({immutableUrl}).",
                 "Update RO3Emu, or add the new address to RO3Emu.download.json.");
         var rest = immutableUrl[allowed.Length..];
-        var urls = Origins.Select(o => o + rest).ToList();
+        var urls = Origins.Concat(FallbackOrigins).Select(o => o + rest).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (!urls.Contains(immutableUrl, StringComparer.OrdinalIgnoreCase)) urls.Add(immutableUrl);
+        if (preferred is not null && urls.FindIndex(u => string.Equals(u, preferred + rest, StringComparison.OrdinalIgnoreCase)) is > 0 and var i)
+        {
+            var first = urls[i];
+            urls.RemoveAt(i);
+            urls.Insert(0, first);
+        }
         return urls;
     }
 }

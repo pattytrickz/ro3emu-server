@@ -47,7 +47,7 @@ public sealed class LauncherController : IDisposable
         if (config.PublisherGame)
         {
             string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RO3Emu", "downloads");
-            _publisher = new PublisherGame(cache);
+            _publisher = new PublisherGame(cache, Path.GetDirectoryName(exePath));
         }
         string defaultDir = config.PublisherGame ? PublisherGame.DefaultInstallFolder() : Path.Combine(Path.GetDirectoryName(exePath)!, "Client");
         _layout = new InstallLayout(_settings.ClientDirectory ?? defaultDir);
@@ -210,7 +210,7 @@ public sealed class LauncherController : IDisposable
         _officialInstalled = installed is { } i ? $"release {i}" : null;
         try
         {
-            _official = await _publisher!.FetchAsync(_life.Token);
+            _official = await _publisher!.FetchAsync(_life.Token, delta: present);
         }
         catch (Exception e) when (e is SetupException or HttpRequestException or TaskCanceledException or IOException)
         {
@@ -219,7 +219,12 @@ public sealed class LauncherController : IDisposable
 
         if (!present)
         {
-            if (_official is null) PostState("offline", "Can't reach the official Ragnarok Online 3 download servers. Try again in a moment.");
+            if (_official is null)
+                PostState("offline", "Can't reach the official Ragnarok Online 3 download servers. Try again in a moment. If it keeps failing, "
+                    + "your network can't reach the download mirror: turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.");
+            else if (TooOld(_official.Full.Release.Sequence))
+                PostState("offline", $"Only an older game release ({_official.Full.Release.Sequence}) is reachable from your network, and it doesn't work "
+                    + $"with {_config.ServerName}. Try again later, or turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.");
             else
             {
                 long size = _official.Full.Sizes.Download > 0 ? _official.Full.Sizes.Download : _official.Full.Sizes.Expanded;
@@ -231,6 +236,13 @@ public sealed class LauncherController : IDisposable
         if (_official is null)
         {
             PostState("ready", "Can't reach the official update servers; playing the installed version.");
+            return;
+        }
+        // A fallback mirror may hold an older release than this folder: it only ever installs into an empty folder, so an
+        // installed game is never "repaired" or "updated" backwards.
+        if (_official.Fallback)
+        {
+            PostState("ready", "Can't reach the main download mirror; playing the installed version.");
             return;
         }
         long remote = _official.Full.Release.Sequence;
@@ -249,6 +261,9 @@ public sealed class LauncherController : IDisposable
 
     /// <summary>A publisher release newer than launcher.json "maxGameRelease".</summary>
     bool Unsupported(long release) => _config.MaxGameRelease > 0 && release > _config.MaxGameRelease;
+
+    /// <summary>A publisher release older than launcher.json "minGameRelease" (only a fallback mirror serves one).</summary>
+    bool TooOld(long release) => _config.MinGameRelease > 0 && release < _config.MinGameRelease;
 
     async Task UpdateAsync(bool verifyAll)
     {
@@ -271,6 +286,13 @@ public sealed class LauncherController : IDisposable
         if (_publisher is not null && PublisherGame.IsClient(_layout.GameDirectory) && Unsupported(_official!.Full.Release.Sequence))
         {
             PostState("ready", $"Release {_official.Full.Release.Sequence} isn't supported by {_config.ServerName} yet, so the game files are left as they are.");
+            return;
+        }
+        // The same checks as CheckPublisherAsync, at the moment the files change: a fallback release only fills an empty
+        // folder, and never one older than minGameRelease.
+        if (_publisher is not null && (_official!.Fallback && PublisherGame.IsClient(_layout.GameDirectory) || TooOld(_official.Full.Release.Sequence)))
+        {
+            await CheckAsync();
             return;
         }
         Directory.CreateDirectory(_layout.GameDirectory);

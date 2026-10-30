@@ -20,16 +20,51 @@ public sealed class PublisherGame : IDisposable
 {
     readonly HttpClient _http;
     readonly ClientInstaller _installer;
-    readonly PublisherConfig _config = PublisherConfig.Genesis;
+    readonly PublisherConfig _config;
+    readonly string _logPath;
 
-    public PublisherGame(string cacheDir)
+    /// <summary>
+    /// <paramref name="appDir"/>: the launcher's folder, where an RO3Emu.download.json (the same file RO3Emu.exe reads)
+    /// replaces the built-in download servers, so a move of the publisher's servers can be handled with a file. Every
+    /// manifest and package is still checked against the pinned publisher key and the manifest's SHA-256.
+    /// </summary>
+    public PublisherGame(string cacheDir, string? appDir = null)
     {
+        _logPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(cacheDir))!, "download.log");
+        _config = PublisherConfig.Genesis;
+        if (appDir is not null && File.Exists(Path.Combine(appDir, PublisherConfig.OverrideFile)))
+        {
+            try
+            {
+                _config = PublisherConfig.Load(appDir);
+                Log($"using {PublisherConfig.OverrideFile}: origins {string.Join(", ", _config.Origins)}; fallback {string.Join(", ", _config.FallbackOrigins)}");
+            }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException or UnauthorizedAccessException)
+            {
+                Log($"{PublisherConfig.OverrideFile} ignored: {e.Message}");
+            }
+        }
         _http = new HttpClient(new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All, ConnectTimeout = TimeSpan.FromSeconds(20) })
         {
             Timeout = Timeout.InfiniteTimeSpan,
         };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"RO3Emu/{typeof(PublisherGame).Assembly.GetName().Version}");
-        _installer = new ClientInstaller(_config, _http, cacheDir);
+        _installer = new ClientInstaller(_config, _http, cacheDir) { Log = Log };
+    }
+
+    /// <summary>
+    /// %LOCALAPPDATA%\RO3Emu\download.log: which server answered, what failed and why. Players who cannot download send
+    /// it; before 30 Oct 2026 the launcher kept no record, and download reports could only be guessed at.
+    /// </summary>
+    void Log(string line)
+    {
+        try
+        {
+            var info = new FileInfo(_logPath);
+            if (info.Exists && info.Length > 2_000_000) File.Move(_logPath, _logPath + ".old", overwrite: true);
+            File.AppendAllText(_logPath, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z {line}{Environment.NewLine}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>The folder holds a game (ro3.exe and its managed DLLs).</summary>
@@ -43,7 +78,19 @@ public sealed class PublisherGame : IDisposable
     /// stalls): the full and delta manifests are about 25 MB, and a fixed 45 s cut a slow line off during the delta,
     /// so a 5 MB update was planned from the full packages, 22 GB for release 140072 (inferred: no launcher log).
     /// </summary>
-    public Task<ClientInstaller.Manifests> FetchAsync(CancellationToken ct) => _installer.FetchAsync(ct);
+    /// <remarks><paramref name="delta"/> false for an empty folder, which cannot use the delta manifest (7 MB).</remarks>
+    public async Task<ClientInstaller.Manifests> FetchAsync(CancellationToken ct, bool delta = true)
+    {
+        try
+        {
+            return await _installer.FetchAsync(ct, delta);
+        }
+        catch (Exception e) when (!ct.IsCancellationRequested)
+        {
+            Log($"no manifest from any server: {e.Message}");
+            throw;
+        }
+    }
 
     /// <summary>
     /// The release the folder holds: our record, else the one the publisher's launcher wrote
