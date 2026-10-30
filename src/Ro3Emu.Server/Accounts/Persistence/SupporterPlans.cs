@@ -35,6 +35,16 @@ internal sealed class SupporterSchemaPlan : DbPlan
                 source_key TEXT PRIMARY KEY, account TEXT NOT NULL, reason TEXT NOT NULL,
                 before_utc_ms INTEGER NOT NULL, after_utc_ms INTEGER NOT NULL, recorded_utc_ms INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS supporter_entitlement_ledger_account ON supporter_entitlement_ledger(account);
+            CREATE TABLE IF NOT EXISTS supporter_order (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL, provider TEXT NOT NULL,
+                tier_cad INTEGER NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL,
+                days INTEGER NOT NULL, tokens INTEGER NOT NULL, state TEXT NOT NULL,
+                provider_order_id TEXT UNIQUE, capture_id TEXT UNIQUE, reversed_cents INTEGER NOT NULL DEFAULT 0,
+                created_utc_ms INTEGER NOT NULL, captured_utc_ms INTEGER NOT NULL DEFAULT 0, updated_utc_ms INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS supporter_order_account ON supporter_order(account);
+            CREATE TABLE IF NOT EXISTS supporter_payment_event (
+                event_key TEXT PRIMARY KEY, order_id INTEGER NOT NULL, kind TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+                outcome TEXT NOT NULL, recorded_utc_ms INTEGER NOT NULL);
             """);
         return 1;
     }
@@ -207,12 +217,25 @@ internal sealed class SupporterEntitlementPlan(string sourceKey, string account,
 {
     internal override int Bytes => 384 + (sourceKey.Length + account.Length + reason.Length) * 2;
     internal override string Label => "supporter/entitlement";
-    internal override object Execute(SqliteConnection db, SqliteTransaction tx)
+    internal override object Execute(SqliteConnection db, SqliteTransaction tx) => EntitlementSql.Apply(db, tx, sourceKey, account,
+        reason, extend ? EntitlementChange.Extend : EntitlementChange.AtLeast, amountMs, nowUtcMs, maxAheadMs).Encode();
+}
+
+/// <summary>How a ledger entry moves the end: Extend adds a length from the later of now and the end; AtLeast moves
+/// the end to a time unless it is later; Reduce takes a length off the end, never before now (a refunded purchase).</summary>
+internal enum EntitlementChange { Extend, AtLeast, Reduce }
+
+/// <summary>The one place an account's paid-through time changes, inside the caller's transaction (a payment's
+/// capture writes its order and its entitlement together).</summary>
+internal static class EntitlementSql
+{
+    internal static EntitlementResult Apply(SqliteConnection db, SqliteTransaction tx, string sourceKey, string account,
+        string reason, EntitlementChange change, long amountMs, long nowUtcMs, long maxAheadMs)
     {
         using (var seen = DbSql.Command(db, tx, "SELECT after_utc_ms FROM supporter_entitlement_ledger WHERE source_key=$key"))
         {
             seen.Parameters.AddWithValue("$key", sourceKey);
-            if (seen.ExecuteScalar() is long applied) return new EntitlementResult(EntitlementOutcome.Replayed, applied).Encode();
+            if (seen.ExecuteScalar() is long applied) return new EntitlementResult(EntitlementOutcome.Replayed, applied);
         }
         long current;
         using (var read = DbSql.Command(db, tx, "SELECT paid_through_utc_ms FROM supporter_entitlement WHERE account=$account"))
@@ -220,8 +243,13 @@ internal sealed class SupporterEntitlementPlan(string sourceKey, string account,
             read.Parameters.AddWithValue("$account", account);
             current = read.ExecuteScalar() as long? ?? 0;
         }
-        long next = extend ? Math.Max(nowUtcMs, current) + amountMs : Math.Max(current, amountMs);
-        if (extend && next - nowUtcMs > maxAheadMs) return new EntitlementResult(EntitlementOutcome.Refused, current).Encode();
+        long next = change switch
+        {
+            EntitlementChange.Extend => Math.Max(nowUtcMs, current) + amountMs,
+            EntitlementChange.AtLeast => Math.Max(current, amountMs),
+            _ => Math.Max(Math.Min(current, nowUtcMs), current - amountMs),
+        };
+        if (change == EntitlementChange.Extend && next - nowUtcMs > maxAheadMs) return new EntitlementResult(EntitlementOutcome.Refused, current);
         using var write = DbSql.Command(db, tx, """
             INSERT INTO supporter_entitlement(account,paid_through_utc_ms,updated_utc_ms) VALUES($account,$next,$now)
                 ON CONFLICT(account) DO UPDATE SET paid_through_utc_ms=$next, updated_utc_ms=$now;
@@ -235,6 +263,6 @@ internal sealed class SupporterEntitlementPlan(string sourceKey, string account,
         write.Parameters.AddWithValue("$reason", reason);
         write.Parameters.AddWithValue("$current", current);
         write.ExecuteNonQuery();
-        return new EntitlementResult(EntitlementOutcome.Applied, next).Encode();
+        return new EntitlementResult(EntitlementOutcome.Applied, next);
     }
 }

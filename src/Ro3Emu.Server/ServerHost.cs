@@ -52,6 +52,7 @@ public static class ServerHost
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GameLoop>());
         builder.Services.AddSingleton<AccountStore>();
         builder.Services.AddSingleton<SupporterEntitlements>();
+        builder.Services.AddSingleton<SupporterCheckout>();
         builder.Services.AddSingleton<AccessList>();
         builder.Services.AddSingleton<CrystalEconomy>();
         builder.Services.AddSingleton<Http.LauncherVersions>();
@@ -282,6 +283,16 @@ public static class ServerHost
             using var reader = new StreamReader(context.Request.Body);
             var line = (await reader.ReadToEndAsync()).Trim();
             return Results.Text(await loop.InvokeAsync(() => Task.FromResult(combat.PacingCommand(line))));
+        });
+        // The website's Supporter checkout (loopback only; the admin bridge): POST /ro3emu/supporter/{login|status|order|
+        // bind|capture|reverse|funding}, JSON in and out (Accounts.SupporterCheckout). Passwords are never logged.
+        app.MapPost("/ro3emu/supporter/{action}", async (HttpContext context, string action, SupporterCheckout checkout) =>
+        {
+            if (context.Connection.RemoteIpAddress is not { } ip || !System.Net.IPAddress.IsLoopback(ip)) return Results.NotFound();
+            System.Text.Json.JsonElement body;
+            try { body = (await System.Text.Json.JsonDocument.ParseAsync(context.Request.Body)).RootElement; }
+            catch (System.Text.Json.JsonException) { return Results.BadRequest(new { ok = false, code = "bad-request", error = "Send JSON." }); }
+            return Results.Json(await checkout.HandleAsync(action, body));
         });
         // Who may play (loopback only, AccessList): POST /ro3emu/access body "approve name" | "block name" | "reset name" | "list".
         app.MapPost("/ro3emu/access", async (HttpContext context, AccessList access, AccountStore accounts, IOptions<ServerOptions> options) =>

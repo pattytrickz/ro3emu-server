@@ -273,9 +273,11 @@ public sealed partial class GmCommands(IOptions<ServerOptions> options, GameData
         ["where"] = ("", Where),
         ["access"] = (Accounts.AccessList.Usage, (s, a) =>
             ReplyAsync(s, services.GetRequiredService<Accounts.AccessList>().Run(string.Join(' ', a)))),
-        ["supporter"] = (Accounts.SupporterEntitlements.Usage, async (s, a) =>
-            await ReplyAsync(s, await services.GetRequiredService<Accounts.SupporterEntitlements>().RunAsync(string.Join(' ', a),
-                services.GetRequiredService<Accounts.AccessList>().LegacySupporters()))),
+        ["supporter"] = (Accounts.SupporterEntitlements.Usage + " | sandbox-clear", async (s, a) =>
+            await ReplyAsync(s, a.Length == 1 && a[0].Equals("sandbox-clear", StringComparison.OrdinalIgnoreCase)
+                ? await services.GetRequiredService<Accounts.SupporterCheckout>().ClearSandboxAsync()
+                : await services.GetRequiredService<Accounts.SupporterEntitlements>().RunAsync(string.Join(' ', a),
+                    services.GetRequiredService<Accounts.AccessList>().LegacySupporters()))),
         ["crystals"] = (CrystalEconomy.Usage, async (s, a) =>
         {
             if (a.Length == 0 || !a[0].Equals("report", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(CrystalEconomy.Usage);

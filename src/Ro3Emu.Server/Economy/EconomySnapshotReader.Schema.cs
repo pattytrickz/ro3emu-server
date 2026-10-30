@@ -52,7 +52,11 @@ public static partial class EconomySnapshotReader
         ["crystal_token_remainder"] = "ledger account remainder tokens",
         ["crystal_source_receipt"] = "source_key ledger account role_id week category gross credited tokens supporter recorded_utc_ms",
         ["supporter_entitlement"] = "account paid_through_utc_ms updated_utc_ms",
-        ["supporter_entitlement_ledger"] = "source_key account reason before_utc_ms after_utc_ms recorded_utc_ms"
+        ["supporter_entitlement_ledger"] = "source_key account reason before_utc_ms after_utc_ms recorded_utc_ms",
+        // Checkout orders and provider events (SupporterCheckoutPlans). An order's tokens are owed, not yet an asset:
+        // they become one only through the token mail's own economy receipt.
+        ["supporter_order"] = "id account provider tier_cad amount_cents currency days tokens state provider_order_id capture_id reversed_cents created_utc_ms captured_utc_ms updated_utc_ms",
+        ["supporter_payment_event"] = "event_key order_id kind amount_cents outcome recorded_utc_ms"
     };
 
     private sealed partial class State

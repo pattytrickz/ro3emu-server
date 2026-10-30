@@ -645,6 +645,16 @@ public sealed class SupporterOptions
 
     /// <summary>Eligible Crystals per Supporter Token; the remainder carries over.</summary>
     public int CrystalsPerToken { get; set; } = 10;
+
+    /// <summary>
+    /// The website's checkout (Accounts.SupporterCheckout, through the admin bridge). "off": no orders. "sandbox": PayPal
+    /// sandbox payments, accepted only for <see cref="SandboxAccounts"/> and recorded as provider "paypal-sandbox", so
+    /// GM "!supporter sandbox-clear" can take their days back. "live": real payments from every account.
+    /// </summary>
+    public string Checkout { get; set; } = "off";
+
+    /// <summary>Staff test accounts that may pay in sandbox mode.</summary>
+    public string[] SandboxAccounts { get; set; } = [];
 }
 
 /// <summary>
