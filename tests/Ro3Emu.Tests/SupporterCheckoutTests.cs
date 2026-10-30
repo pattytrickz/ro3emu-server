@@ -20,6 +20,7 @@ public sealed class SupporterCheckoutTests : IDisposable
     private readonly Clock _clock = new();
     private readonly SupporterEntitlements _entitlements;
     private readonly SupporterCheckout _checkout;
+    private readonly AccessList _access;
     private const long Day = SupporterEntitlements.DayMs;
 
     private sealed class Clock : TimeProvider
@@ -34,7 +35,8 @@ public sealed class SupporterCheckoutTests : IDisposable
         _options.Supporter.Checkout = "live";
         _accounts = new AccountStore(Options.Create(_options));
         _entitlements = new SupporterEntitlements(Options.Create(_options), _accounts, _clock, NullLogger<SupporterEntitlements>.Instance);
-        _checkout = new SupporterCheckout(Options.Create(_options), _accounts, _entitlements, _clock, NullLogger<SupporterCheckout>.Instance);
+        _access = new AccessList(Options.Create(_options), NullLogger<AccessList>.Instance, _entitlements);
+        _checkout = new SupporterCheckout(Options.Create(_options), _accounts, _entitlements, _access, _clock, NullLogger<SupporterCheckout>.Instance);
         foreach (string name in new[] { "Alice", "Bob" })
         {
             byte[] salt = RandomNumberGenerator.GetBytes(16);
@@ -195,5 +197,22 @@ public sealed class SupporterCheckoutTests : IDisposable
         Assert.Contains("1 of 1", await _checkout.ClearSandboxAsync());
         Assert.Equal(Now, _entitlements.PaidThrough("bob"));
         Assert.False(_entitlements.IsActive("bob"));
+    }
+
+    [Fact]
+    public async Task ActiveListsWhoTheGameTreatsAsASupporterNow()
+    {
+        // Entitlements off: the permanent list decides, as in game.
+        _access.Run("supporter Bob");
+        await Pay("alice", 10, "CAP-1");
+        var active = await Call("active", new { });
+        Assert.Equal("legacy-list", active.GetProperty("source").GetString());
+        Assert.Equal(["bob"], active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!).ToArray());
+        // On: paid-through dates decide, and an ended one drops out.
+        _options.Supporter.Entitlements = true;
+        active = await Call("active", new { });
+        Assert.Equal(["alice"], active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!).ToArray());
+        _clock.Now = _clock.Now.AddDays(31);
+        Assert.Empty((await Call("active", new { })).GetProperty("accounts").EnumerateArray());
     }
 }

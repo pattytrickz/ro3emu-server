@@ -41,6 +41,13 @@ public sealed class SupporterEntitlements(IOptions<ServerOptions> options, Accou
 
     public bool IsActive(string account) => PaidThrough(account) is long end && end > Now;
 
+    /// <summary>Every account paid through a later time (lower case).</summary>
+    internal IReadOnlyList<string> ActiveAccounts()
+    {
+        var all = Loaded();
+        lock (_sync) return all.Where(e => e.Value > Now).Select(e => e.Key).Order(StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>A change committed elsewhere (a payment's capture or refund, SupporterCheckout): the cache follows it.</summary>
     internal void Committed(string account, long paidThroughUtcMs)
     {

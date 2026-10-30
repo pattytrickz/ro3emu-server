@@ -15,7 +15,7 @@ namespace Ro3Emu.Server.Accounts;
 /// have verified it with PayPal first. The tier's Supporter Tokens are recorded on the order for mail delivery.
 /// </summary>
 public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountStore accounts, SupporterEntitlements entitlements,
-    TimeProvider clock, ILogger<SupporterCheckout> log)
+    AccessList access, TimeProvider clock, ILogger<SupporterCheckout> log)
 {
     internal const string Currency = "CAD";
     private const int FailuresPerWindow = 5;
@@ -45,7 +45,7 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
 
     private static object Error(string code, string message) => new { ok = false, code, error = message };
 
-    /// <summary>One bridge call: login, status, order, bind, capture, reverse, funding.</summary>
+    /// <summary>One bridge call: login, status, order, bind, capture, reverse, funding, active.</summary>
     public async Task<object> HandleAsync(string action, JsonElement body)
     {
         string Text(string name) => body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out var v)
@@ -63,6 +63,7 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
                 Text("currency"), Text("status")),
             "reverse" => await ReverseAsync(Text("eventId"), Text("captureId"), Text("kind"), Number("amountCents")),
             "funding" => await FundingAsync(Number("fromUtcMs"), Number("toUtcMs"), Text("provider")),
+            "active" => Active(),
             _ => Error("unknown-action", "Unknown supporter action."),
         };
     }
@@ -186,6 +187,17 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
             toUtcMs > 0 ? toUtcMs : long.MaxValue));
         return new { ok = true, grossCents = sums[0], refundedCents = sums[1], netCents = sums[0] - sums[1], orders = sums[2], currency = Currency };
     }
+
+    /// <summary>
+    /// Who is a supporter right now, as AccessList.IsSupporter decides in game: paid-through dates when entitlements are
+    /// on, else the permanent list. The bridge gives these accounts' linked Discord users the Supporter role (phase 5).
+    /// </summary>
+    internal object Active() => new
+    {
+        ok = true, source = entitlements.Enabled ? "entitlements" : "legacy-list",
+        accounts = entitlements.Enabled ? entitlements.ActiveAccounts()
+            : access.LegacySupporters().Select(Key).Distinct().Order(StringComparer.Ordinal).ToArray(),
+    };
 
     /// <summary>GM "!supporter sandbox-clear": takes back the days of every sandbox payment (before going live).</summary>
     internal async Task<string> ClearSandboxAsync()
