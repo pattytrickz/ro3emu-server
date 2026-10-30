@@ -53,6 +53,8 @@ public static class ServerHost
         builder.Services.AddSingleton<AccountStore>();
         builder.Services.AddSingleton<SupporterEntitlements>();
         builder.Services.AddSingleton<SupporterCheckout>();
+        builder.Services.AddSingleton<SupporterTokenMail>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SupporterTokenMail>());
         builder.Services.AddSingleton<AccessList>();
         builder.Services.AddSingleton<CrystalEconomy>();
         builder.Services.AddSingleton<Http.LauncherVersions>();
