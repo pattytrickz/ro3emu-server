@@ -41,6 +41,13 @@ public sealed class SupporterEntitlements(IOptions<ServerOptions> options, Accou
 
     public bool IsActive(string account) => PaidThrough(account) is long end && end > Now;
 
+    /// <summary>A change committed elsewhere (a payment's capture or refund, SupporterCheckout): the cache follows it.</summary>
+    internal void Committed(string account, long paidThroughUtcMs)
+    {
+        Loaded();
+        lock (_sync) _paidThrough![Key(account)] = paidThroughUtcMs;
+    }
+
     /// <summary>Adds <paramref name="days"/> once per <paramref name="sourceKey"/>; refused past 365 days ahead.</summary>
     internal Task<EntitlementResult> ExtendAsync(string sourceKey, string account, string reason, int days) =>
         ApplyAsync(new SupporterEntitlementPlan(sourceKey, Key(account), reason, extend: true, days * DayMs, Now, MaxAheadMs), account);
