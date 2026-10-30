@@ -371,6 +371,72 @@ public sealed class InstallerTests : IAsyncLifetime
         Assert.Equal(_origin + "b/", manifests.Origin);
     }
 
+    [Fact]
+    public async Task UsesAFallbackOriginOnlyAfterEveryMainOneFailedAndSaysSo()
+    {
+        Publish(TwoPackages());
+        var both = await Installer(Config(_origin + "a/") with { FallbackOrigins = [_origin + "b/"] }).FetchAsync();
+        Assert.Equal((_origin + "a/", false), (both.Origin, both.Fallback));
+        Assert.DoesNotContain(_requests, r => r.StartsWith("b/"));
+
+        var fallback = await Installer(Config(_origin + "missing/") with { FallbackOrigins = [_origin + "b/"] }).FetchAsync();
+        Assert.Equal((_origin + "b/", true), (fallback.Origin, fallback.Fallback));
+    }
+
+    [Fact]
+    public async Task AnEmptyFolderSkipsTheDeltaManifest()
+    {
+        Publish(TwoPackages(), deltaPackage: "p2");
+        var manifests = await Installer().FetchAsync(delta: false);
+        Assert.Null(manifests.Delta);
+        Assert.DoesNotContain(_requests, r => r.Contains("delta/"));
+    }
+
+    [Fact]
+    public async Task AnOriginWithoutThePackageCostsNoAttempt()
+    {
+        // 30 Oct 2026: mirrors hold different releases (Linode 140083, CloudFront 140035) and answer 403 for the other's.
+        // With three attempts, a 403 origin used to take every other one; now the second origin gets all three.
+        var content = Publish(TwoPackages());
+        var path = $"pkg/{Sha(Zip(TwoPackages()["p2"]))}.zip";
+        _faults["a/" + path] = context => { context.Response.StatusCode = 403; return Task.FromResult(true); };
+        int served = 0;
+        _faults["b/" + path] = context =>
+        {
+            if (Interlocked.Increment(ref served) > 2) return Task.FromResult(false);
+            context.Response.StatusCode = 503;
+            return Task.FromResult(true);
+        };
+        var game = Path.Combine(_dir.FullName, "game");
+        var installer = Installer();
+        installer.MaxAttempts = 3;
+        await installer.ApplyAsync(installer.MakePlan(await installer.FetchAsync(), game), game);
+        AssertInstalled(game, content);
+        Assert.Single(_requests, r => r.StartsWith("a/" + path));
+    }
+
+    [Fact]
+    public void PackagesComeFromTheManifestsOriginFirst()
+    {
+        var config = Config() with { FallbackOrigins = ["https://fallback.example.test/"] };
+        Assert.Equal([_origin + "b/pkg/x.zip", _origin + "a/pkg/x.zip", "https://fallback.example.test/pkg/x.zip", Remote + "pkg/x.zip"],
+            config.PackageUrls(Remote + "pkg/x.zip", _origin + "b/"));
+        // A fallback manifest's own package URLs are allowed, and its origin goes first.
+        Assert.Equal("https://fallback.example.test/pkg/y.zip",
+            config.PackageUrls("https://fallback.example.test/pkg/y.zip", "https://fallback.example.test/")[0]);
+    }
+
+    [Fact]
+    public void TheBuiltInGenesisSettingsHaveNoFallbackAndTheSameKey()
+    {
+        // CloudFront's release (140035) cannot be patched for a private server: offering it would install a dead client.
+        Assert.Empty(PublisherConfig.Genesis.FallbackOrigins);
+        Assert.Contains("https://d26b54t50zhv93.cloudfront.net/", PublisherConfig.Genesis.AllowedOrigins);
+        // The pinned key is unchanged.
+        using var key = PublisherConfig.Genesis.PublicKey();
+        Assert.Equal(3072, key.KeySize);
+    }
+
     [Theory]
     [InlineData("../evil.dll")]
     [InlineData("/etc/passwd")]

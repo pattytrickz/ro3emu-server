@@ -31,37 +31,44 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
 
     public Func<int, TimeSpan> Backoff { get; set; } = attempt => TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(attempt, 5)));
 
-    public sealed record Manifests(ReleaseManifest Full, ReleaseManifest? Delta, string Origin);
+    /// <summary>The verified manifests and where they came from. Fallback: from a <see cref="PublisherConfig.FallbackOrigins"/>
+    /// origin (every main one failed), which may hold an older release than the main mirrors.</summary>
+    public sealed record Manifests(ReleaseManifest Full, ReleaseManifest? Delta, string Origin, bool Fallback = false);
 
     /// <summary>A target file and the package to take it from.</summary>
     public sealed record Need(ReleaseManifest.TargetFile File, ReleaseManifest.Package Package);
 
+    /// <summary>Origin: where the manifests came from, tried first for every package.</summary>
     public sealed record Plan(IReadOnlyList<Need> Needed, int Present, int KeptPatched, long NeededBytes,
-        IReadOnlyList<ReleaseManifest.Package> Packages)
+        IReadOnlyList<ReleaseManifest.Package> Packages, string? Origin = null)
     {
         public long DownloadBytes => Packages.Sum(p => p.Length);
         public long LargestPackage => Packages.Count == 0 ? 0 : Packages.Max(p => p.Length);
     }
 
-    /// <summary>The full manifest (and the delta one when it verifies) from the first origin that serves a valid one.</summary>
-    public async Task<Manifests> FetchAsync(CancellationToken ct = default)
+    /// <summary>
+    /// The full manifest (and the delta one when it verifies) from the first origin that serves a valid one: the main
+    /// origins in order, then the fallback ones. <paramref name="delta"/> false skips the delta manifest (7 MB), which an
+    /// empty folder cannot use: on a slow route to the mirror that is a quarter of the wait before anything happens.
+    /// </summary>
+    public async Task<Manifests> FetchAsync(CancellationToken ct = default, bool delta = true)
     {
         Exception? last = null;
-        foreach (var origin in config.Origins)
+        foreach (var (origin, fallback) in config.Origins.Select(o => (o, false)).Concat(config.FallbackOrigins.Select(o => (o, true))))
         {
             try
             {
                 var full = await GetBytesAsync(origin + config.FullManifest, ct);
                 var sig = await GetBytesAsync(origin + config.FullSignature, ct);
                 var manifest = ReleaseManifest.Verify(full, sig, config);
-                Log?.Invoke($"manifest from {origin}: {manifest.Release.Id} sequence {manifest.Release.Sequence}, {manifest.TargetFiles.Count} files");
-                ReleaseManifest? delta = null;
-                if (config.DeltaManifest is { Length: > 0 } dm && config.DeltaSignature is { Length: > 0 } ds)
+                Log?.Invoke($"manifest from {origin}{(fallback ? " (fallback)" : "")}: {manifest.Release.Id} sequence {manifest.Release.Sequence}, {manifest.TargetFiles.Count} files");
+                ReleaseManifest? deltaManifest = null;
+                if (delta && config.DeltaManifest is { Length: > 0 } dm && config.DeltaSignature is { Length: > 0 } ds)
                 {
                     try
                     {
-                        delta = ReleaseManifest.Verify(await GetBytesAsync(origin + dm, ct), await GetBytesAsync(origin + ds, ct), config);
-                        if (delta.Release.TargetBuild.ContentSha256 != manifest.Release.TargetBuild.ContentSha256) delta = null;
+                        deltaManifest = ReleaseManifest.Verify(await GetBytesAsync(origin + dm, ct), await GetBytesAsync(origin + ds, ct), config);
+                        if (deltaManifest.Release.TargetBuild.ContentSha256 != manifest.Release.TargetBuild.ContentSha256) deltaManifest = null;
                     }
                     // Only a real failure means "no delta". Cancelled by the caller, the fetch is cancelled: without the delta
                     // every changed file comes from a full package of ~2 GB.
@@ -70,7 +77,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
                         Log?.Invoke($"delta manifest from {origin} skipped: {e.Message}");
                     }
                 }
-                return new Manifests(manifest, delta, origin);
+                return new Manifests(manifest, deltaManifest, origin, fallback);
             }
             catch (InstallException e) { last = e; Log?.Invoke($"{origin}: {e.Message}"); }
             catch (Exception e) when (!ct.IsCancellationRequested && e is HttpRequestException or OperationCanceledException or IOException)
@@ -149,7 +156,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
         }
         var order = manifests.Full.Packages.Concat(manifests.Delta?.Packages ?? []).Select(p => p.Id).Distinct().ToList();
         return new Plan(needs, targets.Count - missing.Count, keptPatched, missing.Sum(t => t.Length),
-            chosen.Values.OrderBy(p => order.IndexOf(p.Id)).ToList());
+            chosen.Values.OrderBy(p => order.IndexOf(p.Id)).ToList(), manifests.Origin);
     }
 
     private enum Present { No, Yes, Patched }
@@ -188,7 +195,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
         {
             var files = plan.Needed.Where(n => n.Package.Id == package.Id).Select(n => n.File).ToList();
             long offset = before;
-            var zip = await DownloadAsync(package, (done, _) => Progress?.Invoke("Downloading", offset + done, total), ct);
+            var zip = await DownloadAsync(package, (done, _) => Progress?.Invoke("Downloading", offset + done, total), ct, plan.Origin);
             before += package.Length;
             Extract(zip, files, folder);
             File.Delete(zip);
@@ -196,8 +203,14 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
         }
     }
 
-    /// <summary>One package into the cache, resuming a partial download, retrying across origins, SHA-256 checked.</summary>
-    public async Task<string> DownloadAsync(ReleaseManifest.Package package, Action<long, long>? progress = null, CancellationToken ct = default)
+    /// <summary>
+    /// One package into the cache, resuming a partial download, retrying across origins, SHA-256 checked. An origin that
+    /// cannot hold it (its name does not resolve, or it answers 403/404: mirrors hold different releases) leaves the
+    /// rotation at once, so the attempts go to the origins that can: with Genesis' own host gone, every other attempt
+    /// (and its back-off) used to go to a name that no longer resolves.
+    /// </summary>
+    public async Task<string> DownloadAsync(ReleaseManifest.Package package, Action<long, long>? progress = null, CancellationToken ct = default,
+        string? preferredOrigin = null)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(package.Id, "^[0-9a-f]{64}$"))
             throw new InstallException($"The manifest has a malformed package id ({package.Id}).", "Do not use this download source.");
@@ -209,11 +222,14 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
             if (new FileInfo(final).Length == package.Length && Sha256(final) == package.Sha256.ToLowerInvariant()) return final;
             File.Delete(final);
         }
-        var urls = config.PackageUrls(package.Url);
+        var urls = config.PackageUrls(package.Url, preferredOrigin);
+        var gone = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Exception? last = null;
-        for (int attempt = 0; attempt < MaxAttempts; attempt++)
+        for (int attempt = 0, turn = 0; attempt < MaxAttempts; attempt++)
         {
-            var url = urls[attempt % urls.Count];
+            var live = urls.Where(u => !gone.Contains(u)).ToList();
+            if (live.Count == 0) break;
+            var url = live[turn++ % live.Count];
             try
             {
                 long have = File.Exists(part) ? new FileInfo(part).Length : 0;
@@ -235,6 +251,15 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
             {
                 last = e;
                 Log?.Invoke($"package {package.Id[..12]} from {url}: {e.Message} (attempt {attempt + 1})");
+                if (e is HttpRequestException { HttpRequestError: HttpRequestError.NameResolutionError }
+                    or HttpRequestException { StatusCode: HttpStatusCode.Forbidden or HttpStatusCode.NotFound })
+                {
+                    // This origin never could have served it: drop it, and spend neither an attempt nor a back-off on it.
+                    gone.Add(url);
+                    turn--;
+                    attempt--;
+                    continue;
+                }
             }
             await Task.Delay(Backoff(attempt), ct);
         }

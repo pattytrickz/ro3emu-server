@@ -23,6 +23,12 @@ public sealed class LauncherConfig
     /// (20 Oct 2026) replaced the two DLLs the patch rewrites, and its login never reaches the server.
     /// </summary>
     [JsonPropertyName("maxGameRelease")] public long MaxGameRelease { get; set; }
+    /// <summary>
+    /// "publisher" mode: the oldest publisher release known to log in on <see cref="Server"/> (0 = no limit). When the main
+    /// download mirror cannot be reached, a fallback mirror may only have an older release; a new install takes it only
+    /// if it is at least this one. 30 Oct 2026: CloudFront serves 140035, from before the 140069 login change.
+    /// </summary>
+    [JsonPropertyName("minGameRelease")] public long MinGameRelease { get; set; }
     /// <summary>Buttons on the page (website, Discord, ...): label, url and an optional icon name the page knows.</summary>
     [JsonPropertyName("links")] public List<LauncherLink> Links { get; set; } = new();
 
