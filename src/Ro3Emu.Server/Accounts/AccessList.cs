@@ -9,9 +9,11 @@ namespace Ro3Emu.Server.Accounts;
 /// POST /ro3emu/access from the host); the approval is used up by that registration. In either mode a blocked name is
 /// refused, existing accounts included, and "reset" lets the next login of an existing name set a new password (the
 /// admin never sees one). "supporter" marks an account that earns Supporter Tokens alongside its Crystals
-/// (NewActivityService.PassPlay). Kept in data/access.json; names compare case-insensitively.
+/// (NewActivityService.PassPlay). Kept in data/access.json; names compare case-insensitively. With
+/// ServerOptions.Supporter.Entitlements on, supporter status is a paid-through date instead (SupporterEntitlements) and
+/// the list only says who gets the legacy end date.
 /// </summary>
-public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessList> log)
+public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessList> log, SupporterEntitlements entitlements)
 {
     public sealed class State
     {
@@ -22,11 +24,18 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
         public List<string> Supporters { get; set; } = new();
     }
 
-    /// <summary>The account earns Supporter Tokens 1:1 with the Crystals it earns in play.</summary>
+    /// <summary>The account is a supporter now: paid through a later time, or (entitlements off) on the permanent list.</summary>
     public bool IsSupporter(string? account)
     {
         if (account == null) return false;
+        if (entitlements.Enabled) return entitlements.IsActive(account);
         lock (_sync) return Has(Load().Supporters, account);
+    }
+
+    /// <summary>The permanent supporters of data/access.json, who get an end date with "!supporter legacy".</summary>
+    public IReadOnlyList<string> LegacySupporters()
+    {
+        lock (_sync) return Load().Supporters.ToList();
     }
 
     private readonly object _sync = new();
@@ -124,7 +133,9 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
                     break;
                 case "supporter":
                     if (!Has(state.Supporters, name)) state.Supporters.Add(name);
-                    reply = $"{name} is a supporter: they now earn Supporter Tokens with every Crystal they earn.";
+                    reply = entitlements.Enabled
+                        ? $"{name} is on the legacy list, but status now comes from paid-through dates: use !supporter grant."
+                        : $"{name} is a supporter: they now earn Supporter Tokens with every Crystal they earn.";
                     break;
                 case "unsupporter":
                     state.Supporters.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));

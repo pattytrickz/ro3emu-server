@@ -273,6 +273,16 @@ public sealed partial class GmCommands(IOptions<ServerOptions> options, GameData
         ["where"] = ("", Where),
         ["access"] = (Accounts.AccessList.Usage, (s, a) =>
             ReplyAsync(s, services.GetRequiredService<Accounts.AccessList>().Run(string.Join(' ', a)))),
+        ["supporter"] = (Accounts.SupporterEntitlements.Usage, async (s, a) =>
+            await ReplyAsync(s, await services.GetRequiredService<Accounts.SupporterEntitlements>().RunAsync(string.Join(' ', a),
+                services.GetRequiredService<Accounts.AccessList>().LegacySupporters()))),
+        ["crystals"] = (CrystalEconomy.Usage, async (s, a) =>
+        {
+            if (a.Length == 0 || !a[0].Equals("report", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(CrystalEconomy.Usage);
+            await ReplyAsync(s, await services.GetRequiredService<CrystalEconomy>().ReportAsync(a[1..],
+                services.GetRequiredService<NewActivityService>().PassWeek()));
+        }
+        ),
         ["dungeonsolo"] = ("on|off (test aid, this role session only)", async (s, a) =>
         {
             if (a.Length != 1 || a[0].ToLowerInvariant() is not ("on" or "off")) throw new ArgumentException("on|off");

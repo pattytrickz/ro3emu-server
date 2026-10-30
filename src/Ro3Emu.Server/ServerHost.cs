@@ -51,7 +51,9 @@ public static class ServerHost
         builder.Services.AddHostedService<GameLoopTickers>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GameLoop>());
         builder.Services.AddSingleton<AccountStore>();
+        builder.Services.AddSingleton<SupporterEntitlements>();
         builder.Services.AddSingleton<AccessList>();
+        builder.Services.AddSingleton<CrystalEconomy>();
         builder.Services.AddSingleton<Http.LauncherVersions>();
         builder.Services.AddSingleton<RoleStore>();
         builder.Services.AddSingleton<Game.Ownership.OwnerRegistry>();

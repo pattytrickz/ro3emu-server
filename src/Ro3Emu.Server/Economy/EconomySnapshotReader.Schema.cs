@@ -46,7 +46,13 @@ public static partial class EconomySnapshotReader
         ["mvp_state"] = "cfg_id state state_time dead_ms", ["mvp_line_cooldown"] = "cfg_id death_ms",
         ["mvp_player"] = "player_id first_num end_num join_num team_num last_time",
         ["prontera_defense_world"] = "season_open map_id defense_point",
-        ["prontera_defense_station"] = "season_open guild_id map_id"
+        ["prontera_defense_station"] = "season_open guild_id map_id",
+        // Supporter v2 accounting, no assets: Crystals and tokens stay in role currency and the ledger (SupporterPlans).
+        ["crystal_week"] = "ledger account week earned gross",
+        ["crystal_token_remainder"] = "ledger account remainder tokens",
+        ["crystal_source_receipt"] = "source_key ledger account role_id week category gross credited tokens supporter recorded_utc_ms",
+        ["supporter_entitlement"] = "account paid_through_utc_ms updated_utc_ms",
+        ["supporter_entitlement_ledger"] = "source_key account reason before_utc_ms after_utc_ms recorded_utc_ms"
     };
 
     private sealed partial class State

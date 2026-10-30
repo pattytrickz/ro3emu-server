@@ -172,6 +172,9 @@ public sealed class ServerOptions
     /// <summary>Who may register and log in (Accounts.AccessList, data/access.json).</summary>
     public AccessOptions Access { get; set; } = new();
 
+    /// <summary>Supporter system v2: paid-through entitlements and the account-wide Crystal budget; each part off by default.</summary>
+    public SupporterOptions Supporter { get; set; } = new();
+
     /// <summary>Every GM command (chat, GM panel, loopback tool) is appended to data/logs/gm-audit.log.</summary>
     public bool GmAudit { get; set; }
 
@@ -616,6 +619,32 @@ public sealed class AccessOptions
 {
     /// <summary>"open": a new name registers on its first login (default). "approved": only names an admin approved.</summary>
     public string Mode { get; set; } = "open";
+}
+
+/// <summary>
+/// Supporter system v2 (owner's plan v1.1, decisions of 30 Oct 2026). Every part is off until the owner turns it on, so
+/// a rollback is a config change: no balance is ever rewritten.
+/// </summary>
+public sealed class SupporterOptions
+{
+    /// <summary>Supporter status comes from paid-through dates (Accounts.SupporterEntitlements) instead of
+    /// data/access.json's permanent list. Give the listed supporters their end date first (GM "!supporter legacy").</summary>
+    public bool Entitlements { get; set; }
+
+    /// <summary>
+    /// The account-wide weekly Crystal budget (Game.CrystalEconomy). "off": as before (1,400 a week per character,
+    /// supporters earn tokens 1:1). "shadow": pays as before but records what the budget would pay. "on": repeatable
+    /// play Crystals are capped per account and week, and active supporters earn 1 token per <see cref="CrystalsPerToken"/>.
+    /// Switch modes at the weekly reset (Monday 05:00 UTC): each mode keeps its own counters.
+    /// </summary>
+    public string CrystalEconomy { get; set; } = "off";
+
+    /// <summary>Repeatable play Crystals an account may earn in a pass week, over all its characters. Pass level
+    /// rewards are a season reward outside it.</summary>
+    public int WeeklyCrystalCap { get; set; } = 700;
+
+    /// <summary>Eligible Crystals per Supporter Token; the remainder carries over.</summary>
+    public int CrystalsPerToken { get; set; } = 10;
 }
 
 /// <summary>
