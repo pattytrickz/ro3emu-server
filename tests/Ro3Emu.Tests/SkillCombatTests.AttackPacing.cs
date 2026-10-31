@@ -67,6 +67,57 @@ public sealed partial class SkillCombatTests
     }
 
     /// <summary>
+    /// Vicewind's clips (31 Oct): swings kept playing with no damage. A request for the running swing, sooner than its
+    /// impact (~240 ms in), ended it and started it again, so a client asking this often never hit at all. The client
+    /// does not interrupt a normal attack with itself (LC_Skill_RunTimeContext.SkillCanInterrupted).
+    /// </summary>
+    [ClientDataFact]
+    public async Task ARequestBeforeTheImpactJoinsTheRunningSwingSoItStillLands()
+    {
+        const int Dagger = 2010120, BasicAttack = 1005001;
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!job 5100");
+        await Gm("alice", $"!item {Dagger} 1");
+        var combat = _app.Services.GetRequiredService<CombatService>();
+        var target = await Target("alice", stationary: true);
+        int hits = 0;
+        Func<GameSession, MonsterUnit, System.Text.Json.JsonElement, long, Task> count = (s, m, row, amount) =>
+        {
+            if (m == target && amount > 0) hits++;
+            return Task.CompletedTask;
+        };
+        await Loop.InvokeAsync(() =>
+        {
+            var dagger = Session("alice").Items.Single(i => i.Entry == Dagger);
+            dagger.Pack = 2;
+            dagger.Grid = 1;
+            target.Hp = 1_000_000;
+            combat.DealtAsync.Add(count);
+            return Task.CompletedTask;
+        });
+        try
+        {
+            await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = BasicAttack, TargetId = target.Uid });
+            var first = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+            await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = BasicAttack, TargetId = target.Uid });
+            var second = await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser);
+            Assert.Equal(0, second.Result);
+            Assert.Equal(first.SessionId, second.SessionId);
+            for (int i = 0; i < 25; i++) // ~2.5 s of requests every 100 ms, each sooner than an impact
+            {
+                await alice.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = BasicAttack, TargetId = target.Uid });
+                Assert.Equal(0, (await Next(alice, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+                await Task.Delay(100);
+            }
+            Assert.True(await Loop.InvokeAsync(() => Task.FromResult(hits)) >= 2, "swings restarted before their impact");
+        }
+        finally
+        {
+            await Loop.InvokeAsync(() => { Session("alice").Attack = null; combat.DealtAsync.Remove(count); return Task.CompletedTask; });
+        }
+    }
+
+    /// <summary>
     /// Sonic Blow has no cooldown (_iCD 0) and cancels itself (_bCancelCast 1): recast after each impact it hit far more
     /// often than its 1200 ms action allows ("spammable"). It is paced per skill like the normal attack.
     /// </summary>

@@ -113,6 +113,11 @@ public sealed partial class CombatService
             else error = ValidateTarget(s, row.Value, req, origin, owned == null ? WalkSlack(s) : 0,
                 _data.Row("SkillConfig", request.SkillId) is { } askedRow ? Range(askedRow) : 0);
         }
+        if (error == 0 && owned == null && JoinsRunningCast(s, row!.Value, req) is { } running)
+        {
+            if (!lineup) await s.SendGameAsync(UseSkill, new CastSkillRsp { SessionId = running.Id, IsAutoCast = req.IsAutoCast });
+            return;
+        }
         var costs = row is { } value ? ResolveCosts(s, value) : new CastCosts();
         long errorParam = 0;
         if (error == 0) (error, errorParam) = ValidateCosts(s, costs);
@@ -172,6 +177,24 @@ public sealed partial class CombatService
         await StartCastAsync(s, row.Value, req, id, owned);
         if (owned == null && !lineup && new SkillConfig(row.Value).SystemType == SkillService.QueueSystemType)
             StartLineup(s, s.SkillCast);
+    }
+
+    /// <summary>
+    /// A request for the skill already on its way to the same target, before its impact: the running cast goes on and
+    /// the request is answered with its session. LC_Skill_RunTimeContext.SkillCanInterrupted: _iInterruptedType 1 (every
+    /// normal attack) is NotInterrupt by its own skill id, and 2 can be interrupted only from the hit point. The server's
+    /// attack loop swings on its own clock and the client asks for every swing itself, so a request and a swing cross on
+    /// the wire; ending the swing for that request sent the client a SkillEnd, it asked again, and swings kept restarting
+    /// before their impact: fast animations with no damage (#247, #181). A later request is a new swing as before.
+    /// </summary>
+    private ActiveSkillCast? JoinsRunningCast(GameSession s, JsonElement row, CastSkillReq req)
+    {
+        if (s.SkillCast is not { Cancelled: false, Resolved: false, Operator: null } running || req.TargetId == 0
+            || running.Request.SkillId != req.SkillId || running.Request.TargetId != req.TargetId) return null;
+        var config = new SkillConfig(row);
+        if (config.InterruptedType is not (1 or 2)) return null;
+        // A loop that ended (a step away, a stun) restarts through the normal path.
+        return config.IfAutoAtk != 2 || s.Attack?.Target.Uid == req.TargetId ? running : null;
     }
 
     /// <summary>
