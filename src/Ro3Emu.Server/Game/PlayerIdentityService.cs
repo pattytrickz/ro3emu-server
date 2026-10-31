@@ -65,7 +65,7 @@ public sealed class PlayerIdentityService(AccessList access, IOptions<ServerOpti
     {
         Load(s);
         await cosmetics.SyncAsync(s);
-        var packet = new CustomDataChange { EntityId = s.Role!.Id, CustomDatas = { Marker(s), CharacterAppearanceService.Marker(s) } };
+        var packet = new CustomDataChange { EntityId = s.Role!.Id, CustomDatas = { Marker(s), CharacterAppearanceService.Marker(s), CharacterAppearanceService.FullMarker(s) } };
         await RoleFanout.EachAsync(world.Viewers(s).Prepend(s), p => p.SendGameAsync(WorldCoreService.CustomChange, packet));
     }
 }

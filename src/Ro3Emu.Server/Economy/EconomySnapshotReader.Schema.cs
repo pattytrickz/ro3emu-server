@@ -60,7 +60,9 @@ public static partial class EconomySnapshotReader
         // Which character an order's token letter went to; the tokens themselves move through the mail's own receipt.
         ["supporter_token_mail"] = "order_id account role_id tokens delivery_key sent_utc_ms",
         // Supporter Merchant purchases per account and pass week, for its account-wide limits (Game.SupporterShop).
-        ["supporter_purchase"] = "account week commodity count"
+        ["supporter_purchase"] = "account week commodity count",
+        // Dye Merchant colour unlocks per account (DyePlans): owned looks, no asset; the payment is the dye receipt's.
+        ["dye_unlock"] = "account palette source unlocked_utc_ms"
     };
 
     private sealed partial class State
