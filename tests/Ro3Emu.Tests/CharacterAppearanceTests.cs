@@ -267,9 +267,9 @@ public sealed class CharacterAppearanceTests : IDisposable
         await using var host = await Start(rarePrice: 75);
         await using var alice = await host.InWorldAsync("Alice");
         await Enable(alice);
-        Assert.Equal(new long[] { tokens, 75 }, host.Service<Ro3Emu.Server.Data.GameData>()
+        Assert.Equal([tokens, 75], [.. host.Service<Ro3Emu.Server.Data.GameData>()
             .Row("ShopCommodityConfig", CharacterAppearanceRules.CommodityForItem(rare))!.Value.GetProperty("_kItemPerPrice")
-            .EnumerateArray().Select(e => e.GetInt64()).ToArray());
+            .EnumerateArray().Select(e => e.GetInt64())]);
         await Gm(host, "alice", "!item 1 1000");
         long before = Session(host, "alice").Progress!.Currency[1];
         Assert.NotEqual(0, await Buy(alice, rare)); // Zeny cannot substitute for Supporter Tokens.

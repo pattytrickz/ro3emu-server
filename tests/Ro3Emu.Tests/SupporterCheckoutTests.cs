@@ -207,11 +207,11 @@ public sealed class SupporterCheckoutTests : IDisposable
         await Pay("alice", 10, "CAP-1");
         var active = await Call("active", new { });
         Assert.Equal("legacy-list", active.GetProperty("source").GetString());
-        Assert.Equal(["bob"], active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!).ToArray());
+        Assert.Equal(["bob"], [.. active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!)]);
         // On: paid-through dates decide, and an ended one drops out.
         _options.Supporter.Entitlements = true;
         active = await Call("active", new { });
-        Assert.Equal(["alice"], active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!).ToArray());
+        Assert.Equal(["alice"], [.. active.GetProperty("accounts").EnumerateArray().Select(a => a.GetString()!)]);
         _clock.Now = _clock.Now.AddDays(31);
         Assert.Empty((await Call("active", new { })).GetProperty("accounts").EnumerateArray());
     }

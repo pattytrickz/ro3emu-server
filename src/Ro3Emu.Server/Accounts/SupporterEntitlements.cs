@@ -45,7 +45,7 @@ public sealed class SupporterEntitlements(IOptions<ServerOptions> options, Accou
     internal IReadOnlyList<string> ActiveAccounts()
     {
         var all = Loaded();
-        lock (_sync) return all.Where(e => e.Value > Now).Select(e => e.Key).Order(StringComparer.Ordinal).ToList();
+        lock (_sync) return [.. all.Where(e => e.Value > Now).Select(e => e.Key).Order(StringComparer.Ordinal)];
     }
 
     /// <summary>A change committed elsewhere (a payment's capture or refund, SupporterCheckout): the cache follows it.</summary>
@@ -96,36 +96,36 @@ public sealed class SupporterEntitlements(IOptions<ServerOptions> options, Accou
             case "status" when parts.Length == 2:
                 return $"{parts[1]}: {(IsActive(parts[1]) ? "active" : "not active")}, paid through {Date(PaidThrough(parts[1]) ?? 0)}. {mode}";
             case "grant" when parts.Length == 4 && int.TryParse(parts[2], out int days) && days is > 0 and <= 365:
-            {
-                var result = await ExtendAsync("manual/" + parts[3], parts[1], "staff grant " + parts[3], days);
-                return result.Outcome switch
                 {
-                    EntitlementOutcome.Refused => $"Refused: {parts[1]} would be paid more than 365 days ahead (now {Date(result.PaidThroughUtcMs)}).",
-                    EntitlementOutcome.Replayed => $"Reference {parts[3]} was already granted: {parts[1]} is paid through {Date(PaidThrough(parts[1]) ?? 0)}.",
-                    _ => $"{parts[1]} is paid through {Date(result.PaidThroughUtcMs)}. {mode}",
-                };
-            }
+                    var result = await ExtendAsync("manual/" + parts[3], parts[1], "staff grant " + parts[3], days);
+                    return result.Outcome switch
+                    {
+                        EntitlementOutcome.Refused => $"Refused: {parts[1]} would be paid more than 365 days ahead (now {Date(result.PaidThroughUtcMs)}).",
+                        EntitlementOutcome.Replayed => $"Reference {parts[3]} was already granted: {parts[1]} is paid through {Date(PaidThrough(parts[1]) ?? 0)}.",
+                        _ => $"{parts[1]} is paid through {Date(result.PaidThroughUtcMs)}. {mode}",
+                    };
+                }
             case "legacy" when parts.Length == 2 && DateTimeOffset.TryParseExact(parts[1], "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal, out var day):
-            {
-                var until = day.AddHours(5);
-                if (until.ToUnixTimeMilliseconds() <= Now) return "Pick a day in the future.";
-                var lines = new List<string>();
-                foreach (string name in legacy)
                 {
-                    var result = await AtLeastAsync("legacy/" + Key(name), name, "permanent supporter end date", until);
-                    lines.Add($"{name} {Date(result.PaidThroughUtcMs)}{(result.Outcome == EntitlementOutcome.Replayed ? " (already set)" : "")}");
+                    var until = day.AddHours(5);
+                    if (until.ToUnixTimeMilliseconds() <= Now) return "Pick a day in the future.";
+                    var lines = new List<string>();
+                    foreach (string name in legacy)
+                    {
+                        var result = await AtLeastAsync("legacy/" + Key(name), name, "permanent supporter end date", until);
+                        lines.Add($"{name} {Date(result.PaidThroughUtcMs)}{(result.Outcome == EntitlementOutcome.Replayed ? " (already set)" : "")}");
+                    }
+                    return lines.Count == 0 ? "data/access.json lists no supporters." : "Legacy supporters: " + string.Join(", ", lines) + ". " + mode;
                 }
-                return lines.Count == 0 ? "data/access.json lists no supporters." : "Legacy supporters: " + string.Join(", ", lines) + ". " + mode;
-            }
             case "list":
-            {
-                var all = Loaded();
-                List<KeyValuePair<string, long>> active;
-                lock (_sync) active = all.Where(e => e.Value > Now).OrderBy(e => e.Value).ToList();
-                return (active.Count == 0 ? "No active supporters." : "Active supporters: "
-                    + string.Join(", ", active.Select(e => $"{e.Key} until {Date(e.Value)}")) + ".") + " " + mode;
-            }
+                {
+                    var all = Loaded();
+                    List<KeyValuePair<string, long>> active;
+                    lock (_sync) active = [.. all.Where(e => e.Value > Now).OrderBy(e => e.Value)];
+                    return (active.Count == 0 ? "No active supporters." : "Active supporters: "
+                        + string.Join(", ", active.Select(e => $"{e.Key} until {Date(e.Value)}")) + ".") + " " + mode;
+                }
             default:
                 return "Usage: " + Usage;
         }

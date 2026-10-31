@@ -366,7 +366,7 @@ public sealed partial class NewActivityService
             play.Sequence++;
             var save = _roles.NewTransaction();
             save.RoleBlob(role, "activity_runtime", System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(runtime));
-            if (live != null) save.Add(_crystalEconomy.Plan(live, PlaySource(role, play), role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
+            if (live != null) save.Add(CrystalEconomy.Plan(live, PlaySource(role, play), role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
             try
             {
                 await _roles.CommitAsync(save, "activity/pass-progress", _ =>
@@ -387,7 +387,7 @@ public sealed partial class NewActivityService
         {
             // Live: the budget's accounting commits with the award or not at all.
             result = await CommitAsync(session, session.NewActivities!.Clone(), extra: grants, runtime: runtime, source: source,
-                persist: live == null ? null : tx => tx.Add(_crystalEconomy.Plan(live, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds())),
+                persist: live == null ? null : tx => tx.Add(CrystalEconomy.Plan(live, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds())),
                 committed: live == null ? null : () => _crystalEconomy.Committed(live));
         }
         catch when (live != null) { _crystalEconomy.Forget(live); throw; }
@@ -412,7 +412,7 @@ public sealed partial class NewActivityService
         try
         {
             var tx = _accounts.NewTransaction();
-            tx.Add(_crystalEconomy.Plan(quote, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
+            tx.Add(CrystalEconomy.Plan(quote, source, role, _clock.GetUtcNow().ToUnixTimeMilliseconds()));
             await tx.CommitAsync(_accounts, "crystal/shadow");
             _crystalEconomy.Committed(quote);
         }

@@ -58,7 +58,7 @@ public sealed class SupporterShop
     private static string Key(string account) => account.ToLowerInvariant();
     internal static string StateKey(string account) => "supporter-boost/" + Key(account);
     private long Week => NewActivityService.PassPeriod(_clock.GetLocalNow()).Week;
-    private static readonly int[] ExpGroup = SupporterShopRules.Products.Where(p => p.Kind == SupporterShopRules.Exp).Select(p => p.Commodity).ToArray();
+    private static readonly int[] ExpGroup = [.. SupporterShopRules.Products.Where(p => p.Kind == SupporterShopRules.Exp).Select(p => p.Commodity)];
 
     // --- Purchase (ShopService.BuyOneAsync) ------------------------------------------------------------------------
 

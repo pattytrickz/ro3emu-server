@@ -35,7 +35,7 @@ public sealed class AccessList(IOptions<ServerOptions> options, ILogger<AccessLi
     /// <summary>The permanent supporters of data/access.json, who get an end date with "!supporter legacy".</summary>
     public IReadOnlyList<string> LegacySupporters()
     {
-        lock (_sync) return Load().Supporters.ToList();
+        lock (_sync) return [.. Load().Supporters];
     }
 
     private readonly object _sync = new();

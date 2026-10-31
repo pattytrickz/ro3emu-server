@@ -88,7 +88,7 @@ public sealed class SupporterTokenMailTests : IAsyncLifetime
         await Pay(20, "CAP-2");
         await Service<SupporterTokenMail>().DeliverPendingAsync();
         await Call("reverse", new { eventId = "EV-2", captureId = "CAP-2", kind = "refund", amountCents = 2000L });
-        Assert.Equal([100, 200], Letters(role).Select(l => l.Attachments.Single().Count).Order().ToArray());
+        Assert.Equal([100, 200], [.. Letters(role).Select(l => l.Attachments.Single().Count).Order()]);
         Assert.Empty(await Owed());
     }
 }

@@ -130,7 +130,7 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
         if (orderId <= 0 || providerOrderId.Length is 0 or > 64) return Error("bad-request", "Missing order.");
         var tx = accounts.NewTransaction();
         int index = tx.Add(new SupporterOrderBindPlan(orderId, providerOrderId, Now));
-        bool bound = Convert.ToInt64((await tx.CommitAsync(accounts, "supporter/order-bind"))[index]) == 1;
+        bool bound = Convert.ToInt64((await tx.CommitAsync(accounts, "supporter/order-bind"))[index], System.Globalization.CultureInfo.InvariantCulture) == 1;
         return bound ? new { ok = true } : Error("bad-state", "That order can't be paid any more. Start again.");
     }
 
@@ -196,7 +196,7 @@ public sealed class SupporterCheckout(IOptions<ServerOptions> options, AccountSt
     {
         ok = true, source = entitlements.Enabled ? "entitlements" : "legacy-list",
         accounts = entitlements.Enabled ? entitlements.ActiveAccounts()
-            : access.LegacySupporters().Select(Key).Distinct().Order(StringComparer.Ordinal).ToArray(),
+            : [.. access.LegacySupporters().Select(Key).Distinct().Order(StringComparer.Ordinal)],
     };
 
     /// <summary>GM "!supporter sandbox-clear": takes back the days of every sandbox payment (before going live).</summary>

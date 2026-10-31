@@ -71,7 +71,7 @@ internal static class InstallFlow
         Ui.Step("Asking the official servers for the current release");
         ClientInstaller.Manifests manifests;
         using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3)))
-            manifests = await installer.FetchAsync(cts.Token);
+            manifests = await installer.FetchAsync(ct: cts.Token);
         var release = manifests.Full.Release;
         Ui.Ok($"{release.Id} (release {release.Sequence}), signature checked ({config.KeyId})");
 

@@ -19,14 +19,14 @@ public sealed class SupporterTokenMail(AccountStore accounts, RoleStore roles, M
     private readonly SemaphoreSlim _running = new(1, 1);
     private readonly SemaphoreSlim _kick = new(0, int.MaxValue);
 
-    protected override async Task ExecuteAsync(CancellationToken stop)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         checkout.Paid += () => _kick.Release();
-        while (!stop.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try { await DeliverPendingAsync(); }
             catch (Exception e) when (e is not OperationCanceledException) { log.LogWarning(e, "Supporter token mail sweep failed"); }
-            try { await _kick.WaitAsync(TimeSpan.FromMinutes(1), stop); }
+            try { await _kick.WaitAsync(TimeSpan.FromMinutes(1), stoppingToken); }
             catch (OperationCanceledException) { return; }
         }
     }

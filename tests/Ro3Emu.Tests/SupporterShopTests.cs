@@ -120,7 +120,7 @@ public sealed class SupporterShopTests : IDisposable
         var data = host.Service<Ro3Emu.Server.Data.GameData>();
         var row = data.Row("ShopCommodityConfig", Recharge.Commodity)!.Value;
         Assert.Equal(SupporterShopRules.MerchantId, Ro3Emu.Server.Data.GameData.Int(row, "_iClassID"));
-        Assert.Equal([F2PRules.SupporterToken, 60L], row.GetProperty("_kItemPerPrice").EnumerateArray().Select(v => v.GetInt64()).ToArray());
+        Assert.Equal([F2PRules.SupporterToken, 60L], [.. row.GetProperty("_kItemPerPrice").EnumerateArray().Select(v => v.GetInt64())]);
         await using var alice = await host.InWorldAsync("Alice");
         await Enable(alice, CharacterAppearanceRules.FirstClientVersion); // dye-only hooks: the dyes work, this NPC stays hidden
         Assert.False(await OnLoop(host, () => CharacterAppearanceService.NpcVisible(Session(host, "alice"), merchant)));
@@ -196,7 +196,7 @@ public sealed class SupporterShopTests : IDisposable
         Assert.Null(drop.Value.Items); // no list: every item the kill drops
         host.Service<IOptions<ServerOptions>>().Value.Supporter.DropBoosterItems = [Material];
         drop = await OnLoop(host, () => rewards.SupporterDropBoost!(Session(host, "alice")));
-        Assert.Equal([Material], drop!.Value.Items!.ToArray()); // a list narrows it
+        Assert.Equal([Material], [.. drop!.Value.Items!]); // a list narrows it
         Assert.Equal(Drop.Minutes * 60L, shop.Running("alice")!.RemainingSeconds);
         // Saved with the item's use, so a relog or a restart keeps it.
         Assert.Contains("\"drop\"", host.Service<RoleStore>().ServerState(SupporterShop.StateKey("alice")));
