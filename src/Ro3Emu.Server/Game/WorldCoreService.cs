@@ -97,6 +97,7 @@ public sealed partial class WorldCoreService : IGameTicker
         combat.ReviveOffer = OfferReviveAsync;
         combat.ReviveCheck = dungeons.ExternalReviveError;
         combat.ReviveItemSkill = ReviveItemSkillAsync;
+        combat.InParty = s => s.Role != null && _teams.TeamOf(s.Role.Id).TeamId != 0;
         character.WingJump = WingJumpAsync;
         character.RegisterItemAction(TaskJumpMapAction, UseQuestWingAsync);
         scene.QueuePublicAdmission = QueueAdmissionAsync;

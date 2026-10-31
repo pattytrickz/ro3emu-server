@@ -223,7 +223,7 @@ public sealed partial class CombatService
             var (group, level) = members[index];
             int learned = _skills.Level(s.Progress, group);
             int id = learned > 0 ? _skills.RealId(group, Math.Min(level, learned)) : 0;
-            if (id <= 0) continue;
+            if (id <= 0 || LineupBuffsActive(s, id)) continue;
             await CastAsync(s, new CastSkillReq { SkillId = id, TargetId = s.Role.Id, TargetPos = s.Position.Clone(), Face = s.Face }, lineup: true);
             if (s.SkillCast is not { Cancelled: false } cast || cast.Request.SkillId != id) continue; // skipped
             int next = index + 1;
@@ -232,6 +232,20 @@ public sealed partial class CombatService
                     () => LineupStepAsync(s, members, next, generation, worldScene));
             return;
         }
+    }
+
+    /// <summary>
+    /// Auto Mode presses the Skill Bar every few seconds, so a buff skill with a short cooldown was recast, and paid for, while
+    /// its buff was still on. A solo caster skips a Lineup skill that only buffs (_kBuff1, no damage or _kBuff2) when every
+    /// one of those buffs is still on it; in a party the allies may lack it. The client has no such rule (inferred).
+    /// </summary>
+    private bool LineupBuffsActive(GameSession s, int skillId)
+    {
+        if (InParty?.Invoke(s) == true || SkillConfig.Get(_data, skillId) is not { } skill) return false;
+        var buffs = skill.Buff1.Where(b => b.Length > 0 && b[0] > 0).Select(b => (int)b[0]).ToList();
+        bool onlyBuffs = skill.Buff2.Length == 0 && !skill.DamageParam1.Any(v => v > 0) && !skill.DamageParam2.Any(v => v > 0);
+        return onlyBuffs && buffs.Count > 0
+            && buffs.All(buff => s.Buffs.Any(b => b.ConfigId == buff && b.ExpireMs > MonsterService.NowMs));
     }
 
     /// <summary>Cast item cost and frozen intent share one owner receipt; HP/SP/buffs remain runtime resources.
