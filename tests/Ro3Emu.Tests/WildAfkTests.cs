@@ -428,6 +428,45 @@ public sealed class WildAfkTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// #general 23 Oct, "Recommended Hard mob (Aster)": Pharos Lighthouse (10537) has MapConfig._iSceneType 0 like the
+    /// towns, yet the OnHook panel recommends six of its monsters (OnHookMonsterRecommendConfig, Aster 5000145 among
+    /// them). A Base 50 player's Aster kill (env 0 item 100 x48, env 1 x475) pays the Bonus Time table there.
+    /// </summary>
+    [ClientDataFact]
+    public async Task PharosLighthouseIsAHuntingFieldForBonusTime()
+    {
+        await using var bot = await InWorld();
+        await Gm(bot, "!lvl 50");
+        await Gm(bot, "!quest done 10105090"); // battle time unlocked, as in Eligible
+        await Warp(bot, 10537);
+        var options = Service<IOptions<ServerOptions>>().Value;
+        options.BonusExpAlways = true;
+        try
+        {
+            long uid = 0;
+            Vec3 position = null!;
+            await OnLoop(() =>
+            {
+                var monster = Service<World>().Map(Session(bot).WorldScene).Units.OfType<MonsterUnit>()
+                    .First(m => !m.Dead && m.Template.NpcId == 5000145);
+                monster.Hp = 1; monster.Moving = false; monster.NextRoamMs = long.MaxValue;
+                uid = monster.Uid; position = monster.Pos;
+                return Task.CompletedTask;
+            });
+            await bot.SendGameAsync(MsgId.Walk, new WalkReq { Pos = position, BStop = true, SpeedRate = 1 });
+            await bot.SendGameAsync(CombatService.UseSkill, new CastSkillReq { SkillId = 1000001, TargetId = uid });
+            Assert.Equal(0, (await Next(bot, CombatService.UseSkill, CastSkillRsp.Parser)).Result);
+            var reward = await Next(bot, CharacterService.GetRewardNotify, GetRewardNotify.Parser,
+                x => x.RewardType.Contains(1) && x.Rewards.Any(i => i.ItemEntry == 100 && i.Stack < 1000));
+            Assert.Equal(475, reward.Rewards.Single(i => i.ItemEntry == 100).Stack);
+        }
+        finally
+        {
+            options.BonusExpAlways = false;
+        }
+    }
+
     [ClientDataFact]
     public async Task MonitorCapsIdleChargeAndAutoOffPauseAndSceneExitStopConsumption()
     {
