@@ -208,7 +208,7 @@ public sealed partial class CombatService
             }
         }
         var stats = _character.Stats(s);
-        var attacker = new Fighter(stats[103], stats[104], stats[109], stats[111], s.Progress!.Level, AttackElement(s));
+        var attacker = new Fighter(stats[103], stats[104], stats[109], stats[111], s.Progress!.Level, AttackElement(s, row));
         var hit = new SkillHitInfo
         {
             SrcID = field?.Uid ?? action.SourceId, SkillId = action.Request.SkillId, SessionId = action.Id,
