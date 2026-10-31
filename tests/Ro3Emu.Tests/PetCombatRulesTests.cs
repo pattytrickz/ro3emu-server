@@ -44,6 +44,21 @@ public sealed class PetCombatRulesTests
         Assert.Equal(34, panel[105]); Assert.Equal(34, panel[106]);
     }
 
+    [ClientDataFact]
+    public void PanelStatsAreReadOncePerPetLevelAndStar()
+    {
+        var pet = new PetData { PetId = 32003, Level = 55, Star = 3 };
+        var first = PetCombatRules.PanelAttributes(Data, 32003, pet);
+        Assert.Same(first, PetCombatRules.PanelAttributes(Data, 32003, new PetData { PetId = 32003, Level = 55, Star = 3 }));
+        // Another level reads its own row.
+        var next = PetCombatRules.PanelAttributes(Data, 32003, new PetData { PetId = 32003, Level = 56, Star = 3 });
+        Assert.NotSame(first, next);
+        Assert.True(next![101] >= first![101]);
+        Assert.Equal(PetCombatRules.Star(Data, 32003, pet)?.GetRawText(),
+            Data.Table("PetStarConfig").Values.First(r => GameData.Int(r, "_iPetID") == 32003 && GameData.Int(r, "_iStar") == 3
+                && GameData.Int(r, "_iStage") == 0).GetRawText());
+    }
+
     [Fact]
     public void MissingOwnershipInputsOrUnknownProgressionHaveNoCombatTemplate()
     {
