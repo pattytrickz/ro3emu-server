@@ -209,14 +209,24 @@ public sealed class SceneView
                     _events.Writer.TryWrite(new ChatHeard(sender, msg.ReceiveId, msg.Content));
                 break;
             case CharacterService.ItemsSync:
-                // 5009 is a dataset increment: every item it adds or rewrites appears whole as an ItemBaseInfo.
-                var items = new List<ItemBaseInfo>();
-                CollectItems(DBItemsInfoIncrement.Parser.ParseFrom(body), items);
+                // 5009 is a dataset increment: a pack arrives whole, or as per-item changes (whole, partial or deleted).
+                // A used-up unit is a partial change carrying only the new stack.
+                var sync = DBItemsInfoIncrement.Parser.ParseFrom(body);
                 lock (_lock)
-                    foreach (var item in items.Where(i => i.ItemGuid != 0))
+                    foreach (var pack in sync.PackInfo.Values)
                     {
-                        _bag[item.ItemGuid] = item.ItemEntry;
-                        _stacks[item.ItemGuid] = item.Stack;
+                        if (pack.All is { } whole) foreach (var item in whole.Items.Values) PutItem(item);
+                        else if (pack.Inc is { } changes)
+                            foreach (var (guid, edit) in changes.Items)
+                                switch (edit.ValueCase)
+                                {
+                                    case DBPackInfoIncrement.Types.itemsFieldIncrement.ValueOneofCase.All: PutItem(edit.All); break;
+                                    case DBPackInfoIncrement.Types.itemsFieldIncrement.ValueOneofCase.Del: _bag.Remove(guid); _stacks.Remove(guid); break;
+                                    case DBPackInfoIncrement.Types.itemsFieldIncrement.ValueOneofCase.Inc:
+                                        if (edit.Inc.HasItemEntry) _bag[guid] = edit.Inc.ItemEntry;
+                                        if (edit.Inc.HasStack) _stacks[guid] = edit.Inc.Stack;
+                                        break;
+                                }
                     }
                 break;
             case GmCommands.BroadcastNotify:
@@ -364,21 +374,11 @@ public sealed class SceneView
         }
     }
 
-    private static void CollectItems(Google.Protobuf.IMessage message, List<ItemBaseInfo> into)
+    private void PutItem(ItemBaseInfo item)
     {
-        if (message is ItemBaseInfo item) { into.Add(item); return; }
-        foreach (var field in message.Descriptor.Fields.InFieldNumberOrder())
-        {
-            if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message) continue;
-            var value = field.Accessor.GetValue(message);
-            if (field.IsMap)
-            {
-                foreach (var entry in (System.Collections.IDictionary)value)
-                    if (((System.Collections.DictionaryEntry)entry).Value is Google.Protobuf.IMessage m) CollectItems(m, into);
-            }
-            else if (field.IsRepeated) { foreach (var m in (System.Collections.IEnumerable)value) if (m is Google.Protobuf.IMessage child) CollectItems(child, into); }
-            else if (value is Google.Protobuf.IMessage child) CollectItems(child, into);
-        }
+        if (item.ItemGuid == 0) return;
+        _bag[item.ItemGuid] = item.ItemEntry;
+        _stacks[item.ItemGuid] = item.Stack;
     }
 
     /// <summary>Bag item guids holding <paramref name="entry"/>.</summary>
