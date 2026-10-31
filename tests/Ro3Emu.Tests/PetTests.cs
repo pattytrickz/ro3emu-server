@@ -711,6 +711,26 @@ public sealed class PetTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task SupportSlotsOpenAtTheirPetSetLimitConditionNotThePublicParamLevel()
+    {
+        await using var bot = await InWorld();
+        await Unlock();
+        await CombinePet(bot);
+        // PetSetLimitConfig._iCondition2 of slot 5 is base level 55; PublicParam PetAssistFieldUnlockLv lists 70 for it
+        // (the unlock text ties support slots to Spirit Tower floors, not to the level).
+        async Task<int> Place(int slot)
+        {
+            await bot.SendGameAsync(PetService.StateUpdate, new PetStateUpdateReq { PetId = 10001, Target = (PetStateSource_Type)2, TargetSlotIndex = slot });
+            return (await Next(bot, PetService.StateUpdate, PetStateUpdateResp.Parser)).Result;
+        }
+        await Gm("!lvl 54");
+        Assert.Equal(ErrorCodes.PetSupportSlot, await Place(5));
+        await Gm("!lvl 55");
+        Assert.Equal(0, await Place(5));
+        Assert.Equal(10001, Saved(bot).SetupPlans[0].SupportPets[5]);
+    }
+
+    [ClientDataFact]
     public async Task SupportPlansCollectionAndFragmentBreakdownPersistWithoutAnActor()
     {
         await using var bot = await InWorld();
