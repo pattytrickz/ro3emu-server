@@ -14,7 +14,7 @@ public sealed partial class CombatService
     /// arrow's (<see cref="AttackElement(GameSession)"/>).
     /// </summary>
     internal int AttackElement(GameSession s, JsonElement row) =>
-        s.Progress != null && _skills.IsNormalAttack(s.Progress.Career, (int)GameData.Int(row, "_iID"))
+        s.Progress != null && _skills.IsNormalAttack(s.Progress.Career, (int)new SkillConfig(row).Id)
             && BasicAttackEnchant(s) is { } enchant ? enchant : AttackElement(s);
 
     /// <summary>
@@ -39,7 +39,7 @@ public sealed partial class CombatService
     /// </summary>
     internal long ElementDamage(GameSession s, JsonElement row, long damage)
     {
-        int element = GameData.Int(row, "_iEleType") is var own and > 1 ? (int)own : AttackElement(s, row);
+        int element = new SkillConfig(row).EleType is var own and > 1 ? (int)own : AttackElement(s, row);
         if (element is < 1 or > AttributeId.ElementCount) return damage;
         long bonus = _character.Stats(s)[AttributeId.NoneEle + element - 1];
         return bonus == 0 ? damage : (long)Math.Floor(damage * (1 + bonus / 10000d));
