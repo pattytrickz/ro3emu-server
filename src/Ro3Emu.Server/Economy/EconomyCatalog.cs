@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ro3Emu.Shared;
 
 namespace Ro3Emu.Server.Economy;
 
@@ -52,6 +53,7 @@ public sealed class EconomyCatalog
                 throw new InvalidDataException($"Invalid ItemConfig denomination: {row.Name}");
             entries.Add(id, type.GetInt32() == 1 ? EconomyAssetKind.Currency : EconomyAssetKind.Item);
         }
+        AddRuntimeItems(entries);
         using var parameters = JsonDocument.Parse(bytes[^1].Data);
         if (!parameters.RootElement.TryGetProperty("AUCTION_CURRENCY", out var bonusRow)
             || bonusRow.ValueKind != JsonValueKind.Number || !bonusRow.TryGetInt64(out long bonusCurrency))
@@ -65,6 +67,21 @@ public sealed class EconomyCatalog
         }
         sha.TransformFinalBlock([], 0, 0);
         return new EconomyCatalog(entries, bonusCurrency, Convert.ToHexString(sha.Hash!));
+    }
+
+    /// <summary>
+    /// Items GameData adds to ItemConfig at runtime (CharacterAppearanceOverlay, SupporterShopOverlay) are not in the file.
+    /// Stored, they made every economy envelope of the realm refuse (31 Oct 2026: a Drop Booster on one character stopped
+    /// other players' logins). They only add denominations, so Version, which recorded evidence is compared against, keeps
+    /// hashing the file bytes alone. Like the overlays, they need the item template the file holds.
+    /// </summary>
+    private static void AddRuntimeItems(Dictionary<long, EconomyAssetKind> entries)
+    {
+        if (!entries.ContainsKey(CharacterAppearanceRules.ItemTemplate)) return;
+        foreach (bool armour in new[] { false, true })
+            for (int palette = 0; palette < CharacterAppearanceRules.PaletteCount; palette++)
+                entries[CharacterAppearanceRules.Item(palette, armour)] = EconomyAssetKind.Item;
+        foreach (var product in SupporterShopRules.Products) entries[product.Item] = EconomyAssetKind.Item;
     }
 
     public bool TryAsset(long id, out EconomyAsset asset)

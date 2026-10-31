@@ -95,6 +95,31 @@ public sealed class EconomyEnvelopeTests : IDisposable
             location => Assert.Equal("0", location.Residual));
     }
 
+    private void StoreItem(long role, long guid, long entry)
+    {
+        using var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_accounts.DatabasePath};Pooling=False");
+        db.Open();
+        using var insert = db.CreateCommand();
+        insert.CommandText = "INSERT INTO item(guid, role_id, entry, stack, pack, sort, grid, is_locked, bind_type, bind_expire) "
+            + "VALUES($guid, $role, $entry, 1, 1, 0, 0, 0, 0, 0)";
+        insert.Parameters.AddWithValue("$guid", guid);
+        insert.Parameters.AddWithValue("$role", role);
+        insert.Parameters.AddWithValue("$entry", entry);
+        insert.ExecuteNonQuery();
+    }
+
+    /// <summary>31 Oct 2026: one uncatalogued item on one character refused other players' economy operations and logins.</summary>
+    [Fact]
+    public async Task AnUndecodableRowOnAnotherCharacterDoesNotRefuseThisOperation()
+    {
+        const long Unknown = 987_654_321;
+        Assert.False(_catalog.TryAsset(Unknown, out _));
+        long other = _roles.Create("e05d-other", 1, "E05" + Guid.NewGuid().ToString("N")[..8], 1, 1000, 1)!.Id;
+        StoreItem(other, 900_001, Unknown);
+        await Spend("e05d-tolerates-" + Guid.NewGuid().ToString("N"), "src-" + Guid.NewGuid().ToString("N")).CommitAsync(_accounts, "test");
+        Assert.Equal(90, _roles.LoadProgress(_role).Currency[1]);
+    }
+
     [Fact]
     public void EnvelopeClonesOutcomeAndCanonicalIntentBytes()
     {
