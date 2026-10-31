@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ro3Emu.Server.Data;
@@ -8,6 +9,9 @@ namespace Ro3Emu.Server.Game;
 /// <summary>Where a boss skill lands, from SkillConfig _iRelease (0 None, 1 Lock, 2 FixCircle, 3 FixRect, 4 Fan,
 /// 5 Arrow, 6 Rect360, 7 DragRect, 8 DragCircle; spec-skills-all §1) and _iRangeType (2 = area).</summary>
 public enum BossSkillArea { Target, AroundSelf, AroundTarget, Fan, Rect }
+
+/// <summary>The part of an around-area one hit lands on: the players between <see cref="Inner"/> and <see cref="Outer"/> metres.</summary>
+public readonly record struct BossHitBand(float Inner, float Outer);
 
 /// <summary>One special skill of a boss, resolved once from its SkillConfig row and show template.</summary>
 public sealed class BossSkill
@@ -34,6 +38,11 @@ public sealed class BossSkill
     public int MaxTargets { get; init; } = 1;
     /// <summary>Hit moments after the cast starts (the show's m_kAtkPoints on the cast timeline).</summary>
     public int[] HitMs { get; init; } = [];
+    /// <summary>The area of each hit of <see cref="HitMs"/> when the show warns rings (Ring of Light: 0-8, 8-16, 16-24 m);
+    /// empty when every hit is the whole <see cref="Radius"/> circle.</summary>
+    public BossHitBand[] HitBands { get; init; } = [];
+    /// <summary>How far from its centre the skill can reach a player.</summary>
+    public float HitReach => HitBands.Length > 0 ? Math.Max(Radius, HitBands.Max(b => b.Outer)) : Radius;
     public bool HighLevel { get; init; }
     public bool Damages { get; init; }
     /// <summary>Damage or a hostile _kBuff2: the hit selects players; a skill with neither only buffs the boss.</summary>
@@ -383,6 +392,7 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
         var hostile = buff2.Except(beneficial).ToArray();
         bool damages = (hostile.Length > 0 || beneficial.Length == 0)
             && (Numbers(row, "_kDamageParam1").Any(v => v > 0) || Numbers(row, "_kDamageParam2").Any(v => v > 0));
+        var hits = HitMoments(template, chant, action);
         return new BossSkill
         {
             Id = id, Row = row, Logic = logic, CdMs = cd, ChantMs = chant, ActionMs = action,
@@ -390,7 +400,8 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
             FromPhase = from, ToPhase = to, Once = once,
             Area = shape, Radius = radius, Width = width, AngleDeg = angle, Reach = reach,
             MaxTargets = (int)Math.Max(1, GameData.Int(row, "_iTargetMax")),
-            HitMs = HitMoments(template, chant, action), HighLevel = GameData.Int(row, "_iSkillEffectLevel") > 0,
+            HitMs = [.. hits.Select(h => h.Ms)], HitBands = HitBandsOf(hits, shape, radius),
+            HighLevel = GameData.Int(row, "_iSkillEffectLevel") > 0,
             Damages = damages, HitsPlayers = damages || hostile.Length > 0,
             SelfBuffs = Tuples(row, "_kBuff1").Where(b => b.Length >= 3 && b[0] > 0).Concat(beneficial)
                 .Select(b => ((int)b[0], (int)b[1], (int)b[2])).ToArray(),
@@ -406,16 +417,66 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
     /// <summary>
     /// The show's attack points on the cast timeline (CombatService.ImpactOffset), distinct, at most MaxHitsPerCast. A
     /// show whose points all sit at 0 on a long action is a scripted warning whose damage parts were server objects: one
-    /// hit at 70 % of the action (inferred lead time).
+    /// hit at 70 % of the action (inferred lead time). Each hit carries the ring its show warns for it, if any.
     /// </summary>
-    private int[] HitMoments(JsonElement? template, int chant, int action)
+    private (int Ms, BossHitBand? Band)[] HitMoments(JsonElement? template, int chant, int action)
     {
         var points = template is { } t && t.TryGetProperty("m_kAtkPoints", out var list) && list.ValueKind == JsonValueKind.Array
             ? list.EnumerateArray().Select(v => GameData.Number(v) ?? 0).Where(v => v >= 0).Distinct().Order().ToArray() : [];
-        if (points.Length == 0 || points.All(p => p < 0.05) && action >= 1000) return [chant + action * 7 / 10];
-        return points.Select(p => CombatService.ImpactOffset(template, p, chant, action)).Distinct()
-            .Take(Math.Max(1, options.MaxHitsPerCast)).ToArray();
+        if (points.Length == 0 || points.All(p => p < 0.05) && action >= 1000) return [(chant + action * 7 / 10, null)];
+        var warned = WarnedAreas(template);
+        return [.. points.Select(p => (Ms: CombatService.ImpactOffset(template, p, chant, action), Band: WarnedAt(warned, p)))
+            .DistinctBy(h => h.Ms).Take(Math.Max(1, options.MaxHitsPerCast))];
     }
+
+    /// <summary>The bands apply when the show warns at least one ring and the skill is a circle around its caster or target;
+    /// a hit without a warning of its own then lands on the whole circle.</summary>
+    private static BossHitBand[] HitBandsOf((int Ms, BossHitBand? Band)[] hits, BossSkillArea shape, float radius) =>
+        shape is BossSkillArea.AroundSelf or BossSkillArea.AroundTarget && hits.Any(h => h.Band is { Inner: > 0 })
+            ? [.. hits.Select(h => h.Band ?? new BossHitBand(0, radius))] : [];
+
+    /// <summary>A warning that closes within this many seconds of an attack point is that hit's area (Ring of Light's
+    /// warnings end 0.17, 0.03 and 0 s before its hits).</summary>
+    private const double WarningToleranceSeconds = 0.5;
+
+    /// <summary>
+    /// The circle and ring warnings of a show (EffectData m_kWarningRange: m_eShapeType 1 with m_fRadius, 5 with
+    /// m_fInnerRadius / m_fOuterRadius) and the second each closes: the show's m_kShows entry is played at the same index of
+    /// m_kPoints and the warning lasts m_fDuration.
+    /// </summary>
+    private List<(double End, BossHitBand Band)> WarnedAreas(JsonElement? template)
+    {
+        var areas = new List<(double, BossHitBand)>();
+        if (template is not { } t || !t.TryGetProperty(SkillTemplateFields.Shows, out var shows) || shows.ValueKind != JsonValueKind.Object
+            || !t.TryGetProperty(SkillTemplateFields.Points, out var points)) return areas;
+        var effects = data.SkillTemplateTable("Lua_Config_EffectData");
+        foreach (var group in shows.EnumerateObject())
+        {
+            if (group.Value.ValueKind != JsonValueKind.Array || !points.TryGetProperty(group.Name, out _)) continue;
+            var starts = Numbers(points, group.Name);
+            for (int i = 0; i < group.Value.GetArrayLength() && i < starts.Length; i++)
+            {
+                var entry = group.Value[i];
+                if (entry.ValueKind != JsonValueKind.Array || entry.GetArrayLength() == 0 || GameData.Number(entry[0]) is not { } id
+                    || !effects.TryGetValue(((long)id).ToString(CultureInfo.InvariantCulture), out var effect)
+                    || !effect.TryGetProperty(SkillTemplateFields.Point, out var point) || !point.TryGetProperty(SkillTemplateFields.WarningRange, out var warning)) continue;
+                double Value(string name) => warning.TryGetProperty(name, out var v) ? GameData.Number(v) ?? 0 : 0;
+                var band = (long)Value(SkillTemplateFields.ShapeType) switch
+                {
+                    1 => new BossHitBand(0, (float)Value(SkillTemplateFields.Radius)),
+                    5 => new BossHitBand((float)Value(SkillTemplateFields.InnerRadius), (float)Value(SkillTemplateFields.OuterRadius)),
+                    _ => default,
+                };
+                if (band.Outer > 0) areas.Add((starts[i] + Value(SkillTemplateFields.Duration), band));
+            }
+            break; // one entry per role in the exported show; the first is read like SkillTemplate
+        }
+        return areas;
+    }
+
+    private static BossHitBand? WarnedAt(List<(double End, BossHitBand Band)> warned, double point) =>
+        warned.Where(w => Math.Abs(w.End - point) <= WarningToleranceSeconds).OrderBy(w => Math.Abs(w.End - point))
+            .Select(w => (BossHitBand?)w.Band).FirstOrDefault();
 
     /// <summary>"summons three" / "@{1} Thief Bugs": the description's first parameter when it is a small count.</summary>
     private int SummonCountOf(JsonElement row) => SummonNpc(row) == 0 ? 0
