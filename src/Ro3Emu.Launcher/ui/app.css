@@ -97,6 +97,8 @@ ul{list-style:none;margin:0;padding:0}
 .message{margin-top:auto;text-align:right;font-size:13.5px;color:var(--ink-2)}
 .message.warn{color:var(--red)}
 .message.warn::before{content:"⚠ ";}
+.message-help{display:block;margin-top:6px;font-weight:600;color:var(--ink);text-decoration:underline}
+.message-help[hidden]{display:none}
 
 .actions-panel{right:var(--pad);width:420px;padding:24px 30px 20px;display:flex;flex-direction:column;align-items:center;gap:12px}
 .actions-panel h3{font-family:var(--body);font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);margin-bottom:4px}

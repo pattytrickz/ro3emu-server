@@ -55,6 +55,10 @@
     var msg = $("message");
     msg.className = "message" + (p.warn ? " warn" : "");
     $("message-text").textContent = state.message || p.text;
+    // A page that explains the failure (download help): opens in the browser (MainWindow sends outside links there).
+    var help = $("message-help");
+    help.hidden = !state.help;
+    if (state.help) help.href = state.help;
 
     var btn = $("primary"), ico = $("primary-icon");
     if (busy) {
@@ -159,7 +163,7 @@
         if (c.cmd !== "ready") return;
         emit({ type: "settings", dir: "C:\\Games\\RO3Emu\\Client", launcher: "1.0.0" });
         emit({ type: "server", online: scenario !== "offline", players: 7 });
-        if (scenario === "offline") return emit({ type: "state", phase: "offline" });
+        if (scenario === "offline") return emit({ type: "state", phase: "offline", help: "https://example.com/download-help" });
         if (scenario === "downloading") {
           emit({ type: "state", phase: "install", remote: remote });
           emit({ type: "progress", stage: "downloading", done: 6.3e9, total: 14.1e9, rate: 31.4 * 1048576, eta: 254 });
