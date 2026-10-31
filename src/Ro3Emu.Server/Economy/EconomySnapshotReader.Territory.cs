@@ -380,9 +380,7 @@ public static partial class EconomySnapshotReader
                             using (Json(value)) { }
                             break;
                         default:
-                            // One row of a table whose other rows decode: an unknown key says nothing about the schema, and
-                            // reported as one it refused every economy operation of the realm (31 Oct 2026).
-                            Issue(EconomyIssueKind.Coverage, key, "Unclassified server_state key.");
+                            Issue(EconomyIssueKind.UnknownSchema, key, "Unclassified server_state key.");
                             break;
                     }
                 });

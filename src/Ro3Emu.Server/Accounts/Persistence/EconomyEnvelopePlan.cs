@@ -225,19 +225,22 @@ internal sealed class EconomyEnvelopePlan(RoleItemPlan child, EconomyEnvelope en
     }
 
     /// <summary>The holdings and the row issues of the realm. A row that cannot be decoded is reported, not thrown: this
-    /// snapshot covers every character, and one bad row anywhere must not refuse every other player's operation. A schema
-    /// the decoder does not know still stops the plan, since nothing it reads can be trusted.</summary>
+    /// snapshot covers every character, and one bad row anywhere must not refuse every other player's operation (31 Oct
+    /// 2026: one booster's unclassified server_state key, a row's UnknownSchema). A table or column the decoder does not
+    /// know ("schema/...") still stops the plan, since nothing it reads can be trusted.</summary>
     private static (Dictionary<(EconomyAsset Asset, EconomyLocation Location), EconomyHolding> Holdings, HashSet<EconomyIssue> Issues) Read(
         SqliteConnection db, SqliteTransaction tx, EconomyCatalog catalog)
     {
         var decoded = EconomySnapshotReader.ReadTransaction(db, tx, catalog);
-        if (decoded.Issues.FirstOrDefault(x => x.Kind is EconomyIssueKind.UnknownSchema) is { } schema)
+        if (decoded.Issues.FirstOrDefault(x => x.Kind is EconomyIssueKind.UnknownSchema
+            && x.Key.StartsWith("schema/", StringComparison.Ordinal)) is { } schema)
             throw new InvalidDataException("E05d economic decoder found unclassified/corrupt stored value: " + schema.Detail);
         var result = new Dictionary<(EconomyAsset, EconomyLocation), EconomyHolding>();
         foreach (var holding in decoded.Holdings)
             if (!result.TryAdd((holding.Asset, holding.Location), holding))
                 throw new InvalidDataException("Duplicate economic holding location.");
-        return (result, decoded.Issues.Where(x => x.Kind is EconomyIssueKind.Corruption or EconomyIssueKind.Coverage).ToHashSet());
+        return (result, decoded.Issues.Where(x => x.Kind is EconomyIssueKind.Corruption or EconomyIssueKind.Coverage
+            or EconomyIssueKind.UnknownSchema).ToHashSet());
     }
 
     /// <summary>An issue this plan's own writes created refuses the plan, so its transaction rolls back and nothing
