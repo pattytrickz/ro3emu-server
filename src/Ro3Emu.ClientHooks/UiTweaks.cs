@@ -50,6 +50,7 @@ namespace Ro3Emu.ClientHooks
                 PassButton.Tick();
                 QuestAutoBattle.Tick();
                 TitleButton.Tick();
+                PosterNotToday.Tick();
             }
             catch (Exception e)
             {
