@@ -9,7 +9,8 @@ namespace Ro3Emu.Server.Game;
 /// <summary>
 /// A boss special skill (MonsterService.BossSkills picks it) carried out on the same wire as every other cast: 31100 (or
 /// 31106 for an _iSkillEffectLevel row) with the row's chant and action, so the client plays the show with its warning
-/// indicators; the boss panel's 31125 for an _iImportantSkill boss; then a 31101 at each attack point of the show, the
+/// indicators, and a 31119 for each ground warning the show leaves out (BossSkill.Warnings); the boss panel's 31125
+/// for an _iImportantSkill boss; then a 31101 at each attack point of the show, the
 /// damage from the shared formula (MonsterSkillHitAsync) and the row's _kBuff2 on the players hit. Where it lands follows
 /// BossSkill.Area, resolved at the hit, so a player who leaves the marked area in time is not hit; a ground area stays
 /// where it was marked. _kBuff1 goes on the boss, a summon spawns its minions, a charge moves the boss to its target
@@ -60,6 +61,7 @@ public sealed partial class CombatService
             SrcID = boss.Uid, SkillID = skill.Id, TargetId = targetId, TargetPos = hasTarget ? targetPos : origin, Face = face,
             SessionId = session, ChantMs = chant, SkillMs = skill.ActionMs, StartTime = now,
         }, highLevel: skill.HighLevel);
+        await BossWarningsAsync(boss, skill, targetId, hasTarget ? targetPos : origin, face);
         if (!skill.Once && skill.CdMs > 0) await BossCooldownStartedAsync(boss, skill.Id, now + skill.CdMs);
         await FightingAsync(boss);
         int show = HitEffect(GameData.Int(skill.Row, "_iScriptShow"));
@@ -70,6 +72,18 @@ public sealed partial class CombatService
                 BossSkillHitAsync(boss, player, role, pet, skill, serial, session, origin, center, face, show, first, options));
         }
         _log.LogDebug("Boss {Npc} casts {Skill} (phase {Phase})", boss.Template.NpcId, skill.Id, rt.Phase);
+    }
+
+    /// <summary>The ground warnings the show does not play (BossSkill.Warnings), on 31119 (31109 for an
+    /// _iSkillEffectLevel row) with the cast's target and facing. The boss as master and the skill let the client close
+    /// them when the boss goes or the cast is interrupted (m_bCloseWhileMasterDestroy, m_bCloseWhileSkillInterrupt; inferred).</summary>
+    private async Task BossWarningsAsync(MonsterUnit boss, BossSkill skill, long targetId, Vec3 at, float face)
+    {
+        foreach (int effect in skill.Warnings)
+            await _world.ToUnitViewersAsync(boss, skill.HighLevel ? SkillEffectHigh : SkillEffect, new SkillEffectDisplayNotify
+            {
+                SourceId = boss.Uid, TargetId = targetId, EffectId = effect, TargetPos = at, Angle = face, MasterId = boss.Uid, SkillId = skill.Id,
+            });
     }
 
     private async Task BossSkillHitAsync(MonsterUnit boss, GameSession? player, Role? role, TowerPetUnit? pet, BossSkill skill,
