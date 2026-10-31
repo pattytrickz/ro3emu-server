@@ -35,7 +35,13 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
                 .Where(id => id > 0).Distinct().ToArray();
             // Guild state has an entity revision separate from the role vector. Until guild publication
             // reaches this projection, a small worker snapshot validates it on every batch.
-            while (true)
+            // C/D 16: a lookup first serves current cached profiles and a revision-checked read without taking anyone's
+            // owner. Clients send these for everyone around them, and holding all those characters (and guilds) made
+            // each player's own casts and heartbeat wait behind other players' lookups (30 Oct: the top character-lock
+            // holder; waits up to 145 s, 18-29 s "ping" on players' screens). Only a read that ran ahead of a commit in
+            // flight takes the owners, as before.
+            var profiles = await cache.TryProfilesWithoutOwnersAsync(ids, await cache.GuildStampsAsync(ids));
+            while (profiles is null)
             {
                 var stamps = await cache.GuildStampsAsync(ids);
                 using var scope = await owners.EnterAsync("micro/user-data",
@@ -43,16 +49,15 @@ public sealed class UserDataService(SocialOwnerCache cache, OwnerRegistry owners
                         .Select(s => ReservationKey.Entity("guild", s.Id.ToString()))).Distinct().ToArray());
                 var stable = await cache.GuildStampsAsync(ids);
                 if (ids.Any(id => stamps[id] != stable[id])) continue;
-                var profiles = await cache.LoadProfilesAsync(ids, stable);
-                foreach (var key in uids.Keys)
-                {
-                    if (!long.TryParse(key.ToString(), out long uid)) continue;
-                    var asked = uids[key] is IDictionary<object, object?> types
-                        ? types.Keys.Select(t => t?.ToString() ?? "").ToHashSet() : [];
-                    if (profiles.TryGetValue(uid, out var profile) && profile is not null) results.Add(Entry(profile, asked, identityClient));
-                    else if (GuildEntry(uid) is { } guild) results.Add(guild);
-                }
-                break;
+                profiles = await cache.LoadProfilesAsync(ids, stable);
+            }
+            foreach (var key in uids.Keys)
+            {
+                if (!long.TryParse(key.ToString(), out long uid)) continue;
+                var asked = uids[key] is IDictionary<object, object?> types
+                    ? types.Keys.Select(t => t?.ToString() ?? "").ToHashSet() : [];
+                if (profiles.TryGetValue(uid, out var profile) && profile is not null) results.Add(Entry(profile, asked, identityClient));
+                else if (GuildEntry(uid) is { } guild) results.Add(guild);
             }
         }
         log.LogDebug("getAttributeBatchByVersion -> {Count} role(s)", results.Count);

@@ -240,6 +240,40 @@ public sealed class MultiplayerTests : IAsyncLifetime
         Assert.IsType<byte[]>(data["Base"]);
     }
 
+    [Fact]
+    public async Task AProfileLookupDoesNotWaitForTheOtherPlayersOwnWork()
+    {
+        await using var alice = await InWorld("Alice");
+        await using var bob = await InWorld("Bob");
+        long bobId = (long)bob.Self!.Uuid;
+        static object? Name(Dictionary<string, object?> reply) =>
+            ((Dictionary<object, object?>)((Dictionary<object, object?>)((object[])reply["Results"]!).Single()!)["Data"]!)["Name"];
+        Assert.Equal("Bob", Name(await alice.GetRoleAttributesAsync(bobId)));
+
+        // Bob's own work holds his character (a cast, a save). Alice's client asking for his name and look must not
+        // queue behind it: 30 Oct, these lookups held other players' characters and players saw 18-29 s "ping".
+        var loop = _app.Services.GetRequiredService<Ro3Emu.Server.Game.GameLoop>();
+        var owners = _app.Services.GetRequiredService<Ro3Emu.Server.Game.Ownership.OwnerRegistry>();
+        var held = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var holder = loop.InvokeAsync(async () =>
+        {
+            using var scope = await owners.EnterAsync("test/bob-busy", Ro3Emu.Server.Game.Ownership.ReservationKey.Role(bobId));
+            held.SetResult();
+            await release.Task;
+        });
+        await held.Task.WaitAsync(Wait);
+        try
+        {
+            Assert.Equal("Bob", Name(await alice.GetRoleAttributesAsync(bobId).WaitAsync(Wait)));
+        }
+        finally
+        {
+            release.SetResult();
+            await holder;
+        }
+    }
+
     private static string RepoRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

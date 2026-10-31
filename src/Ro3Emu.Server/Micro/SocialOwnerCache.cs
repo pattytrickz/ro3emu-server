@@ -85,6 +85,34 @@ public sealed class SocialOwnerCache(AccountStore accounts, OwnerRegistry owners
         return ids.ToDictionary(id => id, id => Profile(id));
     }
 
+    /// <summary>
+    /// The profiles of these roles without taking their owners: the cached ones that are current, and one read of the
+    /// rest, kept only when every row matches its owner's committed revisions, the check <see cref="LoadProfilesAsync"/>
+    /// makes. Null when a row ran ahead of its owner's apply (a commit in flight); the caller then takes the owners and
+    /// loads, as before. A profile is read for display (names, looks, guild), so it never needs the owner held.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<long, ProfileSnapshot?>?> TryProfilesWithoutOwnersAsync(IEnumerable<long> roles,
+        IReadOnlyDictionary<long, GuildStamp> currentGuilds)
+    {
+        AssertLoop();
+        var ids = roles.Distinct().ToArray();
+        var missing = ids.Where(id => Profile(id) is not { } cached || cached.GuildStamp != currentGuilds[id]).ToArray();
+        if (missing.Length != 0)
+        {
+            var loaded = await accounts.ReadAsync<Dictionary<long, ProfileSnapshot?>>(new ProfileSnapshotReadPlan(missing));
+            foreach (var snapshot in loaded.Values.OfType<ProfileSnapshot>())
+                if (!Matches(owners.GetOrRegister(snapshot.Vector), snapshot.Vector, RevisionStore.Identity, RevisionStore.Progress,
+                    "wardrobe", "guild_info", "personal", "personal_upvote", "popularity", "social_outfit", RevisionStore.GuildMembership))
+                    return null;
+            foreach (var (id, snapshot) in loaded)
+            {
+                if (snapshot is null) _profiles.Remove(id);
+                else _profiles[id] = snapshot;
+            }
+        }
+        return ids.ToDictionary(id => id, id => Profile(id));
+    }
+
     internal Task<Dictionary<long, GuildStamp>> GuildStampsAsync(IEnumerable<long> roles)
     {
         AssertLoop();
