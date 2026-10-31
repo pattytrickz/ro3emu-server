@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Romsg;
 using Ro3Emu.Server.Data;
@@ -10,6 +12,32 @@ internal static class PetCombatRules
 {
     internal enum SupportKind { Buff, AttributeHeal, MagicHeal }
     internal sealed record Support(SupportKind Kind, bool SelfOnly = false);
+
+    /// <summary>
+    /// Per GameData (its tables load once): PetStarConfig by pet, star and stage, each panel by its inputs, and the
+    /// PublicParamConfig id lists. A character's stats add every deployed pet's panel on each cast, hit and HP change;
+    /// scanning PetStarConfig and re-reading the panel's JSON for that was the game loop's largest CPU cost
+    /// (31 Oct 2026 profile: about a quarter of the loop).
+    /// </summary>
+    private sealed class Cache(GameData data)
+    {
+        internal readonly Dictionary<(int Pet, int Star, int Stage), JsonElement> Stars = StarIndex(data);
+        internal readonly ConcurrentDictionary<(int Pet, int Level, int Star, int Stage), Dictionary<int, double>?> Panels = new();
+        internal readonly ConcurrentDictionary<string, IReadOnlySet<int>> Params = new(StringComparer.Ordinal);
+
+        private static Dictionary<(int, int, int), JsonElement> StarIndex(GameData data)
+        {
+            Dictionary<(int, int, int), JsonElement> stars = [];
+            // The first row of a key wins, as the scan this replaces did.
+            foreach (var row in data.Table("PetStarConfig").Values)
+                stars.TryAdd(((int)GameData.Int(row, "_iPetID"), (int)GameData.Int(row, "_iStar"), (int)GameData.Int(row, "_iStage")), row);
+            return stars;
+        }
+    }
+
+    private static readonly ConditionalWeakTable<GameData, Cache> Caches = [];
+
+    private static Cache For(GameData data) => Caches.GetValue(data, d => new Cache(d));
 
     /// <summary>
     /// (verified) LC_PetHelper.lua:1119-1237 and Lua_CFG_AttriMonsterConfig.lua:20-48 select
@@ -57,7 +85,10 @@ internal static class PetCombatRules
     /// (32003) Lv.55 at star 3 (13300) shows HP 3534, SP 1463 and PDEF 34 for her row's 2657, 1100 and 25: (inferred)
     /// each is rounded up.
     /// </summary>
-    internal static Dictionary<int, double>? PanelAttributes(GameData data, int id, PetData pet)
+    internal static IReadOnlyDictionary<int, double>? PanelAttributes(GameData data, int id, PetData pet) =>
+        For(data).Panels.GetOrAdd((id, Math.Max(1, pet.Level), pet.Star, pet.StarProgress), _ => Panel(data, id, pet));
+
+    private static Dictionary<int, double>? Panel(GameData data, int id, PetData pet)
     {
         if (PetBaseConfig.Get(data, id) is not { } cfg || NPCConfig.Get(data, cfg.Monster) is not { } npc
             || AttriMonsterConfig.Get(data, npc.AttributeVariated * 1000 + Math.Max(1, pet.Level)) is not { } display
@@ -72,9 +103,9 @@ internal static class PetCombatRules
     }
 
     /// <summary>A PublicParamConfig list of attribute ids (empty when absent).</summary>
-    internal static HashSet<int> ParamIds(GameData data, string name) =>
-        data.Table("PublicParamConfig").GetValueOrDefault(name) is { ValueKind: JsonValueKind.Array } ids
-            ? ids.EnumerateArray().Select(v => (int)(GameData.Number(v) ?? 0)).ToHashSet() : [];
+    internal static IReadOnlySet<int> ParamIds(GameData data, string name) => For(data).Params.GetOrAdd(name, key =>
+        data.Table("PublicParamConfig").GetValueOrDefault(key) is { ValueKind: JsonValueKind.Array } ids
+            ? ids.EnumerateArray().Select(v => (int)(GameData.Number(v) ?? 0)).ToHashSet() : []);
 
     /// <summary>PetAttrChangeConfig._kAttrPerc of a quality, star and stage (attribute id to per-10000), or null.</summary>
     internal static Dictionary<long, long>? AttrChange(GameData data, int quality, int star, int stage)
@@ -85,12 +116,8 @@ internal static class PetCombatRules
         return null;
     }
 
-    internal static JsonElement? Star(GameData data, int id, PetData pet)
-    {
-        var row = data.Table("PetStarConfig").Values.FirstOrDefault(r => GameData.Int(r, "_iPetID") == id
-            && GameData.Int(r, "_iStar") == pet.Star && GameData.Int(r, "_iStage") == pet.StarProgress);
-        return row.ValueKind == JsonValueKind.Undefined ? null : row;
-    }
+    internal static JsonElement? Star(GameData data, int id, PetData pet) =>
+        For(data).Stars.TryGetValue((id, pet.Star, pet.StarProgress), out var row) ? row : null;
 
     /// <summary>
     /// (verified) These SkillConfig scripts describe allies/self, even when _kDamageParam1 is nonzero.
