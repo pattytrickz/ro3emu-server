@@ -687,6 +687,29 @@ public sealed class SupporterOptions
     /// as likely; kill EXP is never boosted by it. Listing item ids narrows it to those items only.
     /// </summary>
     public int[] DropBoosterItems { get; set; } = [];
+
+    /// <summary>The login poster that advertises Supporter status (Game.SupporterAd). Off by default.</summary>
+    public SupporterAdOptions Ad { get; set; } = new();
+}
+
+/// <summary>
+/// The client's own login poster (UI_Sys_ActivityFacePhotoPanel, the publisher's event ads) advertising Supporter status:
+/// one image from <see cref="ImageUrl"/>, its Go button opening <see cref="LinkUrl"/>. Never shown to active supporters,
+/// to the AI players (StatusExcludedAccounts) or below <see cref="MinLevel"/>; the client hook's "Don't show again today"
+/// box skips it for the rest of the player's day.
+/// </summary>
+public sealed class SupporterAdOptions
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>The poster (PNG or JPG over https), downloaded by the client each time it is shown.</summary>
+    public string ImageUrl { get; set; } = "";
+
+    /// <summary>Where the poster's Go button leads.</summary>
+    public string LinkUrl { get; set; } = "https://solro3.com/supporter";
+
+    /// <summary>New characters finish the opening chapter undisturbed.</summary>
+    public int MinLevel { get; set; } = 10;
 }
 
 /// <summary>
