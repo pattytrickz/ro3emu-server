@@ -669,9 +669,8 @@ public sealed class SupporterOptions
     public bool Shop { get; set; }
 
     /// <summary>
-    /// The Common Drop Booster's allowlist (plan §2.2): item ids of common, bound crafting materials whose drops it makes
-    /// 1.5 times as likely. Fail closed: an item not listed is never boosted, and with an empty list the booster is not
-    /// sold. Never list cards, equipment, rare materials, MVP loot, Zeny, Crystals or other currencies.
+    /// The Drop Booster's items. Empty (the owner's choice, 30 Oct 2026): every item a kill can drop, so each is 1.5 times
+    /// as likely; kill EXP is never boosted by it. Listing item ids narrows it to those items only.
     /// </summary>
     public int[] DropBoosterItems { get; set; } = [];
 }

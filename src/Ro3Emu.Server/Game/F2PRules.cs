@@ -52,13 +52,15 @@ namespace Ro3Emu.Shared
         {
             // Crystal Shop (class 130): shortcuts to power, capped per week.
             new Commodity(13101, 400, Weekly, 2),   // Surprise Chest (was 20 a week)
-            new Commodity(13102, 10, Weekly, 20),   // Oridecon (was 150)
-            new Commodity(13103, 10, Weekly, 20),   // Elunium (was 200)
+            // Owner's choice (30 Oct 2026), for the 700/week account Crystal budget: Oridecon and Elunium 10 -> 7 and the
+            // Echo Material Pack 80 -> 60, so a full essential refine week costs 400 of the 700 instead of 560.
+            new Commodity(13102, 7, Weekly, 20),    // Oridecon (was 150)
+            new Commodity(13103, 7, Weekly, 20),    // Elunium (was 200)
             new Commodity(13104, 300, Weekly, 2),   // Blessed Weapon Ore: refine without losing levels (was unlimited)
             new Commodity(13105, 300, Weekly, 2),   // Blessed Armor Ore (was unlimited)
             new Commodity(13106, 50, Weekly, 5),    // Pet Egg: card and pet draws (was unlimited)
             new Commodity(13108, 560, Weekly, 1),   // Refinement Material Pack (700 at 80%, 5 a week)
-            new Commodity(13109, 80, Weekly, 2),    // Echo Material Pack (100 at 80%, 5 a week)
+            new Commodity(13109, 60, Weekly, 2),    // Echo Material Pack (100 at 60%, 5 a week)
             new Commodity(13110, 270, Weekly, 3),   // Zeny Bag (300 at 90%, 30 a week)
             new Commodity(13123, 1000, Weekly, 1),  // Coin Bag: 1,000,000 Minted Coin, the refine currency (was 100, unlimited)
 

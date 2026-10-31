@@ -42,9 +42,9 @@ public sealed class RewardService
     /// <summary>A recipient's Supporter EXP booster in percent (0 when none or not in active Auto Mode; Game.SupporterShop).</summary>
     internal Func<GameSession, int>? SupporterExpPercent { get; set; }
 
-    /// <summary>The killer's Supporter drop booster: its extra-roll chance in percent and the allowlisted items it may
-    /// add (null when none or not in active Auto Mode; Game.SupporterShop).</summary>
-    internal Func<GameSession, (int Percent, IReadOnlySet<int> Items)?>? SupporterDropBoost { get; set; }
+    /// <summary>The killer's Supporter drop booster: its extra-roll chance in percent and the items it may add, null
+    /// Items for every item (the whole booster null when none or not in active Auto Mode; Game.SupporterShop).</summary>
+    internal Func<GameSession, (int Percent, IReadOnlySet<int>? Items)?>? SupporterDropBoost { get; set; }
     /// <summary>Monster Hunt: the area drop rolled with an ordinary field kill (MonsterHuntService).</summary>
     internal List<Func<GameSession, MonsterUnit, IEnumerable<(int Entry, int Count)>>> ExtraKillDrops { get; } = [];
     /// <summary>Monster Hunt: its kill counters join the kill's own transaction, after the AFK child (MonsterHuntService).</summary>
@@ -189,11 +189,12 @@ public sealed class RewardService
                 eventDrops + (handsOn && _random.Next(100) < _handsOnLoot ? 1 : 0), eventCards)) is not { } drops)
             return ([], NoExp);
         foreach (var extra in ExtraKillDrops) drops.AddRange(extra(player, monster));
-        // Supporter drop booster (plan §2.2): at its chance the tables roll once more and only allowlisted common
-        // materials are kept, so those are 1.5 times as likely; everything else (cards, EXP, gear) keeps the data's odds.
-        if (SupporterDropBoost?.Invoke(player) is { } boost && boost.Items.Count > 0 && _random.Next(100) < boost.Percent
+        // Supporter drop booster (plan §2.2): at its chance the tables roll once more and that roll's items are kept
+        // (all of them, or only Supporter:DropBoosterItems when listed), so they are 1.5 times as likely. The extra
+        // roll's EXP is dropped: the booster never adds kill EXP.
+        if (SupporterDropBoost?.Invoke(player) is { } boost && _random.Next(100) < boost.Percent
             && RollDrops(player, monster, bonus, 1, 1) is { } again)
-            drops.AddRange(again.Where(d => boost.Items.Contains(d.Entry)));
+            drops.AddRange(again.Where(d => d.Entry is not (BaseExpItem or JobExpItem) && (boost.Items == null || boost.Items.Contains(d.Entry))));
         long rolled = drops.Where(d => d.Entry == BaseExpItem).Sum(d => (long)d.Count);
         var items = drops.Where(d => d.Entry is not (BaseExpItem or JobExpItem) && _data.Row("ItemConfig", d.Entry) != null).ToList();
         int partyBonus = _teams.ExpBonus(player);
