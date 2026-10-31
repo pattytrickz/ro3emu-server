@@ -140,7 +140,9 @@ public sealed class SupporterShop
     {
         if (SupporterShopRules.ByItem(item.Entry) is not { } p || s.Role is not { } role || s.Account is not { } account) return null;
         if (count != 1 || req.ItemParam.Count != 0) return ErrorCodes.Parameter;
-        if (!_access.IsSupporter(account))
+        // Owner's rule (31 Oct 2026): only Supporters can buy the Recharge, but anyone who has one can use it (it comes in
+        // thank-you gifts). The boosters still need active Supporter status to use.
+        if (p.Kind != SupporterShopRules.Recharge && !_access.IsSupporter(account))
         {
             await GmCommands.ReplyAsync(s, $"{p.Name} needs active Supporter status. It stays in your bag.");
             return ErrorCodes.FeatureUnavailable;

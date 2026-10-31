@@ -40,12 +40,14 @@ public static class SupporterShopRules
         public string Description { get; }
     }
 
-    private const string Rules = " Use needs active Supporter status. Bound to this character; cannot be traded.";
+    private const string Bound = " Bound to this character; cannot be traded.";
+    private const string Rules = " Use needs active Supporter status." + Bound;
 
     public static readonly Product[] Products =
     {
+        // Anyone may use a Recharge they own (owner, 31 Oct 2026); only Supporters can buy one.
         new Product(1_999_301, 9_930_301, Recharge, 60, 2, 0, 60, "Auto-Battle Time Recharge",
-            "Adds 60 minutes of auto-battle (Bonus) time to this character, up to your bank limit. Not used if it would not fit." + Rules),
+            "Adds 60 minutes of auto-battle (Bonus) time to this character, up to your bank limit. Not used if it would not fit." + Bound),
         new Product(1_999_302, 9_930_302, Exp, 80, 1, 50, 60, "Auto EXP Booster +50%",
             "+50% Base and Job EXP from monsters you defeat in Auto Mode, for 60 minutes of active auto-battle. The time only "
             + "runs while auto-battle time is being used. One booster at a time." + Rules),

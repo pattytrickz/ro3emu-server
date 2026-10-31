@@ -165,7 +165,8 @@ public sealed partial class EventService : IGameTicker
             await _roles.SetServerStateAsync(ClaimKey(g, role), _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
             try
             {
-                string mail = await _mail.SendRawAsync(role, g.Title, g.Title, [new MailService.Attachment(g.Item, Math.Max(1, g.Count))]);
+                string mail = await _mail.SendRawAsync(role, g.Title, g.Message is { Length: > 0 } text ? text : g.Title,
+                    [.. g.Attachments().Select(a => new MailService.Attachment(a.Item, a.Count))]);
                 LogLoginGift(_log, g.Id, g.Count, g.Item, name, role, mail);
                 sent++;
             }
