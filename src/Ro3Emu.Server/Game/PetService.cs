@@ -372,7 +372,10 @@ public sealed partial class PetService
 
     private bool SlotOpen(GameSession s, int source, int slot)
     {
-        int[] levels = source == 1 ? [33, 33, 45, 50] : [40, 55, 60, 65, 70]; // PublicParamConfig Pet*FieldUnlockLv.
+        // PublicParamConfig PetFightFieldUnlockLv. Support slots (PetAssistFieldUnlockLv 40..70) are not held to it as a base
+        // level: the unlock text ties them to Spirit Tower floors and PetSetLimitConfig._iCondition2 (base level 39..55)
+        // is their only level gate; the client offered the last slot below level 70 and the server refused it (inferred).
+        int[] levels = source == 1 ? [33, 33, 45, 50] : new int[5];
         return slot >= 1 && slot <= levels.Length && s.Progress!.Level >= levels[slot - 1]
             && _data.Row("PetSetLimitConfig", slot) is { } row
             && GameData.Int(row, source == 1 ? "_iCondition1" : "_iCondition2") is var condition and > 0

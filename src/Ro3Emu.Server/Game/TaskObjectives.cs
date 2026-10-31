@@ -97,6 +97,8 @@ public sealed partial class TaskService
     //   per committed successful clear of a listed boss (DungeonService.MultiBossCleared). Guild co-op (type 16) and
     //   Adventure Party (type 23) quests say "with at least @{1} other members": they count only when another member of
     //   the role's guild / adventure group cleared the same run (inferred).
+    //   The guides 306070 / 306080 say "Clear the Phantom Realm dungeon" but list Realm of the Gods bosses only; a Phantom
+    //   Realm clear (TenGameplayConfig type 50101) counts for them too (inferred).
     // - 106802 [n] "Participate in Treasure Hunting ${1} times" (zh 参与${1}次挖宝): one per committed dig at the Treasure
     //   Map's point (NewActivityService.CompleteTreasureHuntAsync); using the map alone is not a dig (inferred).
     // - 210012 [n] "Participate in Battle of Dragon Coffin Island or Survivor Battle" and 210009 [n] "Participate in Battle

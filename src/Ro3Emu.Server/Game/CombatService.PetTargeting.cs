@@ -13,9 +13,9 @@ public sealed partial class CombatService
     /// <summary>Whether a point is inside a skill row's area: monster selection for every skill, and a guardian's player
     /// targets. Guardian rows alone may carry the forward rectangle, inferred for Eve's final throw from its "ahead"
     /// description.
-    /// (inferred) A missing _kRange is 3 m and a fan without an angle 90 degrees; a rectangle is centred on its anchor and,
-    /// without a length, reaches its width ahead and behind.</summary>
-    private static bool SkillAreaContains(JsonElement row, Vec3 origin, Vec3 requested, float face, Vec3 point)
+    /// (inferred) A missing _kRange is 3 m and a fan without an angle 90 degrees; a drag rectangle is centred on its anchor
+    /// and reaches half its second value ahead and behind.</summary>
+    internal static bool SkillAreaContains(JsonElement row, Vec3 origin, Vec3 requested, float face, Vec3 point)
     {
         int release = (int)GameData.Int(row, "_iRelease");
         Vec3 center = release is SkillRelease.Lock or SkillRelease.DragRect or SkillRelease.DragCircle ? requested : origin;
@@ -26,6 +26,10 @@ public sealed partial class CombatService
         var (forward, side) = FacingOffset(point.X - center.X, point.Z - center.Z, face);
         if (row.TryGetProperty("_ro3GuardianForwardRectangle", out _))
             return Math.Abs(side) <= radius / 2 && forward >= 0 && forward <= range.ElementAtOrDefault(1) / 100;
+        // Earth Strain (1231001, Rect360, _kRange [1550, 750]): "in a ${1}-meter by ${2}-meter area in front of You", _kDescData
+        // 7 and 15; the same order holds for the other Rect360, Arrow and FixRect rows: [length ahead, width across].
+        if (release is SkillRelease.FixRect or SkillRelease.Arrow or SkillRelease.Rect360 && range.Length > 1)
+            return forward >= -0.5 && forward <= radius + .1 && Math.Abs(side) <= range[1] / 200 + .1;
         if (release is SkillRelease.FixRect or SkillRelease.Arrow or SkillRelease.Rect360 or SkillRelease.DragRect)
             return Math.Abs(side) <= radius / 2 && Math.Abs(forward) <= (range.Length > 1 ? range[1] / 200 : radius);
         return Distance(center, point) <= radius + .1 && (release != SkillRelease.Fan

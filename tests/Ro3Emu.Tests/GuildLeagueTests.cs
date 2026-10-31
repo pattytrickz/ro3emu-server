@@ -21,8 +21,8 @@ public sealed partial class GuildLeagueTests : IAsyncLifetime
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(15);
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-league-" + Guid.NewGuid().ToString("N"));
     // Members join in real time (GuildService.EnterTime) and stop being temporary after an hour: the realm opens on a
-    // Monday more than a week ahead of today.
-    private readonly DateTime _opening = FutureMonday();
+    // fixed Monday, far enough ahead that real time stays before it.
+    private readonly DateTime _opening = new(2030, 1, 7);
     private readonly Clock _clock = new();
     private WebApplication _app = null!;
     private string _http = "";
@@ -34,13 +34,6 @@ public sealed partial class GuildLeagueTests : IAsyncLifetime
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Local;
         public void Set(long value) => Interlocked.Exchange(ref _seconds, value);
         public long Now => Interlocked.Read(ref _seconds);
-    }
-
-    private static DateTime FutureMonday()
-    {
-        var day = DateTime.Today.AddDays(8);
-        while (day.DayOfWeek != DayOfWeek.Monday) day = day.AddDays(1);
-        return day;
     }
 
     /// <summary>Unix seconds of a local time in opening week <paramref name="week"/> (1-based), weekday 1 = Monday.</summary>

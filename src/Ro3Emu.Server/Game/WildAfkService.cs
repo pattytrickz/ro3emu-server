@@ -109,13 +109,26 @@ public sealed class WildAfkService : IGameTicker
     }
     private bool Unlocked(GameSession s) => s.Progress != null && _functions.IsOpen(s, 18);
     /// <summary>
+    /// The maps the OnHook panel recommends monsters on (OnHookMonsterRecommendConfig._iMapID). Pharos Lighthouse
+    /// (10537) has _iSceneType 0 like the towns, yet the panel recommends six of its monsters (Aster 5000145 among them),
+    /// so it is a hunting field for Bonus Time (inferred). Every other listed map is a field (1) or a cave (6).
+    /// </summary>
+    private HashSet<long> RecommendedMaps =>
+        _recommendedMaps ??= [.. OnHookMonsterRecommendConfig.All(_data).SelectMany(r => r.MapId)];
+    private HashSet<long>? _recommendedMaps;
+    /// <summary>
     /// The shared hunting maps Bonus Time runs on: the fields (enum scene type 1) and the caves (6: Undersea Tunnel,
     /// Culvert, Geffen Tower, ...; MapConfig _iCaveBelongsTo names their field). The OnHook panel recommends monsters
     /// on both (OnHookMonsterRecommendConfig._iMapID), and the cave names carry no 副本, so a cave is not one of the
     /// "Dungeons and similar Locations" of Localization_en 10960000077 (inferred). Private/dungeon maps never qualify.
     /// </summary>
     private bool Field(GameSession s) => s.InstanceId == 0 && _data.Row("MapConfig", s.SceneEntry) is { } map
-        && GameData.Int(map, "_iSceneType") is 1 or 6;
+        && GameData.Int(map, "_iSceneType") switch
+        {
+            1 or 6 => true, // enum scene type: field or cave; private/dungeon maps never qualify.
+            0 => RecommendedMaps.Contains(s.SceneEntry), // Pharos Lighthouse: scene type 0 like the towns, but a hunting map.
+            _ => false,
+        };
     /// <summary>
     /// Where 43409 may turn Bonus Time back on: the hunting maps and the towns (enum scene type 0). Localization_en
     /// 10960000077 only refuses "Dungeons and similar Locations", and the switch already stays on, suspended, when a

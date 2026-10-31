@@ -676,6 +676,44 @@ public sealed class PetTests : IAsyncLifetime
     }
 
     [ClientDataFact]
+    public async Task OpeningTheHatcheryLevelsARoomWhoseBarIsAlreadyFull()
+    {
+        await using var bot = await InWorld();
+        await Unlock(hatch: true);
+        await Gm("!delitem 1");
+        var data = _app.Services.GetRequiredService<GameData>();
+        var cost = data.Row("PetIncubationRoomConfig", 2)!.Value.GetProperty("_kCost")[0];
+        int coin = cost[0].GetInt32();
+        long price = cost[1].GetInt64(), bar = GameData.Int(data.Row("PetIncubationRoomConfig", 2)!.Value, "_iExp");
+        // A bar that filled while the next step was unaffordable (or before rooms levelled themselves) stays full.
+        await _app.Services.GetRequiredService<GameLoop>().InvokeAsync(async () =>
+        {
+            using var held = await CharacterService.Lock(Session);
+            Session.Pets!.IncubationExp = 20;
+            Roles.SavePets(RoleId(bot), Session.Pets.ToByteArray());
+        });
+        await bot.SendGameAsync(PetService.OpenRoom, new NullArg());
+        await Next(bot, PetService.OpenRoom, NullArg.Parser);
+        // The level-up panel compares the room level with the one last opened, so that stays behind.
+        Assert.Equal((2L, 10L, 1L), (Saved(bot).IncubationLv, Saved(bot).IncubationExp, Saved(bot).OnOpenUIRoomLv));
+
+        // Room 2's step costs money: a full bar waits for it and the next opening buys the step.
+        await _app.Services.GetRequiredService<GameLoop>().InvokeAsync(async () =>
+        {
+            using var held = await CharacterService.Lock(Session);
+            Session.Pets!.IncubationExp = bar;
+            Roles.SavePets(RoleId(bot), Session.Pets.ToByteArray());
+        });
+        await bot.SendGameAsync(PetService.OpenRoom, new NullArg());
+        await Next(bot, PetService.OpenRoom, NullArg.Parser);
+        Assert.Equal((2L, bar), (Saved(bot).IncubationLv, Saved(bot).IncubationExp));
+        await Gm($"!item {coin} {price}");
+        await bot.SendGameAsync(PetService.OpenRoom, new NullArg());
+        await Next(bot, PetService.OpenRoom, NullArg.Parser);
+        Assert.Equal((3L, 0L, 0L), (Saved(bot).IncubationLv, Saved(bot).IncubationExp, Count(bot, coin)));
+    }
+
+    [ClientDataFact]
     public async Task FastHatchRequiresRoomTwoAndAtomicallyConsumesMaterialsAndAccelerators()
     {
         await using var bot = await InWorld();
@@ -708,6 +746,26 @@ public sealed class PetTests : IAsyncLifetime
         await bot.SendGameAsync(PetService.FastEgg, new FastIncubateReq { RoundId = 10001 });
         Assert.NotEqual(0, (await Next(bot, PetService.FastEgg, FastIncubateRes.Parser)).Result);
         Assert.Equal(before, Saved(bot).ToByteArray());
+    }
+
+    [ClientDataFact]
+    public async Task SupportSlotsOpenAtTheirPetSetLimitConditionNotThePublicParamLevel()
+    {
+        await using var bot = await InWorld();
+        await Unlock();
+        await CombinePet(bot);
+        // PetSetLimitConfig._iCondition2 of slot 5 is base level 55; PublicParam PetAssistFieldUnlockLv lists 70 for it
+        // (the unlock text ties support slots to Spirit Tower floors, not to the level).
+        async Task<int> Place(int slot)
+        {
+            await bot.SendGameAsync(PetService.StateUpdate, new PetStateUpdateReq { PetId = 10001, Target = (PetStateSource_Type)2, TargetSlotIndex = slot });
+            return (await Next(bot, PetService.StateUpdate, PetStateUpdateResp.Parser)).Result;
+        }
+        await Gm("!lvl 54");
+        Assert.Equal(ErrorCodes.PetSupportSlot, await Place(5));
+        await Gm("!lvl 55");
+        Assert.Equal(0, await Place(5));
+        Assert.Equal(10001, Saved(bot).SetupPlans[0].SupportPets[5]);
     }
 
     [ClientDataFact]
