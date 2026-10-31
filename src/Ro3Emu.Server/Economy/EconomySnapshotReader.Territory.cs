@@ -369,8 +369,20 @@ public static partial class EconomySnapshotReader
                                 || !DateTimeOffset.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _))
                                 throw new FormatException("Invalid login gift claim.");
                             break;
+                        case "aigm_config":
+                        case "aigm_log":
+                            // AiGmService: settings and its audit lines: no balance.
+                            using (Json(value)) { }
+                            break;
+                        case var boost when boost.StartsWith("boost/", StringComparison.Ordinal)
+                            || boost.StartsWith("supporter-boost/", StringComparison.Ordinal):
+                            // BoostService, SupporterShop: the time left on a used booster; the item is already spent: no balance.
+                            using (Json(value)) { }
+                            break;
                         default:
-                            Issue(EconomyIssueKind.UnknownSchema, key, "Unclassified server_state key.");
+                            // One row of a table whose other rows decode: an unknown key says nothing about the schema, and
+                            // reported as one it refused every economy operation of the realm (31 Oct 2026).
+                            Issue(EconomyIssueKind.Coverage, key, "Unclassified server_state key.");
                             break;
                     }
                 });
