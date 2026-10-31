@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Ro3Emu.Server.Data.Config;
 
 namespace Ro3Emu.Server.Game;
 
@@ -12,6 +13,13 @@ public sealed partial class TaskService
 {
     /// <summary>TaskConfig type 16, the guild activity quests (1601010-1603042), and 23, the Adventure Party quests.</summary>
     private const int GuildQuestType = 16, AdventureGroupQuestType = 23;
+
+    /// <summary>TenGameplayConfig._iType of the Phantom Realm rows (50101-50199); the Realm of the Gods is 100101.</summary>
+    private const int PhantomRealmType = 50101;
+
+    /// <summary>TaskConfig 306070 "Phantom Realm" and 306080 "Conquer the World" (type 3 guides): "Clear the Phantom Realm
+    /// dungeon", yet their 106602 target lists the Realm of the Gods bosses only (the list of 1601020).</summary>
+    private static readonly long[] PhantomRealmGuides = [306070, 306080];
 
     private readonly ConditionalWeakTable<Ownership.AttachmentLease, StrongBox<long>> _friendCounts = new();
 
@@ -58,7 +66,14 @@ public sealed partial class TaskService
         bool groupMate = group > 0 && party.Any(o => !ReferenceEquals(o, s) && o.AdventureGroupRole?.AdventureGroupId == group);
         await ProgressCoreAsync(s, TTenBossWin, t => t is [TTenBossWin, _, _, ..] && t[2..].Contains(boss) ? 1 : 0,
             def => def.Type switch { GuildQuestType => guildMate, AdventureGroupQuestType => groupMate, _ => true });
+        // The guides say Phantom Realm, so a Phantom Realm clear completes them too (inferred: the listed bosses are not its).
+        if (IsPhantomRealmBoss(boss))
+            await ProgressCoreAsync(s, TTenBossWin, t => t is [TTenBossWin, _, _, ..] ? 1 : 0, def => PhantomRealmGuides.Contains(def.Id));
     }
+
+    private bool IsPhantomRealmBoss(long boss) =>
+        _data.Table("TenGameplayConfig").Values.Select(row => new TenGameplayConfig(row))
+            .Any(multi => multi.Type == PhantomRealmType && multi.Boss.Any(b => b.Length > 1 && b[1] == boss));
 
     /// <summary>106802: one committed dig at the Treasure Map's point.</summary>
     public void OnTreasureDug(GameSession s) =>

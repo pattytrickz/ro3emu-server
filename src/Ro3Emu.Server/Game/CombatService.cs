@@ -254,6 +254,8 @@ public sealed partial class CombatService : IGameTicker
     internal Func<GameSession, JsonElement, int, JsonElement>? TargetCountRow { get; set; }
     /// <summary>May the caster's skill put this _kBuff1 buff on the recipient (TalentProcs: talent-gated buffs).</summary>
     internal Func<GameSession, GameSession, int, bool>? SkillBuffAllowed { get; set; }
+    /// <summary>Is the caster in a party (TeamService)? The Skill Bar recasts a buff for the allies that may lack it.</summary>
+    internal Func<GameSession, bool>? InParty { get; set; }
     public List<Func<GameSession, MonsterUnit, JsonElement, DamageHitResult, long, long>> DamageAdjusters { get; } = new();
     public List<Func<GameSession, MonsterUnit, JsonElement, long, long>> ExtraHitDamage { get; } = new();
     public List<Func<GameSession, MonsterUnit, JsonElement, long, Task>> DealtAsync { get; } = new();
@@ -294,6 +296,7 @@ public sealed partial class CombatService : IGameTicker
         scene.Leaving.Add(buffs.ClearOnSceneAsync);
         character.ExtraAttributes.Add(PassiveAttributes);
         character.ExtraAttributes.Add(ResonanceAttributes); // Job Resonance stats (CombatService.Restraint)
+        IncomingDamageAdjusters.Add(MonsterResistedDamageAsync);
         world.UnitRemoved.Add(unit => { if (unit is MonsterUnit m) _fightingMonsters.Remove(m); return Task.CompletedTask; });
         skills.Learned.Add(RefreshSkillParametersAsync);
         skills.Learned.Add(character.RefreshStatsAsync);

@@ -120,6 +120,37 @@ public sealed class EconomyEnvelopeTests : IDisposable
         Assert.Equal(90, _roles.LoadProgress(_role).Currency[1]);
     }
 
+    private void StoreServerState(string key, string value)
+    {
+        using var db = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_accounts.DatabasePath};Pooling=False");
+        db.Open();
+        using var insert = db.CreateCommand();
+        insert.CommandText = "INSERT INTO server_state(key, value) VALUES($key, $value)";
+        insert.Parameters.AddWithValue("$key", key);
+        insert.Parameters.AddWithValue("$value", value);
+        insert.ExecuteNonQuery();
+    }
+
+    /// <summary>The keys features keep in server_state: each one unknown to the decoder refused logins or would have.</summary>
+    [Theory]
+    [InlineData("aigm_config")]
+    [InlineData("aigm_log")]
+    [InlineData("boost/100")]
+    [InlineData("supporter-boost/someone")]
+    public void AFeaturesServerStateKeyIsClassified(string key)
+    {
+        StoreServerState(key, "{}");
+        Assert.DoesNotContain(Cut().Issues, i => i.Detail.Contains("server_state", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnUnknownServerStateKeyDoesNotRefuseThisOperation()
+    {
+        StoreServerState("a-key-no-decoder-knows", "{}");
+        await Spend("e05d-state-" + Guid.NewGuid().ToString("N"), "src-" + Guid.NewGuid().ToString("N")).CommitAsync(_accounts, "test");
+        Assert.Equal(90, _roles.LoadProgress(_role).Currency[1]);
+    }
+
     [Fact]
     public void EnvelopeClonesOutcomeAndCanonicalIntentBytes()
     {
