@@ -31,7 +31,12 @@ internal sealed class CharacterAppearanceView : MonoBehaviour
         if (visible == null || !visible.gameObject.activeInHierarchy) { Clear(); return; }
         _renderers.Clear();
         visible.GetAllRenders(ref _renderers);
-        long state = CharacterAppearance.Number(CharacterAppearance.Custom(_unit, CharacterAppearanceRules.SelectionCustomData));
+        // Servers since the tiered catalogue send the full selection (5-bit palettes); older ones only the first catalogue's.
+        var full = CharacterAppearance.Custom(_unit, CharacterAppearanceRules.FullSelectionCustomData);
+        long state = CharacterAppearance.Number(full ?? CharacterAppearance.Custom(_unit, CharacterAppearanceRules.SelectionCustomData));
+        int hair = full != null ? CharacterAppearanceRules.FullHair(state) : CharacterAppearanceRules.Hair(state);
+        int armour = full != null ? CharacterAppearanceRules.FullArmour(state) : CharacterAppearanceRules.Armour(state);
+        bool auraOn = full != null ? CharacterAppearanceRules.FullAura(state) : CharacterAppearanceRules.Aura(state);
         var worn = _unit.Obf_RuA<Obf_R.Obf_ff>("m_kCurUseAppearances");
         bool cosmetic = CharacterAppearance.Number(worn?.Obf_ruA<long, object>(CharacterAppearanceRules.ClothingSlot)) != 0;
         RD_Renderer body = null;
@@ -41,8 +46,7 @@ internal sealed class CharacterAppearanceView : MonoBehaviour
             var part = renderer.GetRendererData().partType;
             if (part != RoleModelPartType.Hair && part != RoleModelPartType.Body) continue;
             if (part == RoleModelPartType.Body) body = renderer;
-            int palette = part == RoleModelPartType.Hair ? CharacterAppearanceRules.Hair(state)
-                : cosmetic ? 0 : CharacterAppearanceRules.Armour(state);
+            int palette = part == RoleModelPartType.Hair ? hair : cosmetic ? 0 : armour;
             DyePreview.Ensure(renderer, palette, GetInstanceID());
             _owned.Add(renderer);
         }
@@ -53,7 +57,7 @@ internal sealed class CharacterAppearanceView : MonoBehaviour
             if (previous != null) DyePreview.ResetOwned(previous, GetInstanceID());
             _owned.Remove(previous);
         }
-        bool aura = CharacterAppearanceRules.Aura(state)
+        bool aura = auraOn
             && CharacterAppearance.Number(CharacterAppearance.Custom(_unit, SupporterIdentityRules.BadgeCustomData)) == SupporterIdentityRules.GameMaster
             && AuraVisible();
         if (_auraBody != null && (_auraBody != body || !aura)) AuraPreview.HideOwned(_auraBody, GetInstanceID());

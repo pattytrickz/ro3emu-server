@@ -64,7 +64,7 @@ public sealed class SupporterShopTests : IDisposable
 
     private Task<SyntheticHost> Start(bool shop = true) => SyntheticHost.StartAsync(o =>
     {
-        o.GameDataDir = _data; o.CharacterAppearanceEnabled = true; o.CharacterDyePrice = 7;
+        o.GameDataDir = _data; o.CharacterAppearanceEnabled = true;
         o.Supporter.Shop = shop;
         o.GmAccounts = ["alice"];
     });

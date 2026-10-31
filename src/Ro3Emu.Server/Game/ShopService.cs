@@ -19,7 +19,7 @@ namespace Ro3Emu.Server.Game;
 /// </summary>
 public sealed class ShopService(GameData data, CharacterService character, FunctionService functions, RoleStore roles, SeasonService seasons,
     WardrobeService wardrobe, AwardService awards, TimeProvider clock, SessionRegistry sessions, GameLoop loop,
-    SupporterShop supporterShop, ILogger<ShopService> log) : IGameTicker
+    SupporterShop supporterShop, CharacterAppearanceService dyes, ILogger<ShopService> log) : IGameTicker
 {
     public const uint ShopSync = 5024;
     public const uint BuyCommodity = 82332, CommodityCollect = 82333, CommodityPresent = 82335, CommodityGetInfo = 82338,
@@ -128,9 +128,14 @@ public sealed class ShopService(GameData data, CharacterService character, Funct
     private async Task<(int Result, int Price, int BuyTimes)> BuyOneAsync(GameSession session, int commodityId, int count, int quote)
     {
         using var guard = await CharacterService.Lock(session);
+        // The Dye Merchant's colours are account unlocks priced by the shared catalogue, not shop rows.
+        if (Ro3Emu.Shared.CharacterAppearanceRules.IsCommodity(commodityId))
+        {
+            var (code, paid) = await dyes.BuyLockedAsync(session, commodityId, count);
+            return (code, paid, 0);
+        }
         var row = _data.Row("ShopCommodityConfig", commodityId);
-        Fail? error = !CharacterAppearanceService.CanBuy(session, commodityId) ? new(ErrorCodes.FeatureUnavailable, "appearance capability or body unsupported")
-            : row is not { } c ? new(ErrorCodes.ShopNoConfig, "unknown commodity")
+        Fail? error = row is not { } c ? new(ErrorCodes.ShopNoConfig, "unknown commodity")
             : count < 1 ? new(ErrorCodes.Parameter, "bad count")
             : Unavailable(session, c);
         int unit = row is { } r ? UnitPrice(session, r) : 0;
