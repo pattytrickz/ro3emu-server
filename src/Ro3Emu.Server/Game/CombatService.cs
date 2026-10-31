@@ -294,6 +294,7 @@ public sealed partial class CombatService : IGameTicker
         scene.Leaving.Add(buffs.ClearOnSceneAsync);
         character.ExtraAttributes.Add(PassiveAttributes);
         character.ExtraAttributes.Add(ResonanceAttributes); // Job Resonance stats (CombatService.Restraint)
+        IncomingDamageAdjusters.Add(MonsterResistedDamageAsync);
         world.UnitRemoved.Add(unit => { if (unit is MonsterUnit m) _fightingMonsters.Remove(m); return Task.CompletedTask; });
         skills.Learned.Add(RefreshSkillParametersAsync);
         skills.Learned.Add(character.RefreshStatsAsync);

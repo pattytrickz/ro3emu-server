@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Romsg;
 using Ro3Emu.Server.Data;
 using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
@@ -101,6 +102,25 @@ public sealed partial class CombatService
                     System.Globalization.CultureInfo.InvariantCulture, out double crit))
                 yield return (CritAttribute, crit * 100);
         }
+    }
+
+    private const long BeBossType = 602, BeNormalType = 604; // AttributeConfig be_boss_type / be_normal_type, in 1/10000
+    private const long MaxMonsterReduction = 9900; // AttributeConfig _kRange "-9900|"
+
+    /// <summary>
+    /// The Monster Resistance line (Monster Resistance, both Advanced Monster Resistance): "... increases damage reduction
+    /// from monsters by ${1}% while a shield is equipped." The held mastery row's be_boss_type (602) or be_normal_type
+    /// (604) takes off that share of a hit from a boss (NPCConfig _iNPCSubType 3, 4 or 6) or another monster. The rows of
+    /// the learned passives add up (inferred); buff-sourced 602/604 are not read here (the dungeon bonds have their own
+    /// step, DungeonService.BondDamage).
+    /// </summary>
+    internal Task<long> MonsterResistedDamageAsync(MonsterUnit monster, GameSession target, DamageHitResult result, long damage)
+    {
+        if (damage <= 0 || target.Progress == null) return Task.FromResult(damage);
+        bool boss = _data.Row("NPCConfig", monster.Template.NpcId) is { } npc && new NPCConfig(npc).NPCSubType is 3 or 4 or 6;
+        long attribute = boss ? BeBossType : BeNormalType;
+        long reduction = (long)PassiveAttributes(target).Where(p => p.Id == attribute).Sum(p => p.Value);
+        return Task.FromResult(reduction <= 0 ? damage : ScaleMonsterDamage(damage, (int)(10000 - Math.Min(reduction, MaxMonsterReduction))));
     }
 
     /// <summary>
