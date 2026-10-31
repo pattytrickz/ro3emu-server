@@ -243,7 +243,8 @@ public sealed partial class CombatService
         }
     }
 
-    private static bool DealsDamage(JsonElement row) => Numbers(row, "_kDamageParam1").Any(v => v > 0) || Numbers(row, "_kDamageParam2").Any(v => v > 0);
+    private static bool DealsDamage(JsonElement row) =>
+        new SkillConfig(row) is var skill && (skill.DamageParam1.Any(v => v > 0) || skill.DamageParam2.Any(v => v > 0));
 
     /// <summary>Cast item cost and frozen intent share one owner receipt; HP/SP/buffs remain runtime resources.
     /// The admission uses the same scheduled cast and lethal pipeline as every ordinary skill.</summary>
