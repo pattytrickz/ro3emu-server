@@ -123,7 +123,9 @@ public sealed partial class CombatService
     /// once the target steps; the ${2}-meter circle centres on the target where it stands when the bolt lands (inferred).
     /// </summary>
     private static float? ChainRadius(JsonElement row) =>
-        Script(row) == "ChainLightning" && Numbers(row, "_kDescData") is [_, > 0 and var radius, ..] ? (float)radius : null;
+        Script(row) == "ChainLightning" && double.TryParse(new SkillConfig(row).DescData.ElementAtOrDefault(1),
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double radius) && radius > 0
+            ? (float)radius : null;
 
     private static bool InStrip(Vec3 origin, float face, float width, float length, Vec3 point)
     {
