@@ -153,6 +153,10 @@ Ro3Emu.Server.Accounts.Persistence.DungeonObligationActivatePlan/<roomId>P
 Ro3Emu.Server.Accounts.Persistence.DungeonObligationCancelPreparedPlan/<roomId>P
 Ro3Emu.Server.Accounts.Persistence.DungeonObligationCompletePlan/<key>P
 Ro3Emu.Server.Accounts.Persistence.DungeonObligationFreezePlan/frozen
+Ro3Emu.Server.Accounts.Persistence.DyeUnlockPlan/<account>P
+Ro3Emu.Server.Accounts.Persistence.DyeUnlockPlan/<now>P
+Ro3Emu.Server.Accounts.Persistence.DyeUnlockPlan/<palettes>P
+Ro3Emu.Server.Accounts.Persistence.DyeUnlockPlan/<source>P
 Ro3Emu.Server.Accounts.Persistence.EconomyEnvelopePlan/<catalog>P
 Ro3Emu.Server.Accounts.Persistence.EconomyEnvelopePlan/<child>P
 Ro3Emu.Server.Accounts.Persistence.EconomyEnvelopePlan/<envelope>P

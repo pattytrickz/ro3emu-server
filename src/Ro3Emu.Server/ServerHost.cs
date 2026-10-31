@@ -119,6 +119,7 @@ public static class ServerHost
         builder.Services.AddSingleton<SeasonRefineService>();
         builder.Services.AddSingleton<SeasonTalentService>();
         builder.Services.AddSingleton<ShopService>();
+        builder.Services.AddSingleton<CurrencyExchangeService>();
         builder.Services.AddSingleton<ItemBoxService>();
         builder.Services.AddSingleton<MountService>();
         builder.Services.AddSingleton<CareerSpecialService>();
