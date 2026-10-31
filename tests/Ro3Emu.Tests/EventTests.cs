@@ -126,6 +126,26 @@ public sealed class EventTests : IAsyncLifetime
         Assert.Equal(2, Box(bobId)!.Letters.Count);
     }
 
+    /// <summary>A bundle gift: one mail with every attachment in order and its own message, still claimed once.</summary>
+    [ClientDataFact]
+    public async Task ABundleGiftIsOneMailWithItsMessageAndEveryAttachment()
+    {
+        await using var alice = await InWorld("Alice");
+        long id = (long)alice.Self!.Uuid;
+        await Letters(id, 1); // the Halloween login gift
+        var thanks = new LoginGift
+        {
+            Id = "thanks-1", Start = Start.AddHours(-1), End = Start.AddDays(30), Item = 1002001, Count = 500,
+            Title = "Thank you", Message = "Thanks for reporting bugs.",
+            More = [new LoginGiftItem { Item = 1294703, Count = 3 }, new LoginGiftItem { Item = 1250709, Count = 5 }, new LoginGiftItem { Item = 0, Count = 9 }],
+        };
+        Assert.Equal(1, await Service<EventService>().ClaimAsync(id, "Alice", [thanks]));
+        Assert.Equal(0, await Service<EventService>().ClaimAsync(id, "Alice", [thanks]));
+        var letter = Assert.Single(await Letters(id, 2), l => l.Title == "Thank you");
+        Assert.Equal("Thanks for reporting bugs.", letter.Content);
+        Assert.Equal(new MailService.Attachment[] { new(1002001, 500), new(1294703, 3), new(1250709, 5) }, letter.Attachments);
+    }
+
     [ClientDataFact]
     public async Task GmRatesRunForTheirHoursAndAreKeptInTheDatabase()
     {

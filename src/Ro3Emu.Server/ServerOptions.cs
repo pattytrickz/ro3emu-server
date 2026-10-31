@@ -546,8 +546,22 @@ public sealed class LoginGift
     public int Item { get; set; }
     public int Count { get; set; } = 1;
     public string Title { get; set; } = "A gift from the Sol RO3 team";
+    /// <summary>The mail's text. Empty: the title.</summary>
+    public string Message { get; set; } = "";
+    /// <summary>More attachments in the same mail, after <see cref="Item"/> (a thank-you bundle).</summary>
+    public LoginGiftItem[] More { get; set; } = [];
     /// <summary>Roles below this Base level wait for it until they reach it inside the window.</summary>
     public int MinLevel { get; set; }
+
+    internal IEnumerable<(int Item, int Count)> Attachments() =>
+        new[] { (Item, Count) }.Concat(More.Select(m => (m.Item, m.Count))).Where(a => a.Item > 0).Select(a => (a.Item, Math.Max(1, a.Count)));
+}
+
+/// <summary>One more attachment of a <see cref="LoginGift"/>.</summary>
+public sealed class LoginGiftItem
+{
+    public int Item { get; set; }
+    public int Count { get; set; } = 1;
 }
 
 /// <summary>

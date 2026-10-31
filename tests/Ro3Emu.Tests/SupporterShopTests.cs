@@ -222,4 +222,22 @@ public sealed class SupporterShopTests : IDisposable
         Assert.Equal(1, await Bag(host, "alice", Recharge.Item));
         Assert.Equal(10800 - 100, await OnLoop(host, () => Session(host, "alice").WildAfk!.Info.HighMultiplierTimeSeconds));
     }
+
+    /// <summary>Only Supporters buy the Recharge, but anyone who owns one (a thank-you gift) can use it; the boosters
+    /// still need active status.</summary>
+    [Fact]
+    public async Task ANonSupporterCanUseAGiftedRechargeButNotABooster()
+    {
+        await using var host = await Start();
+        await using var alice = await host.InWorldAsync("Alice"); // a GM here (to get the items), not a Supporter
+        await Enable(alice);
+        await Gm(host, "alice", $"!item {Recharge.Item} 1");
+        await Gm(host, "alice", $"!item {Exp50.Item} 1");
+        long before = await OnLoop(host, () => Session(host, "alice").WildAfk!.Info.HighMultiplierTimeSeconds);
+        Assert.Equal(0, await Use(host, alice, Recharge));
+        Assert.Equal(before + 3600, await OnLoop(host, () => Session(host, "alice").WildAfk!.Info.HighMultiplierTimeSeconds));
+        Assert.Equal(0, await Bag(host, "alice", Recharge.Item));
+        Assert.NotEqual(0, await Use(host, alice, Exp50));
+        Assert.Equal(1, await Bag(host, "alice", Exp50.Item));
+    }
 }
