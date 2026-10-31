@@ -83,7 +83,7 @@ public sealed class PublisherGame : IDisposable
     {
         try
         {
-            return await _installer.FetchAsync(ct, delta);
+            return await _installer.FetchAsync(delta, ct);
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {

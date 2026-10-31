@@ -232,7 +232,7 @@ public sealed class InstallerTests : IAsyncLifetime
         var installer = Installer();
         await installer.ApplyAsync(installer.MakePlan(await installer.FetchAsync(), game), game);
         AssertInstalled(game, content);
-        Assert.Contains(_requests, r => r.StartsWith("b/" + path + " bytes=") && !r.EndsWith("bytes=0-"));
+        Assert.Contains(_requests, r => r.StartsWith("b/" + path + " bytes=", StringComparison.Ordinal) && !r.EndsWith("bytes=0-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -332,7 +332,7 @@ public sealed class InstallerTests : IAsyncLifetime
             await Task.Delay(Timeout.Infinite, context.RequestAborted);
             return true;
         };
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Installer().FetchAsync(cancel.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Installer().FetchAsync(ct: cancel.Token));
     }
 
     [Fact]

@@ -51,7 +51,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
     /// origins in order, then the fallback ones. <paramref name="delta"/> false skips the delta manifest (7 MB), which an
     /// empty folder cannot use: on a slow route to the mirror that is a quarter of the wait before anything happens.
     /// </summary>
-    public async Task<Manifests> FetchAsync(CancellationToken ct = default, bool delta = true)
+    public async Task<Manifests> FetchAsync(bool delta = true, CancellationToken ct = default)
     {
         Exception? last = null;
         foreach (var (origin, fallback) in config.Origins.Select(o => (o, false)).Concat(config.FallbackOrigins.Select(o => (o, true))))
@@ -195,7 +195,7 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
         {
             var files = plan.Needed.Where(n => n.Package.Id == package.Id).Select(n => n.File).ToList();
             long offset = before;
-            var zip = await DownloadAsync(package, (done, _) => Progress?.Invoke("Downloading", offset + done, total), ct, plan.Origin);
+            var zip = await DownloadAsync(package, (done, _) => Progress?.Invoke("Downloading", offset + done, total), plan.Origin, ct);
             before += package.Length;
             Extract(zip, files, folder);
             File.Delete(zip);
@@ -209,8 +209,8 @@ public sealed class ClientInstaller(PublisherConfig config, HttpClient http, str
     /// rotation at once, so the attempts go to the origins that can: with Genesis' own host gone, every other attempt
     /// (and its back-off) used to go to a name that no longer resolves.
     /// </summary>
-    public async Task<string> DownloadAsync(ReleaseManifest.Package package, Action<long, long>? progress = null, CancellationToken ct = default,
-        string? preferredOrigin = null)
+    public async Task<string> DownloadAsync(ReleaseManifest.Package package, Action<long, long>? progress = null,
+        string? preferredOrigin = null, CancellationToken ct = default)
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(package.Id, "^[0-9a-f]{64}$"))
             throw new InstallException($"The manifest has a malformed package id ({package.Id}).", "Do not use this download source.");

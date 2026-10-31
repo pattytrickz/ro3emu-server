@@ -84,7 +84,7 @@ public sealed class CrystalEconomy(IOptions<ServerOptions> options, AccountStore
         return new Quote(mode, key, week, gross, credited, tokens, supporter, state.Earned, state.Remainder, next, Cap);
     }
 
-    internal CrystalAwardPlan Plan(Quote quote, string sourceKey, long roleId, long nowUtcMs) => new(sourceKey, Ledger(quote.Mode),
+    internal static CrystalAwardPlan Plan(Quote quote, string sourceKey, long roleId, long nowUtcMs) => new(sourceKey, Ledger(quote.Mode),
         quote.Account, roleId, quote.Week, "pass/play", quote.Gross, quote.Credited, quote.Tokens, quote.Supporter, quote.Earned,
         quote.Remainder, quote.NextRemainder, nowUtcMs);
 

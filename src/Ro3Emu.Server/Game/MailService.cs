@@ -422,7 +422,7 @@ public sealed partial class MailService(AccountStore accounts, RoleStore roles, 
         return DeliverAsync(role, new Letter
         {
             Title = title, Content = content, Sender = sender, Category = 1, DeliveryKey = sourceKey,
-            Attachments = attachments.ToList()
+            Attachments = [.. attachments]
         }, DateTimeOffset.MaxValue, 0, persist);
     }
 

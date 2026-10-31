@@ -109,7 +109,7 @@ dotnet_diagnostic.CA1832.severity = suggestion
 dotnet_diagnostic.CA1836.severity = suggestion
 # 4: prefer Dictionary.Contains methods
 dotnet_diagnostic.CA1841.severity = suggestion
-# 407: use LoggerMessage delegates
+# 419: use LoggerMessage delegates
 dotnet_diagnostic.CA1848.severity = suggestion
 # 5: prefer TryGetValue
 dotnet_diagnostic.CA1854.severity = suggestion
@@ -117,19 +117,19 @@ dotnet_diagnostic.CA1854.severity = suggestion
 dotnet_diagnostic.CA1859.severity = suggestion
 # 1: avoid Enumerable.Any()
 dotnet_diagnostic.CA1860.severity = suggestion
-# 168: avoid constant arrays as arguments
+# 170: avoid constant arrays as arguments
 dotnet_diagnostic.CA1861.severity = suggestion
 # 8: use StringComparison for case-insensitive comparisons
 dotnet_diagnostic.CA1862.severity = suggestion
 # 11: cache and reuse JsonSerializerOptions
 dotnet_diagnostic.CA1869.severity = suggestion
-# 162: avoid potentially expensive logging
+# 169: avoid potentially expensive logging
 dotnet_diagnostic.CA1873.severity = suggestion
 # 15: instantiate argument exceptions correctly
 dotnet_diagnostic.CA2208.severity = suggestion
-# 807: use a collection initializer or expression
+# 809: use a collection initializer or expression
 dotnet_diagnostic.IDE0028.severity = suggestion
-# 143: use a collection expression for an array
+# 158: use a collection expression for an array
 dotnet_diagnostic.IDE0300.severity = suggestion
 # 15: use a collection expression for an empty collection
 dotnet_diagnostic.IDE0301.severity = suggestion
