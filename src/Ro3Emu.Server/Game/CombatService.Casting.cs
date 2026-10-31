@@ -27,6 +27,8 @@ public sealed class ActiveSkillCast
     public bool Automatic { get; init; }
     public required int ChantMs { get; init; }
     public required int ActionMs { get; init; }
+    /// <summary>When its effects land, from StartMs (the template's first attack point, ImpactOffset).</summary>
+    public int ImpactMs { get; init; }
     public bool Cancelled { get; set; }
     public bool Resolved { get; set; }
     /// <summary>Replaced by the next skill before its impact, which still lands (CombatService.LandsBeforeInterrupt).</summary>
@@ -520,11 +522,16 @@ public sealed partial class CombatService
         var origin = actor?.Pos ?? s.Position.Clone();
         var target = FindMonster(s.WorldScene, req.TargetId);
         float face = target != null ? MonsterService.Angle(origin.X, origin.Z, target.X, target.Z) : req.Face;
+        int chantMs = ChantMs(s, row), actionMs = SkillMs(s, row);
+        var template = _data.SkillTemplate(GameData.Int(row, "_iScriptShow"));
+        var points = template is { } t ? Numbers(t, "m_kAtkPoints") : [];
+        double point = points.FirstOrDefault(0.2);
+        int at = Script(row) == "Resurrection" ? chantMs : ImpactOffset(template, point, chantMs, actionMs);
         var action = new ActiveSkillCast
         {
             Id = id, OwnerId = s.Role!.Id, WorldScene = s.WorldScene, SceneGeneration = s.SceneGeneration,
             Attachment = s.Attachment, Request = req, Row = row, Origin = origin, StartedWalking = actor == null && s.Walking, WalkFromUtc = s.LastWalkUtc,
-            StartMs = Now, ChantMs = ChantMs(s, row), ActionMs = SkillMs(s, row), Operator = actor,
+            StartMs = Now, ChantMs = chantMs, ActionMs = actionMs, ImpactMs = at, Operator = actor,
             Automatic = automatic,
         };
         s.SkillCast = action;
@@ -536,10 +543,6 @@ public sealed partial class CombatService
             SrcID = action.SourceId, SkillID = req.SkillId, TargetId = req.TargetId, TargetPos = req.TargetPos ?? origin,
             Face = face, SessionId = id, ChantMs = action.ChantMs, SkillMs = action.ActionMs, StartTime = action.StartMs, PlayAct = true,
         }, highLevel: GameData.Int(row, "_iSkillEffectLevel") > 0, extra: actor != null || req.IsExtraSkill);
-        var template = _data.SkillTemplate(GameData.Int(row, "_iScriptShow"));
-        var points = template is { } t ? Numbers(t, "m_kAtkPoints") : [];
-        double point = points.FirstOrDefault(0.2);
-        int at = Script(row) == "Resurrection" ? action.ChantMs : ImpactOffset(template, point, action.ChantMs, action.ActionMs);
         ScheduleRuntime(action.WorldScene, TimeSpan.FromMilliseconds(at), async () =>
         {
             if (!Live(s, action)) return;
@@ -633,16 +636,20 @@ public sealed partial class CombatService
     }
 
     /// <summary>
-    /// A cast that deals no damage and that the next skill replaces before its impact still lands its effects. The
-    /// client lets another skill interrupt one only from its template's m_fInterruptTime, which is at or after the last
-    /// attack point in 585 of the 598 templates that have both: Mystical Amplification's buff lands at 0.083 s and the
-    /// skill can be interrupted at 0.333 s (skill_12203). The next request can still reach the server before the impact,
-    /// and the buff was lost after its SP and cooldown were paid (inferred: requests bunched in transit). Damaging casts
-    /// are left out so that alternating skills cannot land more hits than their actions allow (inferred).
+    /// A cast that the next skill replaces before its impact still lands its effects. The client lets another skill
+    /// interrupt one only from its template's m_fInterruptTime, which is at or after the last attack point in 585 of the
+    /// 598 templates that have both: Mystical Amplification's buff lands at 0.083 s and the skill can be interrupted at
+    /// 0.333 s (skill_12203), Heal heals at 2.167 s and can be interrupted at 2.367 s (skill_14007), Sonic Blow hits at
+    /// 0.333 s and can be interrupted at 0.667 s (skill_15102). The next request can still reach the server before the
+    /// impact, and the buff, heal or hit was lost after its SP and cooldown were paid (inferred: requests bunched in
+    /// transit). A cast that deals no damage lands once past its chant. A damaging one (positive _kDamageParam1) lands
+    /// only when it was replaced within CastGraceMs of its impact, the same one trip early that cooldowns allow: a
+    /// skill pressed again and again long before its hit (Sonic Blow has no cooldown) still deals nothing (inferred).
     /// </summary>
     private bool LandsBeforeInterrupt(ActiveSkillCast action)
     {
-        if (action.Resolved || Now < action.StartMs + action.ChantMs || Numbers(action.Row, "_kDamageParam1").Any(v => v > 0)) return false;
+        bool damaging = Numbers(action.Row, "_kDamageParam1").Any(v => v > 0);
+        if (action.Resolved || (damaging ? Now + CastGraceMs < action.StartMs + action.ImpactMs : Now < action.StartMs + action.ChantMs)) return false;
         if (_data.SkillTemplate(GameData.Int(action.Row, "_iScriptShow")) is not { } template
             || !template.TryGetProperty("m_fInterruptTime", out var value) || GameData.Number(value) is not { } interrupt) return false;
         var points = Numbers(template, "m_kAtkPoints");
