@@ -77,7 +77,9 @@ public static partial class EconomySnapshotReader
     // (the claimed markers above) and nothing writes it any more.
     // Appearance: character_appearance stores palette selections and an aura preference, not a balance.
     // The cd13b/wardrobe-dye receipt records the bottle consumed atomically with each palette change.
-    public const string ExpectedFormatManifestHash = "1E46A96C89D7BF88CD3C5D4D49A9BA69A4C1AC149DFD1E2720464418FDE88358";
+    // Mounts: SavedState.ResumeBattle is the battle mount id the rider goes back on after the system mount (MountService.Resume).
+    // A selection, not a balance.
+    public const string ExpectedFormatManifestHash = "EFC3E0C9EACD96DB86C2D3AB8DBD7EE74FB37583168EE61D39F400CDF4E37777";
     public static string FormatManifestHash => State.FormatManifestHash;
 
     private sealed partial class State

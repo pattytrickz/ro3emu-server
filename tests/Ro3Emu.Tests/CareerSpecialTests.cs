@@ -297,6 +297,50 @@ public sealed class CareerSpecialTests : IAsyncLifetime
         Assert.DoesNotContain(1131801, await BuffsAsync());
     }
 
+    /// <summary>Reported: Auto Mode rides the travel mount to reach the next monster and gets off it to fight, and a Rune
+    /// Knight was left off the Dragon, so Dragon Breath went unused. Off the travel mount, by request or by combat, the
+    /// rider is back on the battle mount it replaced; a battle mount the player got off stays off.</summary>
+    [ClientDataFact]
+    public async Task GettingOffTheTravelMountPutsTheRiderBackOnTheDragon()
+    {
+        const int TravelItem = 1501013, TravelMount = 60030010;
+        await using var a = await InWorld("Alice");
+        await Become("alice", 1400, 99, 11307); // Rune Knight, Dragon Training
+        await RideAsync(a, Dragon);
+        await Gm("alice", $"!item {TravelItem} 1");
+        await a.SendGameAsync(31323, new ItemUseReq { ItemGuid = Session("alice").Items.Single(i => i.Entry == TravelItem).Guid, ItemCount = 1 });
+        Assert.Equal(0, (await Next(a, 31323, ItemUseResp.Parser)).Result);
+        await a.SendGameAsync(MountService.SetConfig, new PlayerMountsSetCfgReq { MountId = TravelMount });
+        Assert.Equal(0, (await Next(a, MountService.SetConfig, PlayerMountsSetCfgResp.Parser)).Result);
+        var loop = _app.Services.GetRequiredService<GameLoop>();
+        async Task Ride(int tp)
+        {
+            await a.SendGameAsync(MountService.Ride, new PlayerRiderMountReq { Tp = (eRiderType)tp });
+            Assert.Equal(0, (await Next(a, MountService.Ride, PlayerRiderMountResp.Parser)).Result);
+        }
+
+        await Ride(1); // on-system
+        Assert.Equal(TravelMount, MountService.Rider(Session("alice")));
+        Assert.DoesNotContain(1131801, await BuffsAsync());
+        await Ride(0); // off-system
+        Assert.Equal(Dragon, MountService.Rider(Session("alice")));
+        Assert.Contains(1131801, await BuffsAsync());
+
+        await Ride(1);
+        await loop.InvokeAsync(() => // combat puts a rider off the travel mount (MountService.RidingError)
+        {
+            Session("alice").StatusBits |= 1L << 15;
+            return _app.Services.GetRequiredService<MountService>().ReconcileAsync(Session("alice"));
+        });
+        Assert.Equal(Dragon, MountService.Rider(Session("alice")));
+
+        await loop.InvokeAsync(() => { Session("alice").StatusBits &= ~(1L << 15); return Task.CompletedTask; });
+        await Ride(2); // off-battle
+        await Ride(1);
+        await Ride(0);
+        Assert.Equal(0, MountService.Rider(Session("alice")));
+    }
+
     // JobAttackConfig row 39 (_iJobID 6400, _iMountID 1500300): a Mechanic on the Madogear attacks with Normal Punch
     // 1631001, and the skill window shows it in Basic Attack's place (CartRemouldTable 1500300 _kSkillShow [16000]).
     // Reported (Lobonatico, 24 Oct): on the Madogear the punch stayed 0/1 and could not be used, even after a reset and save.

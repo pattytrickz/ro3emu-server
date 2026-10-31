@@ -65,6 +65,11 @@ Mount implementation inferences, rather than captured original-server behavior:
 5. Quest auto-ride persists until the matching recycle action or an explicit mount selection/dismount.
    The action names and arguments establish ride/recycle; this bounded lifetime is an implementation choice.
 6. Exact refusal-code mapping and notification order use the matching `ErrorCodeConfig` texts and DAL expectations.
+7. Riding the system mount from a ridden battle mount remembers that battle mount (`SavedState.ResumeBattle`); getting
+   off the system mount, by 32745 tp 0, an emptied system slot, combat or the map, puts the rider back on it if it is
+   still selected and may be ridden there. Auto Mode rides the system mount to reach its next target and gets off it
+   to fight, which left a Rune Knight without the Dragon (and Dragon Breath); the client is not seen asking for the
+   battle mount again. Getting off or changing the battle mount forgets it.
 
 ## Divine Totem behavior and evidence
 
