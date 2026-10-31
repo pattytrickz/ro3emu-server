@@ -129,6 +129,7 @@ public sealed partial class MvpService : IGameTicker
     private TimeSpan _sinceCheck;
     private readonly RoleObligations<MvpObligationRow> _awardObligations;
     private readonly int _hpRatio;
+    private readonly string[] _aiAccounts;
 
     public MvpService(GameData data, AccountStore accounts, MonsterService monsters, WorldData worldData, CharacterService character,
         RewardService rewards, TaskService tasks, TeamService teams, CombatService combat, BuffService buffs, SessionRegistry sessions,
@@ -137,6 +138,7 @@ public sealed partial class MvpService : IGameTicker
     {
         this._buffs = buffs;
         _hpRatio = Math.Clamp(options?.Value.FieldMvpHpPercent ?? 100, 1, 1000) * 100;
+        _aiAccounts = [.. options?.Value.PartyShareExcludedAccounts ?? [], .. options?.Value.StatusExcludedAccounts ?? []];
         this._data = data;
         this._accounts = accounts;
         this._monsters = monsters;
@@ -672,36 +674,20 @@ public sealed partial class MvpService : IGameTicker
         var rankedMembers = teamsRanked.Take(RankedTeams).SelectMany(t => t.Members).ToHashSet();
         foreach (var id in rankedMembers) Give(id, MVP_AWARD_TYPE.Team, st.Def.Team);
         foreach (var id in st.Stats.Keys) Give(id, MVP_AWARD_TYPE.Join, st.Def.Part);
-        // One rare winner per kill, among the ranked/participation receivers, weighted towards better ranks (inferred).
+        // One rare winner per kill, among the ranked/participation receivers, weighted towards better ranks (inferred). The
+        // AI players (Sol RO3 house rule: PartyShareExcludedAccounts / StatusExcludedAccounts) are not in the draw.
         long rarePlayer = 0, rareTeam = 0;
-        if (st.Stats.Count > 0 && _random.Next(10000) < st.Def.RareChance)
+        bool Ai(long id) => online.TryGetValue(id, out var s) && ServerOptions.AccountListed(_aiAccounts, s.Account);
+        if (st.Stats.Count > 0 && _random.Next(10000) < st.Def.RareChance
+            && PickWeighted(teamsRanked, Ai, _random.Next) is var (winner, winnerTeam))
         {
-            var pool = teamsRanked.SelectMany((t, i) => t.Members.Select(id => (Id: id, Team: t.Key, Weight: Math.Max(1, teamsRanked.Count - i)))).ToList();
-            long roll = _random.Next(pool.Sum(x => x.Weight));
-            foreach (var x in pool)
-            {
-                roll -= x.Weight;
-                if (roll >= 0) continue;
-                rarePlayer = x.Id;
-                rareTeam = x.Team;
-                break;
-            }
-            if (rarePlayer != 0) Give(rarePlayer, MVP_AWARD_TYPE.Probability, st.Def.Rare);
+            (rarePlayer, rareTeam) = (winner, winnerTeam);
+            Give(rarePlayer, MVP_AWARD_TYPE.Probability, st.Def.Rare);
         }
         // Lord's Mane (1009015, "A mane dropped by the boss", the Starshatter Dragon's unseal material) has no source in
         // the client data: one per kill at LordsManePercent, to a member picked as the rare winner is (inferred).
-        if (st.Stats.Count > 0 && _random.Next(100) < LordsManePercent)
-        {
-            var pool = teamsRanked.SelectMany((t, i) => t.Members.Select(id => (Id: id, Weight: Math.Max(1, teamsRanked.Count - i)))).ToList();
-            long roll = pool.Count == 0 ? 0 : _random.Next(pool.Sum(x => x.Weight));
-            foreach (var x in pool)
-            {
-                roll -= x.Weight;
-                if (roll >= 0) continue;
-                awards.GetValueOrDefault(x.Id)?.Add(new MVPPlayerAwardItem { ItemId = LordsMane, Count = 1, Tp = MVP_AWARD_TYPE.Probability });
-                break;
-            }
-        }
+        if (st.Stats.Count > 0 && _random.Next(100) < LordsManePercent && PickWeighted(teamsRanked, Ai, _random.Next) is var (mane, _))
+            awards.GetValueOrDefault(mane)?.Add(new MVPPlayerAwardItem { ItemId = LordsMane, Count = 1, Tp = MVP_AWARD_TYPE.Probability });
         var nextDeaths = st.DeadMs.Append(deadMs).TakeLast(20).ToArray();
         var builder = new RoleItemPlanBuilder(_accounts);
         builder.Add(new MvpSettlementPlan(parentSource, st.Def.CfgId, deadMs));
@@ -777,6 +763,21 @@ public sealed partial class MvpService : IGameTicker
             int percent = decayPercent(members.Count(capped));
             return new RankedTeam(g.Key, g.First().Leader, members, sum > 0 ? sum * percent / 100 : sum, percent < 100);
         }).OrderByDescending(t => t.Score).ToList();
+
+    /// <summary>A member of the ranked teams drawn with the better ranks weighted higher (the first team weighs as many as
+    /// there are teams, the last 1); <paramref name="excluded"/> members are not drawn. Null when nobody can be.</summary>
+    internal static (long Id, long Team)? PickWeighted(IReadOnlyList<RankedTeam> teams, Func<long, bool> excluded, Func<int, int> next)
+    {
+        var pool = teams.SelectMany((t, i) => t.Members.Where(id => !excluded(id)).Select(id => (Id: id, Team: t.Key, Weight: Math.Max(1, teams.Count - i)))).ToList();
+        if (pool.Count == 0) return null;
+        int roll = next(pool.Sum(x => x.Weight));
+        foreach (var x in pool)
+        {
+            roll -= x.Weight;
+            if (roll < 0) return (x.Id, x.Team);
+        }
+        return null;
+    }
 
     /// <summary>PublicParamConfig RewardDecayRatio [50,60,70,80,90] as the percent kept: one capped member 90, two 80 ...
     /// five or more 50 (order inferred: "the more such members, the greater the decay").</summary>
