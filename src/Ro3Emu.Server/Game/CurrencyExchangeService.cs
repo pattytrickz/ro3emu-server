@@ -10,7 +10,7 @@ namespace Ro3Emu.Server.Game;
 /// received units, the 1:100 the window shows. UI_Sys_CoinExchangeWidgetCtrl._itemConvert sends itemId = m_iCostItemId and
 /// count = m_iExchangeNum, the amount spent; _refreshRightItem shows that amount times _iRate as obtained.
 /// </summary>
-public sealed class CurrencyExchangeService(GameData data, CharacterService character, FunctionService functions,
+public sealed partial class CurrencyExchangeService(GameData data, CharacterService character, FunctionService functions,
     ILogger<CurrencyExchangeService> log)
 {
     public const uint Exchange = 2005;
@@ -25,7 +25,7 @@ public sealed class CurrencyExchangeService(GameData data, CharacterService char
             : req.Count < 1 || req.Count > r.SingleLimit || r.Rate < 1 || req.Count * r.Rate > int.MaxValue ? ErrorCodes.Parameter
             : 0;
         if (result == 0) result = await PayAsync(s, row!.Value, req.Count);
-        log.LogInformation("{Name} redeems {Count} of item {Item}: {Result}", s.Role!.Name, req.Count, req.ItemId, result);
+        LogRedeem(log, s.Role!.Name, req.Count, req.ItemId, result);
         await s.SendGameAsync(Exchange, new ItemExchangeResp { Result = result });
     }
 
@@ -40,4 +40,7 @@ public sealed class CurrencyExchangeService(GameData data, CharacterService char
             asyncCommit: true);
         return paid == null ? character.ShortageOf(s, cost) : 0;
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "{Name} redeems {Count} of item {Item}: {Result}")]
+    private static partial void LogRedeem(ILogger logger, string? name, long count, long item, int result);
 }

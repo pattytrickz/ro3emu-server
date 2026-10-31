@@ -187,7 +187,7 @@ public sealed partial class CombatService
     /// the wire; ending the swing for that request sent the client a SkillEnd, it asked again, and swings kept restarting
     /// before their impact: fast animations with no damage (#247, #181). A later request is a new swing as before.
     /// </summary>
-    private ActiveSkillCast? JoinsRunningCast(GameSession s, JsonElement row, CastSkillReq req)
+    private static ActiveSkillCast? JoinsRunningCast(GameSession s, JsonElement row, CastSkillReq req)
     {
         if (s.SkillCast is not { Cancelled: false, Resolved: false, Operator: null } running || req.TargetId == 0
             || running.Request.SkillId != req.SkillId || running.Request.TargetId != req.TargetId) return null;
