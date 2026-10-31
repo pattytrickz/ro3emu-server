@@ -44,7 +44,7 @@ public sealed class BossSkillSetsTests(ITestOutputHelper output)
     {
         var ring = Book(5020001)!.Skills.Single(k => k.Id == 5201301);
         Assert.Equal(3, ring.HitMs.Length);
-        Assert.Equal([(0f, 8f), (8f, 16f), (16f, 24f)], ring.HitBands.Select(b => (b.Inner, b.Outer)).ToArray());
+        Assert.Equal([(0f, 8f), (8f, 16f), (16f, 24f)], [.. ring.HitBands.Select(b => (b.Inner, b.Outer))]);
         Assert.Equal(24f, ring.HitReach);
         Assert.Empty(Book(5020004)!.Skills.Single(k => k.Id == 5203001).HitBands); // a plain circle warning changes nothing
     }
@@ -59,9 +59,9 @@ public sealed class BossSkillSetsTests(ITestOutputHelper output)
         };
         var at = new Romsg.Vec3();
         bool Hit(int hit, float distance) => CombatService.InBossArea(skill, at, at, 0f, distance, 0f, hit);
-        Assert.Equal([true, false, false], new[] { Hit(0, 5f), Hit(1, 5f), Hit(2, 5f) });
-        Assert.Equal([false, true, false], new[] { Hit(0, 12f), Hit(1, 12f), Hit(2, 12f) });
-        Assert.Equal([false, false, true], new[] { Hit(0, 20f), Hit(1, 20f), Hit(2, 20f) });
+        Assert.Equal<bool[]>([true, false, false], [Hit(0, 5f), Hit(1, 5f), Hit(2, 5f)]);
+        Assert.Equal<bool[]>([false, true, false], [Hit(0, 12f), Hit(1, 12f), Hit(2, 12f)]);
+        Assert.Equal<bool[]>([false, false, true], [Hit(0, 20f), Hit(1, 20f), Hit(2, 20f)]);
         Assert.Equal(24f, skill.HitReach);
         // Without bands every hit is the plain circle.
         var plain = new BossSkill { Id = 2, Row = skill.Row, Area = BossSkillArea.AroundSelf, Radius = 10f, HitMs = [3000] };

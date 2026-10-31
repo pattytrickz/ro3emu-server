@@ -400,7 +400,7 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
             FromPhase = from, ToPhase = to, Once = once,
             Area = shape, Radius = radius, Width = width, AngleDeg = angle, Reach = reach,
             MaxTargets = (int)Math.Max(1, GameData.Int(row, "_iTargetMax")),
-            HitMs = hits.Select(h => h.Ms).ToArray(), HitBands = HitBandsOf(hits, shape, radius),
+            HitMs = [.. hits.Select(h => h.Ms)], HitBands = HitBandsOf(hits, shape, radius),
             HighLevel = GameData.Int(row, "_iSkillEffectLevel") > 0,
             Damages = damages, HitsPlayers = damages || hostile.Length > 0,
             SelfBuffs = Tuples(row, "_kBuff1").Where(b => b.Length >= 3 && b[0] > 0).Concat(beneficial)
@@ -425,15 +425,15 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
             ? list.EnumerateArray().Select(v => GameData.Number(v) ?? 0).Where(v => v >= 0).Distinct().Order().ToArray() : [];
         if (points.Length == 0 || points.All(p => p < 0.05) && action >= 1000) return [(chant + action * 7 / 10, null)];
         var warned = WarnedAreas(template);
-        return points.Select(p => (Ms: CombatService.ImpactOffset(template, p, chant, action), Band: WarnedAt(warned, p)))
-            .DistinctBy(h => h.Ms).Take(Math.Max(1, options.MaxHitsPerCast)).ToArray();
+        return [.. points.Select(p => (Ms: CombatService.ImpactOffset(template, p, chant, action), Band: WarnedAt(warned, p)))
+            .DistinctBy(h => h.Ms).Take(Math.Max(1, options.MaxHitsPerCast))];
     }
 
     /// <summary>The bands apply when the show warns at least one ring and the skill is a circle around its caster or target;
     /// a hit without a warning of its own then lands on the whole circle.</summary>
     private static BossHitBand[] HitBandsOf((int Ms, BossHitBand? Band)[] hits, BossSkillArea shape, float radius) =>
         shape is BossSkillArea.AroundSelf or BossSkillArea.AroundTarget && hits.Any(h => h.Band is { Inner: > 0 })
-            ? hits.Select(h => h.Band ?? new BossHitBand(0, radius)).ToArray() : [];
+            ? [.. hits.Select(h => h.Band ?? new BossHitBand(0, radius))] : [];
 
     /// <summary>A warning that closes within this many seconds of an attack point is that hit's area (Ring of Light's
     /// warnings end 0.17, 0.03 and 0 s before its hits).</summary>
@@ -447,8 +447,8 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
     private List<(double End, BossHitBand Band)> WarnedAreas(JsonElement? template)
     {
         var areas = new List<(double, BossHitBand)>();
-        if (template is not { } t || !t.TryGetProperty("m_kShows", out var shows) || shows.ValueKind != JsonValueKind.Object
-            || !t.TryGetProperty("m_kPoints", out var points)) return areas;
+        if (template is not { } t || !t.TryGetProperty(SkillTemplateFields.Shows, out var shows) || shows.ValueKind != JsonValueKind.Object
+            || !t.TryGetProperty(SkillTemplateFields.Points, out var points)) return areas;
         var effects = data.SkillTemplateTable("Lua_Config_EffectData");
         foreach (var group in shows.EnumerateObject())
         {
@@ -459,15 +459,15 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
                 var entry = group.Value[i];
                 if (entry.ValueKind != JsonValueKind.Array || entry.GetArrayLength() == 0 || GameData.Number(entry[0]) is not { } id
                     || !effects.TryGetValue(((long)id).ToString(CultureInfo.InvariantCulture), out var effect)
-                    || !effect.TryGetProperty("m_kPoint", out var point) || !point.TryGetProperty("m_kWarningRange", out var warning)) continue;
+                    || !effect.TryGetProperty(SkillTemplateFields.Point, out var point) || !point.TryGetProperty(SkillTemplateFields.WarningRange, out var warning)) continue;
                 double Value(string name) => warning.TryGetProperty(name, out var v) ? GameData.Number(v) ?? 0 : 0;
-                var band = (long)Value("m_eShapeType") switch
+                var band = (long)Value(SkillTemplateFields.ShapeType) switch
                 {
-                    1 => new BossHitBand(0, (float)Value("m_fRadius")),
-                    5 => new BossHitBand((float)Value("m_fInnerRadius"), (float)Value("m_fOuterRadius")),
+                    1 => new BossHitBand(0, (float)Value(SkillTemplateFields.Radius)),
+                    5 => new BossHitBand((float)Value(SkillTemplateFields.InnerRadius), (float)Value(SkillTemplateFields.OuterRadius)),
                     _ => default,
                 };
-                if (band.Outer > 0) areas.Add((starts[i] + Value("m_fDuration"), band));
+                if (band.Outer > 0) areas.Add((starts[i] + Value(SkillTemplateFields.Duration), band));
             }
             break; // one entry per role in the exported show; the first is read like SkillTemplate
         }
