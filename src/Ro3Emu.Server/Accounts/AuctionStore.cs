@@ -67,9 +67,26 @@ public sealed class AuctionStore(AccountStore accounts)
     public IReadOnlyList<Item> OpenItems()
         => _accounts.ReadSync<List<Item>>(new AuctionReadPlan(AuctionReadKind.Open));
 
-    /// <summary>Every lot of one auction type, settled ones included.</summary>
+    /// <summary>Every lot of one auction type, settled ones included. Shared instances for reading only: never mutate
+    /// or save them (read the lot again with <see cref="Get"/> for that).</summary>
     public IReadOnlyList<Item> ItemsOfType(AuctionType type)
-        => _accounts.ReadSync<List<Item>>(new AuctionReadPlan(AuctionReadKind.OfType, (long)type));
+    {
+        long generation = _accounts.Caches.Current(WrittenCache.Auction);
+        lock (_cacheLock)
+            if (_ofType.TryGetValue(type, out var hit) && hit.Generation == generation) return hit.Items;
+        var items = _accounts.ReadSync<List<Item>>(new AuctionReadPlan(AuctionReadKind.OfType, (long)type));
+        lock (_cacheLock)
+            if (_accounts.Caches.Current(WrittenCache.Auction) == generation) _ofType[type] = (generation, items);
+        return items;
+    }
+
+    // C/D 16: each client asks for its own lots (82005) about once a second, and every ask read and decoded every lot of
+    // the type, settled ones included, synchronously on the loop (30 Oct, 14 h live: 4.5M reads, 4,617 s of loop waits,
+    // the largest single share of the loop's time). Served from memory now. AuctionItemWritePlan, the only writer of
+    // the rows, bumps the generation after its job (DbWriter.AfterJob); a read during which it changed is returned but
+    // not cached, as GuildStore does.
+    private readonly object _cacheLock = new();
+    private readonly Dictionary<AuctionType, (long Generation, IReadOnlyList<Item> Items)> _ofType = [];
 
     /// <summary>Settled lots of one type, latest end first.</summary>
     public IReadOnlyList<Item> SettledItems(AuctionType type)
