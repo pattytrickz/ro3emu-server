@@ -52,9 +52,9 @@ public static class SupporterShopRules
         new Product(1_999_303, 9_930_303, Exp, 100, 1, 100, 30, "Auto EXP Booster +100%",
             "+100% Base and Job EXP from monsters you defeat in Auto Mode, for 30 minutes of active auto-battle. The time only "
             + "runs while auto-battle time is being used. One booster at a time." + Rules),
-        new Product(1_999_304, 9_930_304, Drop, 40, 2, 50, 15, "Common Drop Booster 1.5x",
-            "1.5x the chance of common, bound crafting materials from monsters you defeat in Auto Mode, for 15 minutes of active "
-            + "auto-battle. Never cards, equipment, rare materials, MVP loot, Zeny or Crystals. One booster at a time." + Rules),
+        new Product(1_999_304, 9_930_304, Drop, 40, 2, 50, 15, "Drop Booster 1.5x",
+            "1.5x the chance of every item drop from monsters you defeat in Auto Mode, for 15 minutes of active auto-battle. "
+            + "The time only runs while auto-battle time is being used. One booster at a time." + Rules),
     };
 
     public static Product? ByItem(int item)

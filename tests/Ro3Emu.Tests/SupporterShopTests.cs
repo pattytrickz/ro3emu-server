@@ -1,7 +1,9 @@
 using System.Text.Json.Nodes;
 using Google.Protobuf;
+using Microsoft.Extensions.Options;
 using Romsg;
 using Ro3Emu.Bot;
+using Ro3Emu.Server;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Accounts.Persistence;
 using Ro3Emu.Server.Game;
@@ -63,7 +65,7 @@ public sealed class SupporterShopTests : IDisposable
     private Task<SyntheticHost> Start(bool shop = true) => SyntheticHost.StartAsync(o =>
     {
         o.GameDataDir = _data; o.CharacterAppearanceEnabled = true; o.CharacterDyePrice = 7;
-        o.Supporter.Shop = shop; o.Supporter.DropBoosterItems = [Material];
+        o.Supporter.Shop = shop;
         o.GmAccounts = ["alice"];
     });
 
@@ -191,7 +193,10 @@ public sealed class SupporterShopTests : IDisposable
         Assert.Equal(0, await Use(host, alice, Drop));
         var drop = await OnLoop(host, () => rewards.SupporterDropBoost!(Session(host, "alice")));
         Assert.Equal(50, drop!.Value.Percent);
-        Assert.Equal([Material], drop.Value.Items.ToArray());
+        Assert.Null(drop.Value.Items); // no list: every item the kill drops
+        host.Service<IOptions<ServerOptions>>().Value.Supporter.DropBoosterItems = [Material];
+        drop = await OnLoop(host, () => rewards.SupporterDropBoost!(Session(host, "alice")));
+        Assert.Equal([Material], drop!.Value.Items!.ToArray()); // a list narrows it
         Assert.Equal(Drop.Minutes * 60L, shop.Running("alice")!.RemainingSeconds);
         // Saved with the item's use, so a relog or a restart keeps it.
         Assert.Contains("\"drop\"", host.Service<RoleStore>().ServerState(SupporterShop.StateKey("alice")));

@@ -20,7 +20,8 @@ namespace Ro3Emu.Server.Game;
 /// never while idle, paused, in town, offline or playing by hand, and survives relogs and restarts (server_state).
 /// One booster at a time per account; a second is refused until the first ends.</item>
 /// <item>The EXP booster adds its percent to the recipient's kill EXP in active Auto Mode; the drop booster rolls the
-/// killer's tables once more at its chance keeping only Supporter:DropBoosterItems (RewardService). Neither touches
+/// killer's tables once more at its chance and keeps that roll's items, all of them unless Supporter:DropBoosterItems
+/// lists some, but never its EXP (RewardService). Neither touches
 /// Crystals, which come only from the pass (CrystalEconomy), so free and supporter players earn the same Crystals.</item>
 /// </list>
 /// A booster already running when status lapses runs out its purchased time (plan §3 E).
@@ -72,7 +73,6 @@ public sealed class SupporterShop
             await GmCommands.ReplyAsync(s, "The Supporter Merchant serves active Supporters. See solro3.com/supporter.");
             return (ErrorCodes.FeatureUnavailable, "not an active supporter");
         }
-        if (p.Kind == SupporterShopRules.Drop && Options.DropBoosterItems.Length == 0) return (ErrorCodes.FeatureUnavailable, "drop booster allowlist empty");
         var bought = await _accounts.ReadAsync<Dictionary<int, int>>(new SupporterPurchaseReadPlan(Key(s.Account), Week));
         bool overOwn = bought.GetValueOrDefault(commodity) + count > p.WeeklyLimit;
         bool overGroup = p.Kind == SupporterShopRules.Exp && ExpGroup.Sum(c => bought.GetValueOrDefault(c)) + count > SupporterShopRules.ExpWeeklyLimit;
@@ -109,9 +109,9 @@ public sealed class SupporterShop
     private int ExpPercent(GameSession s) => s.Account != null && Running(s.Account) is { Kind: SupporterShopRules.Exp } b
         && WildAfkService.AutoActive(s) ? b.Percent : 0;
 
-    private (int Percent, IReadOnlySet<int> Items)? DropBoost(GameSession s) =>
-        s.Account != null && Options.DropBoosterItems.Length > 0 && Running(s.Account) is { Kind: SupporterShopRules.Drop } b
-        && WildAfkService.AutoActive(s) ? (b.Percent, Options.DropBoosterItems.ToHashSet()) : null;
+    private (int Percent, IReadOnlySet<int>? Items)? DropBoost(GameSession s) =>
+        s.Account != null && Running(s.Account) is { Kind: SupporterShopRules.Drop } b && WildAfkService.AutoActive(s)
+            ? (b.Percent, Options.DropBoosterItems.Length > 0 ? Options.DropBoosterItems.ToHashSet() : null) : null;
 
     /// <summary>Auto-battle time was used: the account's booster runs down by the same seconds.</summary>
     internal void OnConsumed(GameSession s, long seconds)
@@ -163,11 +163,6 @@ public sealed class SupporterShop
         if (Running(account) is { } running)
         {
             await GmCommands.ReplyAsync(s, $"Your {Name(running)} still has {Minutes(running.RemainingSeconds)} minute(s) of auto-battle left. One booster at a time.");
-            return ErrorCodes.FeatureUnavailable;
-        }
-        if (p.Kind == SupporterShopRules.Drop && Options.DropBoosterItems.Length == 0)
-        {
-            await GmCommands.ReplyAsync(s, "The drop booster is not active on this realm yet. It stays in your bag.");
             return ErrorCodes.FeatureUnavailable;
         }
         // As BoostService: the item is spent first, then the account's booster is saved (server_state).
