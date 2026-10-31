@@ -116,11 +116,15 @@ public sealed class LauncherController : IDisposable
             .Select(l => new { label = l.Label, url = l.Url, icon = l.Icon }),
     });
 
-    void PostState(string phase, string? message = null)
+    void PostState(string phase, string? message = null, string? help = null)
     {
         _phase = phase;
-        _post(new { type = "state", phase, installed = InstalledLabel, remote = RemoteLabel, message });
+        _post(new { type = "state", phase, installed = InstalledLabel, remote = RemoteLabel, message, help });
     }
+
+    /// <summary>The download help page for a failed publisher download, when launcher.json names an http(s) one.</summary>
+    string? DownloadHelp => _publisher is not null && Uri.TryCreate(_config.DownloadHelp, UriKind.Absolute, out var u)
+        && u.Scheme is "http" or "https" ? u.AbsoluteUri : null;
 
     async Task CheckAsync()
     {
@@ -221,10 +225,10 @@ public sealed class LauncherController : IDisposable
         {
             if (_official is null)
                 PostState("offline", "Can't reach the official Ragnarok Online 3 download servers. Try again in a moment. If it keeps failing, "
-                    + "your network can't reach the download mirror: turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.");
+                    + "your network can't reach the download mirror: turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.", DownloadHelp);
             else if (TooOld(_official.Full.Release.Sequence))
                 PostState("offline", $"Only an older game release ({_official.Full.Release.Sequence}) is reachable from your network, and it doesn't work "
-                    + $"with {_config.ServerName}. Try again later, or turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.");
+                    + $"with {_config.ServerName}. Try again later, or turn on Cloudflare WARP (free, 1.1.1.1) or a VPN, then press Retry.", DownloadHelp);
             else
             {
                 long size = _official.Full.Sizes.Download > 0 ? _official.Full.Sizes.Download : _official.Full.Sizes.Expanded;
@@ -343,7 +347,11 @@ public sealed class LauncherController : IDisposable
         {
             _work?.Dispose();
             _work = null;
-            PostState("error", e is SetupException s ? $"{s.Message} {s.Fix}" : e.Message);
+            // A publisher download that failed (not a full disk or a locked file): the help page has the WARP steps.
+            bool download = _publisher is not null && (e is HttpRequestException ||
+                e is InstallException && (e.Message.StartsWith("A game package could not be downloaded", StringComparison.Ordinal)
+                    || e.Message.StartsWith("The publisher's download servers could not be reached", StringComparison.Ordinal)));
+            PostState("error", e is SetupException s ? $"{s.Message} {s.Fix}" : e.Message, download ? DownloadHelp : null);
         }
     }
 

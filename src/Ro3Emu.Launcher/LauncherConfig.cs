@@ -29,6 +29,9 @@ public sealed class LauncherConfig
     /// if it is at least this one. 30 Oct 2026: CloudFront serves 140035, from before the 140069 login change.
     /// </summary>
     [JsonPropertyName("minGameRelease")] public long MinGameRelease { get; set; }
+    /// <summary>"publisher" mode: a page explaining what to do when the game download fails (shown as a link under the
+    /// message). Empty: no link.</summary>
+    [JsonPropertyName("downloadHelp")] public string? DownloadHelp { get; set; }
     /// <summary>Buttons on the page (website, Discord, ...): label, url and an optional icon name the page knows.</summary>
     [JsonPropertyName("links")] public List<LauncherLink> Links { get; set; } = new();
 
