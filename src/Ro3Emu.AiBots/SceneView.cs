@@ -57,6 +57,7 @@ public sealed class SceneView
     private readonly object _lock = new();
     private readonly Dictionary<ulong, Unit> _units = new();
     private readonly Dictionary<long, int> _bag = new();
+    private readonly Dictionary<long, int> _stacks = [];
     private readonly Dictionary<long, PartyMember> _party = new();
     /// <summary>Recent hits between units: who each unit last hit, and who hit each unit (source, when).</summary>
     private readonly Dictionary<ulong, (ulong Target, DateTime At)> _lastHit = new();
@@ -211,7 +212,12 @@ public sealed class SceneView
                 // 5009 is a dataset increment: every item it adds or rewrites appears whole as an ItemBaseInfo.
                 var items = new List<ItemBaseInfo>();
                 CollectItems(DBItemsInfoIncrement.Parser.ParseFrom(body), items);
-                lock (_lock) foreach (var item in items) if (item.ItemGuid != 0) _bag[item.ItemGuid] = item.ItemEntry;
+                lock (_lock)
+                    foreach (var item in items.Where(i => i.ItemGuid != 0))
+                    {
+                        _bag[item.ItemGuid] = item.ItemEntry;
+                        _stacks[item.ItemGuid] = item.Stack;
+                    }
                 break;
             case GmCommands.BroadcastNotify:
                 string notice = BroadCastNotify.Parser.ParseFrom(body).Content;
@@ -379,6 +385,12 @@ public sealed class SceneView
     public long[] Guids(int entry)
     {
         lock (_lock) return _bag.Where(p => p.Value == entry).Select(p => p.Key).ToArray();
+    }
+
+    /// <summary>The stack the server last synced for a bag item (0 when unknown).</summary>
+    public int Stack(long itemGuid)
+    {
+        lock (_lock) return _stacks.GetValueOrDefault(itemGuid);
     }
 
     public Unit[] Units(int type)
