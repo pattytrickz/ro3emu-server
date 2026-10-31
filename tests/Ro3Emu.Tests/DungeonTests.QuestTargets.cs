@@ -78,6 +78,31 @@ public sealed partial class DungeonTests
             await QuestProbe.WaitAsync(_app, account, 10200010, i => i.CompleteNum is [1, 1, 0], "second boss too");
     }
 
+    /// <summary>
+    /// The guides 306070 "Phantom Realm" and 306080 "Conquer the World" say "Clear the Phantom Realm dungeon", but their
+    /// 106602 target lists only the Realm of the Gods bosses (the list of 1601020), so a Phantom Realm clear never
+    /// moved them. Both count a Phantom Realm clear too (inferred).
+    /// </summary>
+    [ClientDataFact]
+    public async Task APhantomRealmClearCompletesTheGuideQuestsThatSayPhantomRealm()
+    {
+        SyntheticSolo();
+        var alice = await InWorld("Alice");
+        await Gm(alice, "!lvl 99");
+        foreach (long guide in new long[] { 306070, 306080 })
+        {
+            await QuestProbe.AcceptAsync(_app, _http, "alice", guide);
+            await QuestProbe.AtAsync(_app, "alice", guide, 0);
+        }
+
+        Assert.Equal(0, await Enter(alice));
+        long instance = await Load(alice);
+        await Kill(alice, await BossIn(instance));
+        Assert.Equal((DungeonRes)1, (await Next(alice, DungeonService.Result, DungeonResNotify.Parser)).Res);
+        foreach (long guide in new long[] { 306070, 306080 })
+            await QuestProbe.DoneAsync(_app, "alice", guide);
+    }
+
     private async Task ClearAsParty((BotClient Bot, string Account)[] members, int mark, long scene, int boss)
     {
         var leader = members[0].Bot;
