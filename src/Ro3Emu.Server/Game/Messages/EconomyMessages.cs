@@ -6,7 +6,7 @@ namespace Ro3Emu.Server.Game;
 
 /// <summary>Shops, mail claims, auctions, player trade and stalls.</summary>
 public sealed class EconomyMessages(ShopService shops, MailService mail, AuctionService auctions, TradeService trade, StallsService stalls,
-    TimedBattleService timedBattles) : Messaging.IMessageModule
+    TimedBattleService timedBattles, CurrencyExchangeService currencyExchange) : Messaging.IMessageModule
 {
     public void Map(Messaging.MessageRoutes routes)
     {
@@ -16,11 +16,16 @@ public sealed class EconomyMessages(ShopService shops, MailService mail, Auction
         routes.AdmitEconomic(id => id is >= 82000 and <= 82020); // auctions
         routes.AdmitEconomic(id => id is MailService.ClaimMail);
         routes.AdmitRole(id => id is >= 82332 and <= 82340); // ordinary shops
+        routes.AdmitRole(id => id is CurrencyExchangeService.Exchange); // pays and grants the sender's own currencies
         routes.Intercept("trade", id => id is >= 32601 and <= 32630, (session, msgId, body) =>
             session.Role != null && session.Progress != null ? trade.HandleAsync(session, msgId, body) : Task.FromResult(false));
         routes.Intercept("stalls", id => id is >= StallsService.Start and <= StallsService.Share, (session, msgId, body) =>
             session.Role != null && session.Progress != null ? stalls.HandleAsync(session, msgId, body) : Task.FromResult(false));
 
+        routes.Map(CurrencyExchangeService.Exchange, "shops", async (session, msgId, body) =>
+        {
+            await currencyExchange.ExchangeAsync(session, ItemExchangeReq.Parser.ParseFrom(body.Span));
+        });
         routes.Map(ShopService.BuyCommodity, "shops", async (session, msgId, body) =>
         {
             var buy = BuyCommodityReq.Parser.ParseFrom(body.Span);
