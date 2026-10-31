@@ -288,6 +288,7 @@ public sealed partial class CombatService : IGameTicker
         this._options = options?.Value;
         _pets = pets;
         WireGuardians();
+        DamageAdjusters.Add((s, _, row, _, damage) => ElementDamage(s, row, damage));
         monsters.Attack = MonsterAttackAsync;
         buffs.ImmuneDeathDeclined = PlayerDiesAsync;
         scene.Leaving.Add(ClearSkillsAsync);
