@@ -41,6 +41,7 @@ public sealed partial class CharacterService
         LoadStatPlans(session);
         MigrateEquipmentInstances(session);
         MigrateCardPackItems(session);
+        StampTimedItems(session);
         session.EquipLevels = roles.LoadEquipLevels(role.Id) is { } levels ? System.Text.Json.JsonSerializer.Deserialize<EquipLevels>(levels) ?? new() : new();
         LoadEquipmentPlans(session);
         session.AutoDecompose = roles.LoadAutoDecompose(role.Id) is { } setting ? AutoDecomposeSetting.Parser.ParseFrom(setting) : new();

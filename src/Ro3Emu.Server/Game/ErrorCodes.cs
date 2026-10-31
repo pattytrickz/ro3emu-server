@@ -109,6 +109,7 @@ public static class ErrorCodes
     // Items
     public const int ItemMissing = 150;         // "Item does not exist"
     public const int ItemNoConfig = 151;        // "Item configuration does not exist"
+    public const int ItemExpired = 177;         // "Item has expired"
     public const int ItemsShort = 154;          // "Not enough required items"
     public const int BagFull = 159;             // "Backpack is full. Clear some space to receive the item."
     public const int DecomposeTabMissing = 183; // "Item dismantling tab configuration does not exist"

@@ -276,6 +276,7 @@ internal sealed class ItemSchemaPlan : DbPlan
             migrate.CommandText = "UPDATE item SET bind_expire = expire_time WHERE expire_time != 0";
             migrate.ExecuteNonQuery();
         }
+        SchemaSql.AddColumn(db, tx, "item", "expire_tm", "INTEGER NOT NULL DEFAULT 0");
         return 1;
     }
 }

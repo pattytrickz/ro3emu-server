@@ -213,7 +213,7 @@ public sealed partial class CharacterService
                     {
                         Entry = grant.Entry, Stack = stack, Pack = pack,
                         Sort = items.Where(i => i.Grid == 0 && i.Pack == pack).Select(i => i.Sort).DefaultIfEmpty(0).Max() + 1,
-                        BindType = grant.BindType, BindExpire = grant.ExpireTimeStamp,
+                        BindType = grant.BindType, BindExpire = grant.ExpireTimeStamp, ExpireTm = TimedExpiry(grant.Entry),
                         Attrs = TotemAttrFactory?.Invoke(grant.Entry) ?? EmblemAttrFactory?.Invoke(grant.Entry) ?? RollAttrs(grant.Entry)
                     };
                     items.Add(item);
@@ -453,7 +453,7 @@ public sealed partial class CharacterService
         target.Entry = source.Entry; target.Stack = source.Stack; target.Pack = source.Pack;
         target.Sort = source.Sort; target.Grid = source.Grid; target.IsLocked = source.IsLocked;
         target.Attrs = source.Attrs; target.StringAttrs = source.StringAttrs;
-        target.BindType = source.BindType; target.BindExpire = source.BindExpire;
+        target.BindType = source.BindType; target.BindExpire = source.BindExpire; target.ExpireTm = source.ExpireTm;
         target.Enchantments = source.Enchantments;
     }
 
@@ -492,7 +492,8 @@ public sealed partial class CharacterService
             var item = new InvItem
             {
                 Entry = entry, Stack = stack, Pack = pack, Sort = NextSort(session, pack),
-                Attrs = TotemAttrFactory?.Invoke(entry) ?? EmblemAttrFactory?.Invoke(entry) ?? RollAttrs(entry), BindType = bind
+                Attrs = TotemAttrFactory?.Invoke(entry) ?? EmblemAttrFactory?.Invoke(entry) ?? RollAttrs(entry), BindType = bind,
+                ExpireTm = TimedExpiry(entry)
             };
             if (persist) itemStore.Insert(session.Role!.Id, item);
             session.Items.Add(item);

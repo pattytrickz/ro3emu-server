@@ -32,6 +32,11 @@ public sealed class InvItem
     public long BindExpire { get; set; }
     /// <summary>Legacy award name for ItemBindInfo.expireTimeStamp.</summary>
     public long ExpireTimeStamp { get => BindExpire; set => BindExpire = value; }
+    /// <summary>
+    /// ItemBaseInfo.expireTm, unix seconds: when a timed item (ItemConfig _iTimeBoundEnum) lapses; 0 for items that
+    /// never do.
+    /// </summary>
+    public long ExpireTm { get; set; }
 
     /// <summary>ItemBaseInfo.enchantment, keyed by Enchantment row id.</summary>
     public Dictionary<int, ItemEnchantment> Enchantments { get; set; } = new();
@@ -41,7 +46,7 @@ public sealed class InvItem
     {
         Guid = Guid, Entry = Entry, Stack = Stack, Pack = Pack, Sort = Sort, Grid = Grid,
         Attrs = Attrs == null ? null : new(Attrs),
-        StringAttrs = StringAttrs == null ? null : new(StringAttrs), BindType = BindType, BindExpire = BindExpire, IsLocked = IsLocked,
+        StringAttrs = StringAttrs == null ? null : new(StringAttrs), BindType = BindType, BindExpire = BindExpire, ExpireTm = ExpireTm, IsLocked = IsLocked,
         Enchantments = Enchantments.ToDictionary(p => p.Key, p => new ItemEnchantment { Attr = new(p.Value.Attr), GetTime = p.Value.GetTime }),
     };
 }
@@ -69,7 +74,7 @@ public sealed class ItemStore(AccountStore accounts)
     {
         using var cmd = db.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "SELECT guid, entry, stack, pack, sort, grid, attrs, is_locked, enchantments, str_attrs, bind_type, bind_expire FROM item WHERE role_id = $r ORDER BY guid";
+        cmd.CommandText = "SELECT guid, entry, stack, pack, sort, grid, attrs, is_locked, enchantments, str_attrs, bind_type, bind_expire, expire_tm FROM item WHERE role_id = $r ORDER BY guid";
         cmd.Parameters.AddWithValue("$r", roleId);
         using var r = cmd.ExecuteReader();
         var items = new List<InvItem>();
@@ -85,13 +90,13 @@ public sealed class ItemStore(AccountStore accounts)
     {
         using var cmd = db.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "SELECT i.guid, i.entry, i.stack, i.pack, i.sort, i.grid, i.attrs, i.is_locked, i.enchantments, i.str_attrs, i.bind_type, i.bind_expire, i.role_id "
+        cmd.CommandText = "SELECT i.guid, i.entry, i.stack, i.pack, i.sort, i.grid, i.attrs, i.is_locked, i.enchantments, i.str_attrs, i.bind_type, i.bind_expire, i.expire_tm, i.role_id "
             + "FROM item i JOIN role r ON r.id = i.role_id WHERE r.deleted_time = 0 AND i.attrs IS NOT NULL ORDER BY i.guid";
         using var r = cmd.ExecuteReader();
         var items = new Dictionary<long, List<InvItem>>();
         while (r.Read())
         {
-            long role = r.GetInt64(12);
+            long role = r.GetInt64(13);
             if (!items.TryGetValue(role, out var list)) items[role] = list = new();
             list.Add(Row(r));
         }
@@ -105,7 +110,7 @@ public sealed class ItemStore(AccountStore accounts)
         IsLocked = r.GetBoolean(7),
         Enchantments = r.IsDBNull(8) ? new() : System.Text.Json.JsonSerializer.Deserialize<Dictionary<int, ItemEnchantment>>(r.GetString(8)) ?? new(),
         StringAttrs = r.IsDBNull(9) ? null : System.Text.Json.JsonSerializer.Deserialize<Dictionary<int, string>>(r.GetString(9)),
-        BindType = r.GetInt32(10), BindExpire = r.GetInt64(11),
+        BindType = r.GetInt32(10), BindExpire = r.GetInt64(11), ExpireTm = r.GetInt64(12),
     };
 
     /// <summary>Stores a new instance and assigns its guid.</summary>

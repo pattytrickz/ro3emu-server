@@ -23,11 +23,13 @@ public readonly partial record struct ItemConfig(JsonElement Row)
     [ConfigField("_iLevelNeed")] public partial long LevelNeed { get; }
     [ConfigField("_iName")] public partial long[] Name { get; }
     [ConfigField("_iQuality")] public partial long Quality { get; }
+    [ConfigField("_iSeasonLapseProduct")] public partial long[][] SeasonLapseProduct { get; }
     [ConfigField("_iSeasonResetType")] public partial long SeasonResetType { get; }
     [ConfigField("_iSexNeed")] public partial long SexNeed { get; }
     [ConfigField("_iSort")] public partial long Sort { get; }
     [ConfigField("_iStackLimit")] public partial long StackLimit { get; }
     [ConfigField("_iSubType")] public partial long SubType { get; }
+    [ConfigField("_iTimeBoundEnum")] public partial long TimeBoundEnum { get; }
     [ConfigField("_iTrade")] public partial long Trade { get; }
     [ConfigField("_iType")] public partial long Type { get; }
     [ConfigField("_iUseEffect")] public partial JsonElement? UseEffect { get; }
@@ -38,5 +40,6 @@ public readonly partial record struct ItemConfig(JsonElement Row)
     [ConfigField("_kIcon")] public partial string Icon { get; }
     [ConfigField("_kJobNeed")] public partial long[] JobNeed { get; }
     [ConfigField("_kMultiverseArray")] public partial long[] MultiverseArray { get; }
+    [ConfigField("_kTimeBoundPara")] public partial long[] TimeBoundPara { get; }
     [ConfigField("_kUseTimes")] public partial long[] UseTimes { get; }
 }
