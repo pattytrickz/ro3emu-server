@@ -55,6 +55,8 @@ public readonly partial record struct SkillConfig(JsonElement Row)
     [ConfigField("_kBuff1")] public partial long[][] Buff1 { get; }
     [ConfigField("_kBuff2")] public partial long[][] Buff2 { get; }
     [ConfigField("_kCost")] public partial long[][] Cost { get; }
+    [ConfigField("_kDamageFormulaExtra")] public partial string[] DamageFormulaExtra { get; }
+    [ConfigField("_kDamageParamExtra")] public partial long[][] DamageParamExtra { get; }
     [ConfigField("_kDamageParam1")] public partial long[] DamageParam1 { get; }
     [ConfigField("_kDamageParam2")] public partial long[] DamageParam2 { get; }
     [ConfigField("_kDescData")] public partial string[] DescData { get; }
