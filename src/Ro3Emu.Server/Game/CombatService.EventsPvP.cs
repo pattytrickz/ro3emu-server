@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Ro3Emu.Server.Data.Config;
 using Romsg;
 
 namespace Ro3Emu.Server.Game;
@@ -158,7 +159,7 @@ public sealed partial class CombatService
         { Def = defend[AttributeId.Def], Mdef = defend[AttributeId.Mdef], Flee = defend[AttributeId.Flee], ResCri = defend[AttributeId.ResCri] };
         var (damage, result) = Damage(a, b, row, ratioBonus: AuraBladeBonus(source, row), bonusCrit: GuardianPetRules.CriticalChance(row),
             forceCrit: GuardianPetRules.CriticalAtHp(row, defend[AttributeId.Hp], defend[AttributeId.MaxHp]));
-        damage = GuardianPetRules.DirectDamage(row, damage);
+        damage = SkillAttributeDamage.Apply(new SkillConfig(row), attack, GuardianPetRules.DirectDamage(row, damage));
         damage = GuardianOutgoingDamage(source, row, damage);
         damage = GuardianControlledDamage(source, GuardianControlTarget(target), damage);
         if (result != DamageHitResult.Miss) damage = ApplyPlayerRestraints(source, target, damage);

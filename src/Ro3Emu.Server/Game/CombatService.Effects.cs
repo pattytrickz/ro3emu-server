@@ -796,7 +796,7 @@ public sealed partial class CombatService
             GuardianPetRules.CriticalAtHp(row, target.Hp, target.Template.MaxHp), AuraBladeBonus(s, row));
         if (row.TryGetProperty("_ro3GuardianFixedHit", out var fixedValue))
             return (GuardianPetRules.DirectDamage(row, fixedValue.GetInt64()), DamageHitResult.Normal);
-        amount = GuardianPetRules.DirectDamage(row, amount);
+        amount = SkillAttributeDamage.Apply(new SkillConfig(row), _character.Stats(s), GuardianPetRules.DirectDamage(row, amount));
         if (amount > 0)
         {
             foreach (var modifier in DamageAdjusters) amount = Math.Max(0, modifier(s, target, row, result, amount));

@@ -148,3 +148,7 @@ An accepted cast (31102) ends the running one, and an ended cast never lands. A 
 ## A repeated request before the impact
 
 The server's attack loop swings on its own clock and the client asks for every swing itself, so a request (31102) can reach the server just after a swing started. `LC_Skill_RunTimeContext.SkillCanInterrupted` says the client's own swing is not interrupted by the same skill: `_iInterruptedType` 1 (every normal attack) is `NotInterrupt` for its own id, and 2 is interruptible only from the hit point. Ending the running swing for such a request sent the client a `SkillEnd`, it asked again, and swings kept restarting before their impact: fast animations with no damage. A request for the same skill and target before the impact now joins the running cast (`CombatService.JoinsRunningCast`): it is answered with that cast's session, pays nothing and changes no timer. A request after the impact, for another target or for another skill behaves as before.
+
+## Skill damage that grows with ASPD
+
+`_kDamageFormulaExtra` `AXaddBplus1` and `AXaddBplus1_withlimit` scale a skill's damage with a caster attribute, ASPD on every player skill that has them. `_kDamageParamExtra` is `[A, attribute, B, limit]` and the factor is `1 + A * attribute / B`, with the attribute capped at the limit when the row has one (`SkillAttributeDamage`). Warg Strike's `[30, 115, 10000, 500]` and `_kDescData` `1`, `0.3`, `500` read "every 1% ASPD grants an Extra 0.3% Skill Damage". That the whole ASPD counts, not only what is above 100, is **(inferred)**.
