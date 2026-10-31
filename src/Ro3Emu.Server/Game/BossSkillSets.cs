@@ -403,7 +403,7 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
                 && data.Row("SkillConfig", groundBlast) != null ? (int)groundBlast : 0,
             ChargeEffect = Charge(row, out int chargeMs), ChargeMs = chargeMs,
             PushEffect = Push(row, out int pushMs, out float pushDistance), PushMs = pushMs, PushDistance = pushDistance,
-            Warnings = Warnings(GameData.Int(row, "_iScriptShow"), template),
+            Warnings = Warnings(new SkillConfig(row).ScriptShow, template),
         };
     }
 
@@ -417,7 +417,7 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
     {
         if (show <= 0) return [];
         var listed = new HashSet<long>();
-        if (template is { } t && t.TryGetProperty("m_kShows", out var shows) && shows.ValueKind == JsonValueKind.Object)
+        if (template is { } t && t.TryGetProperty(SkillTemplateFields.Shows, out var shows) && shows.ValueKind == JsonValueKind.Object)
             foreach (var stage in shows.EnumerateObject().Where(s => s.Value.ValueKind == JsonValueKind.Array))
                 foreach (var entry in stage.Value.EnumerateArray())
                     if (entry.ValueKind == JsonValueKind.Array && entry.GetArrayLength() > 0 && GameData.Number(entry[0]) is double id)
@@ -426,7 +426,7 @@ public sealed class BossSkillSets(GameData data, BossSkillOptions options)
         var warnings = new List<int>();
         for (long id = show * 100; id < show * 100 + 100; id++)
             if (!listed.Contains(id) && effects.TryGetValue(id.ToString(System.Globalization.CultureInfo.InvariantCulture), out var e)
-                && e.TryGetProperty("m_kPoint", out var point) && point.TryGetProperty("m_kWarningRange", out _))
+                && e.TryGetProperty(SkillTemplateFields.Point, out var point) && point.TryGetProperty(SkillTemplateFields.WarningRange, out _))
                 warnings.Add((int)id);
         return [.. warnings];
     }

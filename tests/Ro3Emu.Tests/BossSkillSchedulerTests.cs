@@ -138,7 +138,7 @@ public sealed class BossSkillSchedulerTests : IAsyncLifetime
         for (int i = 0; i < 4; i++)
             warnings.Add(await Next(alice, CombatService.SkillEffect, SkillEffectDisplayNotify.Parser, n => n.SkillId == 4320101
                 && warnings.All(w => w.EffectId != n.EffectId)));
-        Assert.Equal([4320104, 4320105, 4320106, 4320117], warnings.Select(w => w.EffectId).Order().ToArray());
+        Assert.Equal([4320104, 4320105, 4320106, 4320117], [.. warnings.Select(w => w.EffectId).Order()]);
         // On the boss and its cast, so the client clears them with it.
         Assert.All(warnings, w => Assert.Equal((drake.Uid, drake.Uid, cast.Face), (w.SourceId, w.MasterId, w.Angle)));
     }
