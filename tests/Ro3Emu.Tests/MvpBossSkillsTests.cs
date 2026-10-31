@@ -48,6 +48,18 @@ public sealed class MvpBossSkillsTests
         Assert.Equal(5002301, FirstBuff(5202801));
     }
 
+    [Fact]
+    public void TheRareWinnerIsNeverAnExcludedAiPlayer()
+    {
+        var ranked = MvpService.RankTeams([(1, 7, 1, 300), (2, 7, 1, 300), (3, 0, 0, 560)], _ => false, _ => 100);
+        bool Ai(long role) => role is 1 or 3;
+        for (int roll = 0; roll < 2; roll++)
+            Assert.Equal(2, MvpService.PickWeighted(ranked, Ai, _ => roll)!.Value.Id);
+        Assert.Null(MvpService.PickWeighted(ranked, _ => true, _ => 0));
+        // Without exclusions every member is drawn, the better team's members more often (team 7 outscores the solo player).
+        Assert.Equal([1, 1, 2, 2, 3], Enumerable.Range(0, 5).Select(r => MvpService.PickWeighted(ranked, _ => false, _ => r)!.Value.Id).ToArray());
+    }
+
     [ClientDataFact]
     public void GoldenThiefBugSummonsSixtySecondBugsAndFrenzies()
     {

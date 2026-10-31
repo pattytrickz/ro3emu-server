@@ -37,6 +37,47 @@ public sealed class BossSkillSetsTests(ITestOutputHelper output)
         Assert.Equal((BossSkillArea.Rect, 23f, 7f), (slash.Area, slash.Radius, slash.Width));
     }
 
+    // Ring of Light (5201301, show 52001) warns a circle of 8 m, then the rings 8-16 m and 16-24 m, one for each of its three
+    // hits (EffectData m_kWarningRange: m_fRadius, m_fInnerRadius / m_fOuterRadius): the gaps between the rings are safe.
+    [ClientDataFact]
+    public void AnnulusWarningsAreTheAreasOfTheHitsTheyEndAt()
+    {
+        var ring = Book(5020001)!.Skills.Single(k => k.Id == 5201301);
+        Assert.Equal(3, ring.HitMs.Length);
+        Assert.Equal([(0f, 8f), (8f, 16f), (16f, 24f)], ring.HitBands.Select(b => (b.Inner, b.Outer)).ToArray());
+        Assert.Equal(24f, ring.HitReach);
+        Assert.Empty(Book(5020004)!.Skills.Single(k => k.Id == 5203001).HitBands); // a plain circle warning changes nothing
+    }
+
+    // Ring of Darkness (5202401, show 52015) is Deviling's copy of Ring of Light: the same 8 m circle and 8-16 / 16-24 m rings.
+    [ClientDataFact]
+    public void RingOfDarknessHitsTheRingsItWarns()
+    {
+        var ring = Book(5020003)!.Skills.Single(k => k.Id == 5202401);
+        Assert.Equal(3, ring.HitMs.Length);
+        Assert.Equal([(0f, 8f), (8f, 16f), (16f, 24f)], ring.HitBands.Select(b => (b.Inner, b.Outer)).ToArray());
+    }
+
+    [Fact]
+    public void ARingHitSkipsThePlayersInsideItsInnerRadius()
+    {
+        var skill = new BossSkill
+        {
+            Id = 1, Row = System.Text.Json.JsonSerializer.SerializeToElement(new { }), Area = BossSkillArea.AroundSelf, Radius = 10f,
+            HitMs = [3000, 6000, 9000], HitBands = [new(0f, 8f), new(8f, 16f), new(16f, 24f)],
+        };
+        var at = new Romsg.Vec3();
+        bool Hit(int hit, float distance) => CombatService.InBossArea(skill, at, at, 0f, distance, 0f, hit);
+        Assert.Equal([true, false, false], new[] { Hit(0, 5f), Hit(1, 5f), Hit(2, 5f) });
+        Assert.Equal([false, true, false], new[] { Hit(0, 12f), Hit(1, 12f), Hit(2, 12f) });
+        Assert.Equal([false, false, true], new[] { Hit(0, 20f), Hit(1, 20f), Hit(2, 20f) });
+        Assert.Equal(24f, skill.HitReach);
+        // Without bands every hit is the plain circle.
+        var plain = new BossSkill { Id = 2, Row = skill.Row, Area = BossSkillArea.AroundSelf, Radius = 10f, HitMs = [3000] };
+        Assert.True(CombatService.InBossArea(plain, at, at, 0f, 5f, 0f));
+        Assert.False(CombatService.InBossArea(plain, at, at, 0f, 12f, 0f));
+    }
+
     // The field MVPs' summon and prop skills name no NPC (no _kLogicData); BossSkillSets.ReconstructedSummons binds them to
     // the 50010xx NPCs made for those MVPs. A summoned unit's own skill (its _kRespawnSkill) leaves the boss's rotation.
     [ClientDataFact]

@@ -65,16 +65,17 @@ public sealed partial class CombatService
         int show = HitEffect(GameData.Int(skill.Row, "_iScriptShow"));
         for (int i = 0; i < skill.HitMs.Length; i++)
         {
-            bool first = i == 0;
+            int hit = i;
             ScheduleRuntime(boss.WorldScene, TimeSpan.FromMilliseconds(Math.Max(0, skill.HitMs[i] + chant - skill.ChantMs)), () =>
-                BossSkillHitAsync(boss, player, role, pet, skill, serial, session, origin, center, face, show, first, options));
+                BossSkillHitAsync(boss, player, role, pet, skill, serial, session, origin, center, face, show, hit, options));
         }
         _log.LogDebug("Boss {Npc} casts {Skill} (phase {Phase})", boss.Template.NpcId, skill.Id, rt.Phase);
     }
 
     private async Task BossSkillHitAsync(MonsterUnit boss, GameSession? player, Role? role, TowerPetUnit? pet, BossSkill skill,
-        long serial, long session, Vec3 origin, Vec3 center, float face, int show, bool first, BossSkillOptions options)
+        long serial, long session, Vec3 origin, Vec3 center, float face, int show, int hit, BossSkillOptions options)
     {
+        bool first = hit == 0;
         if (!BossCastCurrent(boss, serial)) return;
         var rt = boss.BossSkills!;
         if (first)
@@ -108,15 +109,15 @@ public sealed partial class CombatService
         }
         else
         {
-            float reach = skill.Area == BossSkillArea.Rect ? MathF.Sqrt(skill.Radius * skill.Radius + skill.Width * skill.Width) : skill.Radius;
+            float reach = skill.Area == BossSkillArea.Rect ? MathF.Sqrt(skill.Radius * skill.Radius + skill.Width * skill.Width) : skill.HitReach;
             var near = new List<GameSession>();
             _world.CollectPlayers(boss.WorldScene, center.X, center.Z, reach + 0.5f, near);
             foreach (var p in near)
                 if (p.Role != null && !p.Dead && !p.SceneLoading && p.WorldScene == boss.WorldScene
-                    && InBossArea(skill, origin, center, face, p.Position.X, p.Position.Z)) victims.Add(p);
+                    && InBossArea(skill, origin, center, face, p.Position.X, p.Position.Z, hit)) victims.Add(p);
             if (boss.InstanceId != 0)
                 foreach (var unit in _world.Map(boss.WorldScene).Near(center.X, center.Z, reach + 0.5f))
-                    if (unit is TowerPetUnit tp && !tp.Dead && tp.Hp > 0 && InBossArea(skill, origin, center, face, tp.X, tp.Z)) pets.Add(tp);
+                    if (unit is TowerPetUnit tp && !tp.Dead && tp.Hp > 0 && InBossArea(skill, origin, center, face, tp.X, tp.Z, hit)) pets.Add(tp);
             victims.Sort((a, b) => MonsterService.Distance(center.X, center.Z, a.Position.X, a.Position.Z)
                 .CompareTo(MonsterService.Distance(center.X, center.Z, b.Position.X, b.Position.Z)));
             if (victims.Count > skill.MaxTargets) victims.RemoveRange(skill.MaxTargets, victims.Count - skill.MaxTargets);
@@ -139,14 +140,20 @@ public sealed partial class CombatService
     }
 
     /// <summary>Whether (x, z) is inside the skill's area: a circle around the boss or its marked point, a fan or a
-    /// rectangle ahead of the boss in the direction it faced when the cast began.</summary>
-    internal static bool InBossArea(BossSkill skill, Vec3 origin, Vec3 center, float face, float x, float z)
+    /// rectangle ahead of the boss in the direction it faced when the cast began. A circle whose show warns rings (the
+    /// hit's <see cref="BossSkill.HitBands"/> entry) covers only that ring.</summary>
+    internal static bool InBossArea(BossSkill skill, Vec3 origin, Vec3 center, float face, float x, float z, int hit = 0)
     {
         switch (skill.Area)
         {
             case BossSkillArea.AroundSelf:
             case BossSkillArea.AroundTarget:
-                return MonsterService.Distance(center.X, center.Z, x, z) <= skill.Radius + 0.1f;
+                {
+                    float distance = MonsterService.Distance(center.X, center.Z, x, z);
+                    if (hit >= skill.HitBands.Length) return distance <= skill.Radius + 0.1f;
+                    var band = skill.HitBands[hit];
+                    return distance > band.Inner && distance <= band.Outer + 0.1f;
+                }
             case BossSkillArea.Fan:
                 {
                     float dx = x - origin.X, dz = z - origin.Z;
