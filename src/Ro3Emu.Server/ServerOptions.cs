@@ -2,14 +2,9 @@ namespace Ro3Emu.Server;
 
 public sealed class ServerOptions
 {
-    /// <summary>PTR rollout gate for character dyes and the GM aura. Requires matching client hooks.</summary>
+    /// <summary>Rollout gate for character dyes (the Dye Merchant's account unlocks) and the GM aura. Requires matching
+    /// client hooks. The colours and their prices are Ro3Emu.Shared.CharacterAppearanceRules, shared with the client.</summary>
     public bool CharacterAppearanceEnabled { get; set; }
-    public int CharacterDyePrice { get; set; } = 1000;
-    /// <summary>
-    /// Supporter Tokens (currency 4) per Violet, Gold or Silver dye bottle: the rare colours are sold for tokens only, never
-    /// Zeny. 75 = the Colour Change Voucher price in the supporter plan (29 Oct 2026). Zero hides these six offers.
-    /// </summary>
-    public int CharacterDyeRarePrice { get; set; } = 75;
 
     /// <summary>Address the client is told to connect to (server list gate addresses). Must be an IP literal.</summary>
     public string PublicHost { get; set; } = "127.0.0.1";

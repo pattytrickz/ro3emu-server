@@ -443,6 +443,7 @@ public sealed class RoleSessionService(RoleStore roles, Data.GameData data, Buff
             && !Ro3Emu.Shared.CharacterAppearanceRules.IsServerMarker(v.Id)));
         entity.CustomDatas.Add(PlayerIdentityService.Marker(session));
         entity.CustomDatas.Add(CharacterAppearanceService.Marker(session));
+        entity.CustomDatas.Add(CharacterAppearanceService.FullMarker(session));
         return entity;
     }
 

@@ -10,12 +10,14 @@ internal static class CharacterAppearance
     private static Obf_R.Obf_ff _global;
     private static bool _itemsReady, _reported;
     private static float _nextReady;
-    private static int _shopPrice = -1, _shopRarePrice = -1;
+    // The account's unlocked colours the shop rows were last built for (CharacterAppearanceRules.OwnedCustomData).
+    private static long _shopOwned = long.MinValue;
+    private static Obf_R.Obf_ff _texts;
     internal static object MaskProperty { get; private set; }
 
     internal static void Install(Obf_R.Obf_ff global)
     {
-        _global = global; _itemsReady = false; _shopPrice = -1; _shopRarePrice = -1; _reported = false; _nextReady = 0;
+        _global = global; _itemsReady = false; _shopOwned = long.MinValue; _texts = null; _reported = false; _nextReady = 0;
         MaskProperty = global.Obf_LuA<object>("enum_unitAttrClientMap.IsMaskFace");
     }
 
@@ -28,14 +30,14 @@ internal static class CharacterAppearance
         if (_itemsReady && First(_global.Obf_LuA<Obf_R.Obf_Ef>("rawget")?.Obf_HuA(rows, (long)CharacterAppearanceRules.HairItemBase)) != null
             && MerchantPresent(dbm)) return;
         _itemsReady = false;
-        _shopPrice = -1;
-        _shopRarePrice = -1;
+        _shopOwned = long.MinValue;
+        _texts = texts;
         if (!ApplyMerchant(dbm, texts)) return;
         var template = rows?.Obf_ruA<long, Obf_R.Obf_ff>(CharacterAppearanceRules.ItemTemplate);
         if (template == null) return;
         for (int i = 0; i < CharacterAppearanceRules.PaletteCount * 2; i++)
         {
-            int item = CharacterAppearanceRules.ItemForCommodity(CharacterAppearanceRules.CommodityBase + i);
+            int item = CharacterAppearanceRules.Item(i % CharacterAppearanceRules.PaletteCount, i >= CharacterAppearanceRules.PaletteCount);
             var row = CopyConfig(template);
             foreach (var field in CharacterAppearanceRules.ItemFields(item)) Set(row, field.Key, field.Value);
             PassChallenges.RawSet(rows, (long)item, row);
@@ -86,45 +88,56 @@ internal static class CharacterAppearance
             var unit = First(_global.Obf_LuA<Obf_R.Obf_Ef>("LC_UnitManager.GetLocalPlayer")?.Obf_HuA()) as Obf_R.Obf_ff;
             if (unit == null) return;
             Attach(unit);
-            var price = Custom(unit, CharacterAppearanceRules.PriceCustomData);
-            var rare = Custom(unit, CharacterAppearanceRules.RarePriceCustomData);
-            if (price == null || rare == null)
+            // The server answers the ready message with the owned-colours marker (only while the dyes are enabled).
+            var marker = Custom(unit, CharacterAppearanceRules.OwnedCustomData);
+            if (marker == null)
             {
                 SingletonMonoBehaviour<NW_CBBNetworkManager>.Instance.Obf_jBd(CharacterAppearanceRules.ClientReadyMessage,
                     new byte[] { CharacterAppearanceRules.ClientVersion });
                 return;
             }
-            int amount = Convert.ToInt32(price), rarePrice = Convert.ToInt32(rare);
-            if (amount == _shopPrice && rarePrice == _shopRarePrice) return;
+            long owned = Convert.ToInt64(marker);
+            if (owned == _shopOwned) return;
             var db = _global.Obf_RuA<Obf_R.Obf_ff>("Lua_DBManager");
             var dbm = First(db?.Obf_RuA<Obf_R.Obf_Ef>("GetInstance")?.Obf_HuA(db)) as Obf_R.Obf_ff;
-            if (ApplyShop(dbm, amount, rarePrice)) { _shopPrice = amount; _shopRarePrice = rarePrice; }
+            if (ApplyShop(dbm, owned)) _shopOwned = owned;
         }
         catch (Exception e) { Report(e); }
     }
 
-    private static bool ApplyShop(Obf_R.Obf_ff dbm, int price, int rarePrice)
+    /// <summary>The Dye Merchant's rows for this account (CharacterAppearanceRules.ShopRows): owned colours at 0, the rest
+    /// at their Crystal and token prices. Item names and descriptions say which colours are owned.</summary>
+    private static bool ApplyShop(Obf_R.Obf_ff dbm, long owned)
     {
         if (dbm == null) return false;
         var rows = PassChallenges.Values(dbm, "m_kCFG_ShopCommodityConfig");
         var template = rows?.Obf_ruA<long, Obf_R.Obf_ff>(CharacterAppearanceRules.ShopTemplate);
         if (template == null) return false;
-        for (int i = 0; i < CharacterAppearanceRules.PaletteCount * 2; i++)
+        for (int id = CharacterAppearanceRules.CommodityBase; id < CharacterAppearanceRules.CommodityBase + CharacterAppearanceRules.CommodityCount; id++)
+            PassChallenges.RawSet(rows, (long)id, null);
+        bool armour = (owned & (1L << CharacterAppearanceRules.ArmourSupportedBit)) != 0;
+        int shown = 0;
+        foreach (var offer in CharacterAppearanceRules.ShopRows(owned, armour))
         {
-            int id = CharacterAppearanceRules.CommodityBase + i;
-            int item = CharacterAppearanceRules.ItemForCommodity(id);
-            if (price <= 0 || CharacterAppearanceRules.IsRare(item) && rarePrice <= 0)
-            { PassChallenges.RawSet(rows, (long)id, null); continue; }
             var row = CopyConfig(template);
-            foreach (var field in CharacterAppearanceRules.ShopFields(item, price, rarePrice)) Set(row, field.Key, field.Value);
-            PassChallenges.RawSet(rows, (long)id, row);
+            foreach (var field in offer.Value) Set(row, field.Key, field.Value);
+            PassChallenges.RawSet(rows, (long)offer.Key, row);
+            shown++;
         }
         var wrapper = dbm.Obf_RuA<Obf_R.Obf_ff>("m_kCFG_ShopCommodityConfig");
         wrapper.Obf_luA<string, object>("m_kAllIDList", null);
         wrapper.Obf_RuA<Obf_R.Obf_Ef>("OnInitDatas")?.Obf_HuA(wrapper);
         var merchant = PassChallenges.Values(dbm, "m_kCFG_ShopConfig")?.Obf_ruA<long, Obf_R.Obf_ff>(CharacterAppearanceRules.MerchantId);
-        if (merchant != null) Set(merchant, "_kCurrencyDisplay", rarePrice > 0 ? new long[] { 1, CharacterAppearanceRules.RareCurrency } : new long[] { 1 });
-        Debug.Log("[Ro3Emu.Appearance] dye shop " + (price > 0 ? "enabled" : "disabled") + " by server");
+        if (merchant != null) Set(merchant, "_kCurrencyDisplay", new long[] { CharacterAppearanceRules.Crystal, CharacterAppearanceRules.Token });
+        if (_texts != null)
+            for (int i = 0; i < CharacterAppearanceRules.PaletteCount * 2; i++)
+            {
+                int palette = i % CharacterAppearanceRules.PaletteCount, item = CharacterAppearanceRules.Item(palette, i >= CharacterAppearanceRules.PaletteCount);
+                bool mine = palette != 0 && CharacterAppearanceRules.Owns(owned, palette);
+                PassChallenges.Text(_texts, CharacterAppearanceRules.NameText(item), CharacterAppearanceRules.ItemName(item) + (mine ? " (Owned)" : ""));
+                PassChallenges.Text(_texts, CharacterAppearanceRules.DescriptionText(item), CharacterAppearanceRules.Description(item, mine));
+            }
+        Debug.Log("[Ro3Emu.Appearance] dye shop: " + shown + " offers for this account");
         return true;
     }
 
