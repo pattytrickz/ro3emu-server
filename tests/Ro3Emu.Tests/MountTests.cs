@@ -14,7 +14,7 @@ namespace Ro3Emu.Tests;
 public sealed class MountTests : IAsyncLifetime
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "ro3emu-mount-" + Guid.NewGuid().ToString("N"));
-    private readonly ManualClock _clock = new(DateTimeOffset.UtcNow);
+    private readonly ManualClock _clock = new(new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.Zero));
     private WebApplication _app = null!;
     private string _http = "";
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
@@ -293,7 +293,7 @@ public sealed class MountTests : IAsyncLifetime
         await player.SendGameAsync(CharacterService.ShortcutBarSave, new ShortcutBarSaveReq { SlotIndex = 0, ItemGuid = guid });
         Assert.Equal(0, (await Next(player, CharacterService.ShortcutBarSave, ShortcutBarSaveRes.Parser)).Result);
         int start = player.Inbox.Snapshot().Count;
-        long before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        long before = _clock.GetUtcNow().ToUnixTimeMilliseconds();
         await player.SendGameAsync(CharacterService.ShortcutBarUse, new ShortcutBarUseReq { SlotIndex = 0 });
         var reply = await Next(player, CharacterService.ShortcutBarUse, ShortcutBarUseRes.Parser);
         Assert.Equal((0, 0), (reply.Result, reply.SlotIndex));
