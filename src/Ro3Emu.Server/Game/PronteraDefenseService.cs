@@ -3,6 +3,7 @@ using Romsg;
 using Ro3Emu.Server.Accounts;
 using Ro3Emu.Server.Accounts.Persistence;
 using Ro3Emu.Server.Data;
+using Ro3Emu.Server.Data.Config;
 using Ro3Emu.Server.Maps;
 using Ro3Emu.Server.Economy;
 
@@ -265,7 +266,7 @@ public sealed class PronteraDefenseService : IGameTicker
         string open = Opening().ToString(System.Globalization.CultureInfo.InvariantCulture);
         var keys = new List<Ownership.ReservationKey> { Ownership.ReservationKey.Entity("prontera_event", open) };
         foreach (var row in _data.Table("PronteraDefenseMapConfig").Values)
-            if (GameData.Int(row, "_iMapId") is > 0 and var map)
+            if (new PronteraDefenseMapConfig(row).MapId is > 0 and var map)
                 keys.Add(Ownership.ReservationKey.Entity("prontera_point", $"{open}:{map}"));
         return [.. keys];
     }
