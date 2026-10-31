@@ -4,6 +4,12 @@ using Ro3Emu.AiBots;
 // AI players for an RO3Emu server: they log in like real clients, level up on fields, hang out in town, join parties
 // and chat (canned lines, or a language model when an API key is set). See docs/guide/ai-bots.md.
 // usage: Ro3Emu.AiBots [--config ~/aibots/aibots.json] [--count N] [--server http://host:port]
+//        Ro3Emu.AiBots qa [--server http://127.0.0.1:5380] <check>...   (in-game QA checks, see Qa.cs)
+if (args.Length > 0 && args[0] == "qa")
+{
+    Environment.ExitCode = await Qa.RunAsync(args[1..]);
+    return;
+}
 string configPath = Arg("--config") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "aibots", "aibots.json");
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(configPath))!);
 var options = AiBotsOptions.Load(configPath);
