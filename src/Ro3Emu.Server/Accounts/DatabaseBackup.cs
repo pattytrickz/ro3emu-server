@@ -8,10 +8,13 @@ namespace Ro3Emu.Server.Accounts;
 /// Copies ro3emu.db to &lt;data&gt;/backups at startup and every 6 hours, keeping the newest 20 (C/D 19).
 /// - **Cut:** one SQLite online backup step reads a single WAL snapshot, so a copy holds exactly the transactions
 ///   committed before it started, however fast the writer advances meanwhile.
-/// - **Atomic:** the copy is written as <c>.partial</c>, checked with <c>PRAGMA quick_check</c> and only then renamed
-///   to <c>ro3emu-*.db</c>. A crash or a failed check never leaves a file that pruning counts as a good backup.
-/// - **Startup validation:** the startup backup is the realm's integrity check. A copy that fails it is kept as
-///   <c>.corrupt</c> and logged as critical (the live file is never touched).
+/// - **Atomic:** the copy is written as <c>.partial</c> and only then renamed to <c>ro3emu-*.db</c>. A crash or a failed
+///   check never leaves a file that pruning counts as a good backup.
+/// - **Cost:** at 15 GB the copy takes a minute and <c>PRAGMA quick_check</c> an hour of one core and the backup disk
+///   (31 Oct 2026). So a restart makes no copy while the newest is younger than <see cref="Interval"/> (releases restart
+///   every 4 hours), and a scheduled copy is checked only once per <see cref="IntegrityInterval"/> (inferred).
+/// - **Validation:** a copy that fails the check is kept as <c>.corrupt</c> and logged as critical (the live file is never
+///   touched). A manual <see cref="Backup()"/> always checks.
 /// - **Disk:** a copy never takes the space the live database needs to grow: when a copy and
 ///   <see cref="FreeSpaceReserve"/> do not fit, the oldest backups go first, and a failed copy is deleted at once.
 /// </summary>
@@ -24,7 +27,9 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
     /// <summary>Disk space a backup leaves free for the live database (inferred): on 27 Oct 2026 a failed startup copy
     /// held the last of it, and kills and logins failed with "database or disk is full" for over an hour.</summary>
     internal const long FreeSpaceReserve = 1L << 30;
-    private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
+    private static readonly TimeSpan Interval = TimeSpan.FromHours(6), IntegrityInterval = TimeSpan.FromHours(24);
+    /// <summary>In the data directory: its write time is when a copy last passed the integrity check.</summary>
+    private const string IntegrityMarker = ".backup-integrity-checked";
     private readonly object _backupGate = new();
     private string? _lastName;
     private int _sameNameCount;
@@ -62,11 +67,12 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
             log.LogWarning("Database backups are off (Ro3Emu:DatabaseBackups=false)");
             return;
         }
+        try { await Task.Delay(UntilNextBackup(DateTime.UtcNow), ct); } catch (OperationCanceledException) { return; }
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                Backup();
+                Backup(IntegrityCheckDue(DateTime.UtcNow));
             }
             catch (Exception e) when (e is IOException or SqliteException or InvalidDataException)
             {
@@ -76,17 +82,38 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
         }
     }
 
-    public string Backup()
+    public string Backup() => Backup(verify: true);
+
+    private string Backup(bool verify)
     {
-        // Startup and manual requests serialize the copy, the check and the pruning.
+        // Scheduled and manual requests serialize the copy, the check and the pruning.
         lock (_backupGate)
         {
-            try { return BackupCore(); }
+            try { return BackupCore(verify); }
             catch { Interlocked.Increment(ref _failures); throw; }
         }
     }
 
-    private string BackupCore()
+    /// <summary>How long a starting host waits for its first copy: what is left of <see cref="Interval"/> since the newest
+    /// backup, compressed or not (ro3emu-backup-compress keeps the write time).</summary>
+    internal TimeSpan UntilNextBackup(DateTime utcNow)
+    {
+        if (!System.IO.Directory.Exists(Directory)) return TimeSpan.Zero;
+        var newest = System.IO.Directory.GetFiles(Directory, Prefix + "*")
+            .Where(f => f.EndsWith(Extension, StringComparison.Ordinal) || f.EndsWith(Extension + ".zst", StringComparison.Ordinal))
+            .Select(File.GetLastWriteTimeUtc).DefaultIfEmpty(DateTime.MinValue).Max();
+        if (newest == DateTime.MinValue) return TimeSpan.Zero;
+        var left = newest + Interval - utcNow;
+        return left <= TimeSpan.Zero ? TimeSpan.Zero : left > Interval ? Interval : left;
+    }
+
+    internal bool IntegrityCheckDue(DateTime utcNow)
+    {
+        var marker = new FileInfo(Path.Combine(options.Value.DataDir, IntegrityMarker));
+        return !marker.Exists || utcNow - marker.LastWriteTimeUtc >= IntegrityInterval;
+    }
+
+    private string BackupCore(bool verify)
     {
         var dir = Directory;
         System.IO.Directory.CreateDirectory(dir);
@@ -94,7 +121,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
         var target = Path.Combine(dir, NextName());
         var partial = target + PartialExtension;
         var started = Stopwatch.GetTimestamp();
-        try { Copy(partial, target); }
+        try { Copy(partial, target, verify); }
         catch
         {
             // A failed copy can be as large as the database: leaving it would hold the disk the live file needs.
@@ -111,7 +138,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
         return target;
     }
 
-    private void Copy(string partial, string target)
+    private void Copy(string partial, string target, bool verify)
     {
         using var source = accounts.Open();
         using var destination = new SqliteConnection($"Data Source={partial};Pooling=False");
@@ -120,6 +147,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
         Persistence.DbWriteGuard.AttachBackup(destination, accounts.AccessMetrics, accounts.DatabasePath);
         BeforeCopyForTest?.Invoke(destination);
         source.BackupDatabase(destination);
+        if (!verify) return;
         if (QuickCheck(destination) is { } problem)
         {
             destination.Close();
@@ -128,6 +156,7 @@ public sealed class DatabaseBackup(IOptions<ServerOptions> options, AccountStore
             log.LogCritical("Database backup failed its integrity check ({Problem}); the copy is kept as {Corrupt}", problem, corrupt);
             throw new InvalidDataException($"Backup integrity check failed: {problem}");
         }
+        File.WriteAllText(Path.Combine(options.Value.DataDir, IntegrityMarker), DateTime.UtcNow.ToString("O"));
     }
 
     /// <summary>

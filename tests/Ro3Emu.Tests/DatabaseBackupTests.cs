@@ -446,4 +446,20 @@ public sealed class DatabaseBackupTests : IDisposable
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+
+    /// <summary>Releases restart the host every 4 hours; a copy at each start kept the backup disk and a core busy.</summary>
+    [Fact]
+    public void ARestartMakesNoCopyWhileTheNewestIsYoungerThanTheInterval()
+    {
+        var accounts = Store();
+        var backup = Backup(accounts);
+        Assert.Equal(TimeSpan.Zero, backup.UntilNextBackup(DateTime.UtcNow));
+        Assert.True(backup.IntegrityCheckDue(DateTime.UtcNow));
+        backup.Backup();
+        var left = backup.UntilNextBackup(DateTime.UtcNow);
+        Assert.InRange(left, TimeSpan.FromHours(5), TimeSpan.FromHours(6));
+        Assert.Equal(TimeSpan.Zero, backup.UntilNextBackup(DateTime.UtcNow.AddHours(7)));
+        Assert.False(backup.IntegrityCheckDue(DateTime.UtcNow));
+        Assert.True(backup.IntegrityCheckDue(DateTime.UtcNow.AddHours(25)));
+    }
 }
