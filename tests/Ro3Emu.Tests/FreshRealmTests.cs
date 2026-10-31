@@ -23,6 +23,10 @@ namespace Ro3Emu.Tests;
 public sealed class FreshRealmTests : IAsyncLifetime
 {
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "ro3emu-fresh-" + Guid.NewGuid().ToString("N"));
+    // The realm's "today" is a fixed local day (noon, so the test never straddles midnight); the clock then runs in real time.
+    private static readonly DateTime Today = new(2026, 10, 12);
+    private readonly RunningClock _clock = new(new DateTimeOffset(Today.AddHours(12), TimeZoneInfo.Local.GetUtcOffset(Today.AddHours(12))));
+    private static long TodayStart => new DateTimeOffset(Today, TimeZoneInfo.Local.GetUtcOffset(Today)).ToUnixTimeSeconds();
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
     private WebApplication _app = null!;
     private string _http = "";
@@ -38,8 +42,8 @@ public sealed class FreshRealmTests : IAsyncLifetime
             o.MicroGatePort = microPort;
             o.GameGatePort = gamePort;
             o.OpenContent.Enabled = true;
-            o.SeasonStart = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        });
+            o.SeasonStart = Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }, _clock);
         await _app.StartAsync();
         _http = $"http://127.0.0.1:{httpPort}";
     }
@@ -50,6 +54,12 @@ public sealed class FreshRealmTests : IAsyncLifetime
         await _app.DisposeAsync();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_dataDir, true); } catch (IOException) { }
+    }
+
+    private sealed class RunningClock(DateTimeOffset origin) : TimeProvider
+    {
+        private readonly long _started = global::System.Diagnostics.Stopwatch.GetTimestamp();
+        public override DateTimeOffset GetUtcNow() => origin + global::System.Diagnostics.Stopwatch.GetElapsedTime(_started);
     }
 
     private static string RepoData()
@@ -129,12 +139,12 @@ public sealed class FreshRealmTests : IAsyncLifetime
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!lvl 60");
         var season = await Next(alice, SeasonService.SeasonSync, DBSeasonInfoIncrement.Parser);
-        long start = new DateTimeOffset(DateTime.Today).ToUnixTimeSeconds();
+        long start = TodayStart;
         Assert.Equal(101, season.Current.All.PlayBookId);
         Assert.Equal(start, season.Current.All.StartTime);
         Assert.Equal(101001, season.Current.All.StageId);
         var time = await Next(alice, SeasonService.TimeInfoNotify, SeasonTimeInfoNotify.Parser);
-        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long now = _clock.GetUtcNow().ToUnixTimeSeconds();
         // The client's stage list skips 101001 (_iHide 1), so on days 1-7 LC_SeasonHelper.GetCurrentStageId is nil and
         // the first visible stage, 101002, has not started: the case ClientHooks.ServerDayGates.CurrentStage answers.
         var data = Service<GameData>();
@@ -170,7 +180,7 @@ public sealed class FreshRealmTests : IAsyncLifetime
         await using var alice = await InWorld("Alice");
         await Gm("alice", "!lvl 60");
         var sync = await Next(alice, NewActivityService.ActivitySync, DBNewActivityInfoIncrement.Parser, m => m.SyncAllMark);
-        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), open = new DateTimeOffset(DateTime.Today).ToUnixTimeSeconds();
+        long now = _clock.GetUtcNow().ToUnixTimeSeconds(), open = TodayStart;
         var infos = await Service<GameLoop>().InvokeAsync(() => Task.FromResult(
             Session("alice").NewActivities!.ActivityInfo.ToDictionary(k => k.Key, k => k.Value.Clone())));
         // LC_DAL_NewActivity keeps an activity for the page only while its state is a TimeLimitConfig state ("Start"),
@@ -198,7 +208,7 @@ public sealed class FreshRealmTests : IAsyncLifetime
         await Gm("alice", "!lvl 60");
         await Gm("alice", "!item 1113001 1");
         var time = await Next(alice, SeasonService.TimeInfoNotify, SeasonTimeInfoNotify.Parser);
-        long start = new DateTimeOffset(DateTime.Today).ToUnixTimeSeconds();
+        long start = TodayStart;
         // The clock stays the season's own: chapter one (101002) starts on day 8, chapter two after it.
         Assert.Equal(start + 7 * 86400, time.StageTimeInfo[101002].StartTime);
         Assert.True(time.StageTimeInfo[101003].StartTime >= start + 14 * 86400);

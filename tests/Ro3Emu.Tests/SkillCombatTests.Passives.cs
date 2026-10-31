@@ -45,6 +45,36 @@ public sealed partial class SkillCombatTests
         Assert.Contains((103L, 1d), armed);
     }
 
+    private const int TestShield = 2500120; // ItemConfig _iSubType 50 (Guard)
+
+    // Advanced Monster Resistance: "Mastery of shields increases damage reduction from monsters by ${1}% while a shield
+    // is equipped." Its own row 1164001 names 1164101, [602, 1000] and [604, 1000] (be_boss_type / be_normal_type), which
+    // a hit from a monster takes by the monster's kind: Baphomet Jr. (NPCConfig _iNPCSubType 1) is not a boss. The
+    // Royal Guard's line adds up to the 50% its description shows: Monster Resistance 3000, Paladin's and its own 1000.
+    [ClientDataFact]
+    public async Task AdvancedMonsterResistanceCutsAMonstersHitOnlyWithAShield()
+    {
+        await using var alice = await InWorld("Alice");
+        await Gm("alice", "!lvl 99"); await Gm("alice", "!job 1410"); await Teach("alice", 11637);
+        var combat = _app.Services.GetRequiredService<CombatService>();
+        var baphometJr = await Target("alice", stationary: true, npcId: 5000073);
+        var boss = await Target("alice", stationary: true, npcId: 4390000);
+        async Task<(long Normal, long Boss)> Taken()
+        {
+            long normal = 10000, boss10000 = 10000;
+            foreach (var f in combat.IncomingDamageAdjusters) normal = await f(baphometJr, Session("alice"), DamageHitResult.Normal, normal);
+            foreach (var f in combat.IncomingDamageAdjusters) boss10000 = await f(boss, Session("alice"), DamageHitResult.Normal, boss10000);
+            return (normal, boss10000);
+        }
+        Assert.Equal((10000, 10000), await Loop.InvokeAsync(Taken));
+        var armed = await Loop.InvokeAsync(() =>
+        {
+            Session("alice").Items.Add(new InvItem { Guid = 990003, Entry = TestShield, Stack = 1, Grid = 2 });
+            return Taken();
+        });
+        Assert.Equal((5000, 5000), armed);
+    }
+
     // Hilt Binding: "Increases the duration of Adrenaline Rush, Power Thrust, and Maximize Power by ${3} sec." Its tuple
     // [16105, 33, add, 60000, 0, 2] adds 60 s to column 2 (the duration) of Adrenaline Rush's first _kBuff1 tuple.
     [ClientDataFact]
